@@ -67,6 +67,23 @@ function statusLabel(status?: string) {
   return "💤 Dead";
 }
 
+function updateTypeIcon(type?: string) {
+  switch (type) {
+    case "Crowd/vibe":
+      return "🔥";
+    case "Line update":
+      return "🚶";
+    case "Music/DJ":
+      return "🎧";
+    case "Event info":
+      return "🎉";
+    case "Cover charge":
+      return "💵";
+    default:
+      return "📝";
+  }
+}
+
 function venueType(venue: VenueWithEvent) {
   return venue.type || "Nightlife Spot";
 }
@@ -116,6 +133,12 @@ export default function Home() {
   const [suggestionLoading, setSuggestionLoading] = useState(false);
   const [suggestionFeedback, setSuggestionFeedback] = useState("");
   const [suggestionStatus, setSuggestionStatus] = useState<"success" | "error" | null>(null);
+  const [recentUpdates, setRecentUpdates] = useState<Array<{
+    id: string;
+    update_type: string | null;
+    message: string | null;
+    created_at: string | null;
+  }>>([]);
 
   useEffect(() => {
     async function fetchSummary() {
@@ -253,6 +276,65 @@ export default function Home() {
 
     return () => newMap.remove();
   }, []);
+
+  async function loadRecentUpdates() {
+    if (!selected) {
+      console.log("Recent updates: no selected venue");
+      setRecentUpdates([]);
+      return;
+    }
+
+    console.log("Recent updates: fetching for selected.id", selected.id, "selected.name", selected.name);
+
+    let { data, error } = await supabase
+      .from("suggested_updates")
+      .select("*")
+      .eq("venue_id", selected.id)
+      .order("created_at", { ascending: false })
+      .limit(5);
+
+    if (error) {
+      console.error("Recent updates error (venue_id):", error);
+      setRecentUpdates([]);
+      return;
+    }
+
+    if ((!data || data.length === 0) && selected.name) {
+      console.log("Recent updates: venue_id returned no rows, falling back to venue_name", selected.name);
+      const fallback = await supabase
+        .from("suggested_updates")
+        .select("*")
+        .eq("venue_name", selected.name)
+        .order("created_at", { ascending: false })
+        .limit(5);
+
+      if (fallback.error) {
+        console.error("Recent updates error (venue_name fallback):", fallback.error);
+        setRecentUpdates([]);
+        return;
+      }
+
+      data = fallback.data;
+    }
+
+    console.log("Recent updates fetched:", data);
+    setRecentUpdates(data || []);
+  }
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadUpdates() {
+      if (ignore) return;
+      await loadRecentUpdates();
+    }
+
+    loadUpdates();
+
+    return () => {
+      ignore = true;
+    };
+  }, [selected]);
 
   const filteredVenues = useMemo(() => {
     let results = venues;
@@ -470,13 +552,15 @@ export default function Home() {
 
     try {
       const { error } = await supabase.from("suggested_updates").insert({
-        venue_id: selected.id,
+        venue_id: selected.id || null,
         venue_name: selected.name,
         update_type: suggestionType,
         message: suggestionMessage.trim(),
       });
 
       if (error) throw error;
+
+      await loadRecentUpdates();
 
       setSuggestionStatus("success");
       setSuggestionFeedback("Update sent — thanks for helping the city.");
@@ -1106,6 +1190,40 @@ export default function Home() {
                   <p className="mt-2 text-sm font-semibold text-white/70">
                     {minutesAgo(selected.lastUpdated)}
                   </p>
+                </div>
+              </div>
+
+              <div className="mb-4 rounded-3xl border border-white/10 bg-white/5 p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/45">
+                  Recent Updates
+                </p>
+                <div className="mt-3 space-y-2">
+                  {recentUpdates.length === 0 ? (
+                    <div className="rounded-3xl bg-white/5 p-3 text-sm text-white/55">
+                      No updates yet — be the first
+                    </div>
+                  ) : (
+                    recentUpdates.map((update) => (
+                      <div
+                        key={update.id}
+                        className="rounded-3xl bg-white/5 p-3 text-sm text-white/90"
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="mt-1 text-lg">
+                            {updateTypeIcon(update.update_type || "")}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-white">
+                              {update.message || "No message provided"}
+                            </p>
+                            <p className="mt-1 text-[11px] text-white/50">
+                              {minutesAgo(update.created_at)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
 
