@@ -159,6 +159,66 @@ function getDeviceId() {
   return deviceId;
 }
 
+function getHeatWeight(venue: VenueWithEvent) {
+  const baseVotes = venue.voteCount || 0;
+  const baseUpdates = venue.updateCount || 0;
+  const score = Math.max(0, venue.score || 0);
+  const trending = Math.max(0, venue.trendingScore || 0);
+
+  const rawValue = baseVotes + baseUpdates + score + trending;
+  return Math.max(1, rawValue);
+}
+
+function buildVenueHeatmapGeoJSON(
+  venues: VenueWithEvent[]
+): GeoJSON.FeatureCollection<GeoJSON.Geometry, GeoJSON.GeoJsonProperties> {
+  type HeatFeature = GeoJSON.Feature<
+    GeoJSON.Point,
+    {
+      weight: number;
+      voteCount: number;
+      updateCount: number;
+      score: number;
+      trendingScore: number;
+    }
+  >;
+
+  const features: HeatFeature[] = venues.flatMap((venue) => {
+    const active =
+      (venue.voteCount || 0) > 0 ||
+      (venue.updateCount || 0) > 0 ||
+      (venue.score || 0) > 0;
+
+    if (!active || !venue.lng || !venue.lat) return [];
+
+    const weight = getHeatWeight(venue);
+
+    return [
+      {
+        type: "Feature",
+        geometry: {
+          type: "Point",
+          coordinates: [venue.lng, venue.lat],
+        },
+        properties: {
+          weight,
+          voteCount: venue.voteCount || 0,
+          updateCount: venue.updateCount || 0,
+          score: venue.score || 0,
+          trendingScore: venue.trendingScore || 0,
+        },
+      },
+    ];
+  });
+
+  console.log("heatmap geojson build: feature count", features.length);
+
+  return {
+    type: "FeatureCollection",
+    features,
+  };
+}
+
 export default function Home() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const markersRef = useRef<mapboxgl.Marker[]>([]);
@@ -173,6 +233,8 @@ export default function Home() {
   const [activeChip, setActiveChip] = useState("All");
   const [viewMode, setViewMode] = useState<"map" | "events">("map");
   const [map, setMap] = useState<mapboxgl.Map | null>(null);
+  const userLocationMarkerRef = useRef<mapboxgl.Marker | null>(null);
+  const [heatmapEnabled, setHeatmapEnabled] = useState(true);
   const [sheetExpanded, setSheetExpanded] = useState(false);
   const [summary, setSummary] = useState("");
   const [summaryLoading, setSummaryLoading] = useState(true);
@@ -476,7 +538,116 @@ export default function Home() {
       zoom: 10,
     });
 
-    newMap.on("load", () => newMap.resize());
+    newMap.on("load", () => {
+      newMap.resize();
+
+      if (!newMap.getSource("venue-heat")) {
+        newMap.addSource("venue-heat", {
+          type: "geojson",
+          data: {
+            type: "FeatureCollection",
+            features: [],
+          },
+        });
+      }
+
+      const sourceExists = !!newMap.getSource("venue-heat");
+      console.log("heatmap load: source exists", sourceExists);
+
+      const firstSymbol = newMap
+        .getStyle()
+        .layers?.find((layer) => layer.type === "symbol")?.id;
+
+      if (!newMap.getLayer("venue-heat-layer")) {
+        newMap.addLayer(
+          {
+            id: "venue-heat-layer",
+            type: "heatmap",
+            source: "venue-heat",
+            maxzoom: 18,
+            paint: {
+              "heatmap-weight": [
+                "interpolate",
+                ["linear"],
+                ["get", "weight"],
+                1,
+                0.4,
+                2,
+                0.9,
+                4,
+                1.4,
+                8,
+                1.9,
+                16,
+                2.5,
+              ],
+              "heatmap-intensity": [
+                "interpolate",
+                ["linear"],
+                ["zoom"],
+                7,
+                1.4,
+                11,
+                2.1,
+                15,
+                2.8,
+              ],
+              "heatmap-color": [
+                "interpolate",
+                ["linear"],
+                ["heatmap-density"],
+                0,
+                "rgba(0,0,0,0)",
+                0.15,
+                "rgba(252,211,77,0.24)",
+                0.35,
+                "rgba(251,146,60,0.42)",
+                0.6,
+                "rgba(249,115,22,0.58)",
+                0.85,
+                "rgba(239,68,68,0.78)",
+                1,
+                "rgba(220,38,38,0.92)",
+              ],
+              "heatmap-radius": [
+                "interpolate",
+                ["linear"],
+                ["zoom"],
+                7,
+                30,
+                10,
+                50,
+                13,
+                70,
+                16,
+                90,
+              ],
+              "heatmap-opacity": [
+                "interpolate",
+                ["linear"],
+                ["zoom"],
+                7,
+                0.55,
+                11,
+                0.7,
+                15,
+                0.82,
+              ],
+            },
+          },
+          firstSymbol
+        );
+      }
+
+      const layerExists = !!newMap.getLayer("venue-heat-layer");
+      console.log("heatmap load: layer exists", layerExists, "firstSymbol", firstSymbol);
+
+      newMap.setLayoutProperty(
+        "venue-heat-layer",
+        "visibility",
+        heatmapEnabled ? "visible" : "none"
+      );
+    });
 
     setMap(newMap);
 
@@ -620,10 +791,12 @@ export default function Home() {
     filteredVenues.forEach((venue) => {
       const el = document.createElement("button");
 
-      const activity = venue.voteCount || 0;
-
+      const signals = (venue.voteCount || 0) + (venue.updateCount || 0);
       const size =
-        activity >= 10 ? 46 : activity >= 5 ? 40 : activity >= 1 ? 34 : 28;
+        signals === 0 ? 24 :
+        signals <= 2 ? 30 :
+        signals <= 5 ? 36 :
+        40;
 
       el.type = "button";
       el.setAttribute("aria-label", venue.name);
@@ -641,12 +814,12 @@ export default function Home() {
       core.style.height = "100%";
       core.style.borderRadius = "9999px";
       core.style.background = energyColor(venue.energyLevel);
-      core.style.border = "3px solid white";
+      core.style.border = "2px solid white";
       core.style.boxShadow = energyGlow(venue.energyLevel);
       core.style.transform =
-        venue.energyLevel === "high" ? "scale(1.08)" : "scale(1)";
+        venue.energyLevel === "high" ? "scale(1.04)" : "scale(1)";
       core.style.animation =
-        venue.energyLevel === "high" ? "litPulse 1.8s ease-in-out infinite" : "none";
+        venue.energyLevel === "high" ? "litPulse 1.6s ease-in-out infinite" : "none";
 
       const shine = document.createElement("div");
       shine.style.width = "100%";
@@ -679,6 +852,35 @@ export default function Home() {
       markersRef.current.push(marker);
     });
   }, [map, filteredVenues]);
+
+  useEffect(() => {
+    if (!map) return;
+
+    const source = map.getSource("venue-heat") as mapboxgl.GeoJSONSource | null;
+    if (!source) {
+      console.log("heatmap update: source missing");
+      return;
+    }
+
+    const data = buildVenueHeatmapGeoJSON(filteredVenues);
+    console.log("heatmap update: updating source", data.features.length);
+    source.setData(data as GeoJSON.FeatureCollection);
+  }, [map, filteredVenues]);
+
+  useEffect(() => {
+    if (!map) return;
+    if (!map.getLayer("venue-heat-layer")) {
+      console.log("heatmap toggle: layer missing");
+      return;
+    }
+
+    console.log("heatmap toggle: visibility", heatmapEnabled ? "visible" : "none");
+    map.setLayoutProperty(
+      "venue-heat-layer",
+      "visibility",
+      heatmapEnabled ? "visible" : "none"
+    );
+  }, [map, heatmapEnabled]);
 
   async function vote(vibe: Vibe) {
     if (!selected) return;
@@ -1070,12 +1272,75 @@ export default function Home() {
         </div>
       </div>
 
-      <button
-        onClick={() => map?.flyTo({ center: [-76.2859, 36.8508], zoom: 10 })}
-        className="absolute right-4 top-56 z-20 flex h-11 w-11 items-center justify-center rounded-full bg-black/70 shadow-xl backdrop-blur-xl"
-      >
-        <Navigation size={18} />
-      </button>
+      <div className="absolute right-4 top-52 z-20 flex flex-col items-end gap-3 sm:top-44">
+        <button
+          onClick={() => {
+            if (!map) return;
+            if (!navigator.geolocation) {
+              console.error("Geolocation unavailable");
+              map.flyTo({ center: [-76.2859, 36.8508], zoom: 10 });
+              return;
+            }
+
+            navigator.geolocation.getCurrentPosition(
+              (position) => {
+                const { longitude, latitude } = position.coords;
+                if (!map) return;
+                map.flyTo({ center: [longitude, latitude], zoom: 14 });
+                userLocationMarkerRef.current?.remove();
+
+                const pulse = document.createElement("div");
+                pulse.className = "user-location-pulse";
+
+                userLocationMarkerRef.current = new mapboxgl.Marker({
+                  element: pulse,
+                  anchor: "center",
+                })
+                  .setLngLat([longitude, latitude])
+                  .addTo(map);
+              },
+              (error) => {
+                console.error("Geolocation error:", error);
+                map.flyTo({ center: [-76.2859, 36.8508], zoom: 10 });
+              },
+              { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+            );
+          }}
+          className="flex h-11 w-11 items-center justify-center rounded-full bg-black/70 shadow-xl backdrop-blur-xl"
+          aria-label="Locate me"
+        >
+          <Navigation size={18} />
+        </button>
+
+        <button
+          onClick={() => {
+            const nextValue = !heatmapEnabled;
+            setHeatmapEnabled(nextValue);
+            if (map?.getLayer("venue-heat-layer")) {
+              map.setLayoutProperty(
+                "venue-heat-layer",
+                "visibility",
+                nextValue ? "visible" : "none"
+              );
+              console.log(
+                "heatmap control clicked: visibility",
+                nextValue ? "visible" : "none"
+              );
+            }
+          }}
+          className={`flex min-w-[88px] items-center justify-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold transition ${
+            heatmapEnabled
+              ? "border-orange-400 bg-orange-500/15 text-orange-100"
+              : "border-white/10 bg-white/5 text-white/65"
+          }`}
+          aria-pressed={heatmapEnabled}
+        >
+          <span>Heat</span>
+          <span className="inline-flex h-6 min-w-[32px] items-center justify-center rounded-full bg-white/10 text-[10px] uppercase tracking-[0.24em]">
+            {heatmapEnabled ? "On" : "Off"}
+          </span>
+        </button>
+      </div>
 
       {!selected && trending.length > 0 && viewMode === "map" && (
         <div className="absolute inset-x-3 bottom-[14vh] z-30 sm:left-3 sm:right-auto sm:bottom-[23vh]">
