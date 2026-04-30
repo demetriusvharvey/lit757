@@ -4,8 +4,24 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { supabase } from "../src/lib/supabase";
-import { Venue, Vibe } from "../src/types";
-import { MapPin, Navigation, Share2, Flame, X, ChevronUp } from "lucide-react";
+import { Event, Venue, Vibe } from "../src/types";
+import {
+  MapPin,
+  Navigation,
+  Share2,
+  X,
+  ChevronUp,
+  Search,
+  Music,
+  BadgeDollarSign,
+  UserRoundCheck,
+  CalendarDays,
+} from "lucide-react";
+
+type VenueWithEvent = Venue & {
+  tonightEvent?: Event | null;
+  voteCount?: number;
+};
 
 const VIBE_SCORE: Record<Vibe, number> = {
   lit: 2,
@@ -32,8 +48,8 @@ function statusLabel(status?: string) {
   return "💤 Dead";
 }
 
-function venueType(venue: Venue) {
-  return (venue as any).type || "Nightlife Spot";
+function venueType(venue: VenueWithEvent) {
+  return venue.type || "Nightlife Spot";
 }
 
 function minutesAgo(date?: string | null) {
@@ -44,14 +60,30 @@ function minutesAgo(date?: string | null) {
   return `Updated ${mins} min ago`;
 }
 
+function getDeviceId() {
+  if (typeof window === "undefined") return null;
+
+  let deviceId = localStorage.getItem("lit757_device_id");
+
+  if (!deviceId) {
+    deviceId = crypto.randomUUID();
+    localStorage.setItem("lit757_device_id", deviceId);
+  }
+
+  return deviceId;
+}
+
 export default function Home() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const markersRef = useRef<mapboxgl.Marker[]>([]);
   const touchStartY = useRef<number | null>(null);
 
-  const [venues, setVenues] = useState<Venue[]>([]);
-  const [selected, setSelected] = useState<Venue | null>(null);
+  const [venues, setVenues] = useState<VenueWithEvent[]>([]);
+  const [selected, setSelected] = useState<VenueWithEvent | null>(null);
   const [city, setCity] = useState("All 757");
+  const [query, setQuery] = useState("");
+  const [activeChip, setActiveChip] = useState("All");
+  const [viewMode, setViewMode] = useState<"map" | "events">("map");
   const [map, setMap] = useState<mapboxgl.Map | null>(null);
   const [sheetExpanded, setSheetExpanded] = useState(false);
 
@@ -64,6 +96,15 @@ export default function Home() {
       console.error("Venues error:", venuesError);
       return;
     }
+
+    const today = new Date().toISOString().split("T")[0];
+
+    const { data: eventsData, error: eventsError } = await supabase
+      .from("events")
+      .select("*")
+      .eq("event_date", today);
+
+    if (eventsError) console.error("Events error:", eventsError);
 
     const since = new Date(Date.now() - 90 * 60 * 1000).toISOString();
 
@@ -84,17 +125,24 @@ export default function Home() {
           0
         );
 
+        const voteCount = venueVotes.length;
+
         const sortedVotes = [...venueVotes].sort(
           (a, b) =>
             new Date(b.created_at).getTime() -
             new Date(a.created_at).getTime()
         );
 
+        const tonightEvent =
+          eventsData?.find((event) => event.venue_id === venue.id) || null;
+
         return {
           ...venue,
           score,
+          voteCount,
           status: getStatus(score),
           lastUpdated: sortedVotes[0]?.created_at || null,
+          tonightEvent,
         };
       }) || [];
 
@@ -132,9 +180,73 @@ export default function Home() {
   }, []);
 
   const filteredVenues = useMemo(() => {
-    if (city === "All 757") return venues;
-    return venues.filter((v) => v.city === city);
-  }, [venues, city]);
+    let results = venues;
+
+    if (city !== "All 757") {
+      results = results.filter((venue) => venue.city === city);
+    }
+
+    if (activeChip !== "All") {
+      const chip = activeChip.toLowerCase();
+
+      results = results.filter((venue) => {
+        const searchable = [
+          venue.name,
+          venue.city,
+          venue.type,
+          venue.music_genre,
+          venue.age_limit,
+          venue.cover,
+          venue.parking,
+          venue.dress_code,
+          venue.status,
+          venue.tonightEvent?.title,
+          venue.tonightEvent?.genre,
+          venue.tonightEvent?.dj,
+          venue.tonightEvent?.cover_price,
+          venue.tonightEvent?.dress_code,
+          venue.tonightEvent?.description,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+
+        return searchable.includes(chip);
+      });
+    }
+
+    if (query.trim()) {
+      const q = query.toLowerCase();
+
+      results = results.filter((venue) => {
+        const searchable = [
+          venue.name,
+          venue.city,
+          venue.address,
+          venue.type,
+          venue.music_genre,
+          venue.age_limit,
+          venue.cover,
+          venue.parking,
+          venue.dress_code,
+          venue.status,
+          venue.tonightEvent?.title,
+          venue.tonightEvent?.genre,
+          venue.tonightEvent?.dj,
+          venue.tonightEvent?.cover_price,
+          venue.tonightEvent?.dress_code,
+          venue.tonightEvent?.description,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+
+        return searchable.includes(q);
+      });
+    }
+
+    return results;
+  }, [venues, city, activeChip, query]);
 
   useEffect(() => {
     if (!map) return;
@@ -164,6 +276,7 @@ export default function Home() {
 
         setSelected(venue);
         setSheetExpanded(true);
+        setViewMode("map");
 
         map.flyTo({
           center: [venue.lng, venue.lat],
@@ -182,20 +295,64 @@ export default function Home() {
   async function vote(vibe: Vibe) {
     if (!selected) return;
 
-    const { error } = await supabase.from("votes").insert({
-      venue_id: selected.id,
-      vibe,
-    });
+    const deviceId = getDeviceId();
 
-    if (error) {
-      console.error("Vote error:", error);
+    if (!deviceId) {
+      console.error("No device ID found");
       return;
+    }
+
+    const since = new Date(Date.now() - 90 * 60 * 1000).toISOString();
+
+    const { data: existingVote, error: findError } = await supabase
+      .from("votes")
+      .select("*")
+      .eq("venue_id", selected.id)
+      .eq("device_id", deviceId)
+      .gte("created_at", since)
+      .maybeSingle();
+
+    if (findError) {
+      console.error("Find vote error:", findError);
+      return;
+    }
+
+    if (existingVote) {
+      const { error: updateError } = await supabase
+        .from("votes")
+        .update({
+          vibe,
+          created_at: new Date().toISOString(),
+        })
+        .eq("id", existingVote.id);
+
+      if (updateError) {
+        console.error("Update vote error:", updateError);
+        return;
+      }
+    } else {
+      const { error: insertError } = await supabase.from("votes").insert({
+        venue_id: selected.id,
+        vibe,
+        device_id: deviceId,
+      });
+
+      if (insertError) {
+        console.error("Vote error:", insertError);
+        return;
+      }
     }
 
     await loadVenues();
 
     setSelected((prev) =>
-      prev ? { ...prev, lastUpdated: new Date().toISOString() } : prev
+      prev
+        ? {
+            ...prev,
+            lastUpdated: new Date().toISOString(),
+            voteCount: (prev.voteCount || 0) + 1,
+          }
+        : prev
     );
 
     if ("vibrate" in navigator) navigator.vibrate(40);
@@ -217,7 +374,29 @@ export default function Home() {
     (a, b) => (b.score || 0) - (a.score || 0)
   );
 
+  const eventSpots = filteredVenues.filter((venue) => venue.tonightEvent);
   const visibleTopSpots = sheetExpanded ? topSpots : topSpots.slice(0, 3);
+
+  // 🔥 TRENDING LOGIC
+  const trending = [...filteredVenues]
+    .filter((v) => (v.voteCount || 0) > 0)
+    .sort(
+      (a, b) =>
+        (b.voteCount || 0) + (b.score || 0) -
+        ((a.voteCount || 0) + (a.score || 0))
+    )
+    .slice(0, 5);
+
+  const chips = [
+    "All",
+    "Hip-Hop",
+    "R&B",
+    "Country",
+    "Latin",
+    "21+",
+    "Lit",
+    "Events",
+  ];
 
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-black text-white">
@@ -225,10 +404,10 @@ export default function Home() {
 
       <div className="absolute left-3 right-3 top-3 z-20">
         <div className="rounded-3xl border border-white/10 bg-black/70 px-4 py-3 shadow-2xl backdrop-blur-2xl">
-          <div className="flex items-center justify-between gap-3">
+          <div className="mb-3 flex items-center justify-between gap-3">
             <div>
               <h1 className="text-xl font-black tracking-tight">
-                What’s lit tonight? 🔥
+                What's lit tonight? 🔥
               </h1>
               <p className="text-xs text-white/50">Hampton Roads nightlife</p>
             </div>
@@ -248,15 +427,122 @@ export default function Home() {
               <option>Newport News</option>
             </select>
           </div>
+
+          <div className="flex items-center gap-2 rounded-2xl bg-white/10 px-3 py-2">
+            <Search size={16} className="text-white/50" />
+            <input
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setSelected(null);
+                setSheetExpanded(true);
+              }}
+              placeholder="Search DJ, genre, event, age..."
+              className="w-full bg-transparent text-sm outline-none placeholder:text-white/35"
+            />
+          </div>
+
+          <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+            {chips.map((chip) => (
+              <button
+                key={chip}
+                onClick={() => {
+                  setActiveChip(chip);
+                  setSelected(null);
+                  setSheetExpanded(true);
+                  if (chip === "Events") setViewMode("events");
+                }}
+                className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-bold transition ${
+                  activeChip === chip
+                    ? "bg-white text-black"
+                    : "bg-white/10 text-white/75"
+                }`}
+              >
+                {chip}
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-2 rounded-2xl bg-white/10 p-1">
+            <button
+              onClick={() => {
+                setViewMode("map");
+                setSelected(null);
+              }}
+              className={`rounded-xl py-2 text-xs font-black ${
+                viewMode === "map" ? "bg-white text-black" : "text-white/60"
+              }`}
+            >
+              Map
+            </button>
+
+            <button
+              onClick={() => {
+                setViewMode("events");
+                setSelected(null);
+                setSheetExpanded(true);
+              }}
+              className={`rounded-xl py-2 text-xs font-black ${
+                viewMode === "events" ? "bg-white text-black" : "text-white/60"
+              }`}
+            >
+              Events
+            </button>
+          </div>
         </div>
       </div>
 
       <button
         onClick={() => map?.flyTo({ center: [-76.2859, 36.8508], zoom: 10 })}
-        className="absolute right-4 top-28 z-20 flex h-11 w-11 items-center justify-center rounded-full bg-black/70 shadow-xl backdrop-blur-xl"
+        className="absolute right-4 top-56 z-20 flex h-11 w-11 items-center justify-center rounded-full bg-black/70 shadow-xl backdrop-blur-xl"
       >
         <Navigation size={18} />
       </button>
+
+      {/* 🔥 TRENDING NOW SECTION */}
+      {!selected && trending.length > 0 && viewMode === "map" && (
+        <div className="absolute bottom-[32vh] left-3 right-3 z-30">
+          <div className="rounded-3xl border border-red-500/20 bg-black/80 p-3 backdrop-blur-2xl shadow-xl">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-black text-red-400 tracking-wide">
+                🔥 TRENDING NOW
+              </p>
+              <p className="text-[10px] text-white/40">Live signals</p>
+            </div>
+
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {trending.map((v) => (
+                <button
+                  key={v.id}
+                  onClick={() => {
+                    setSelected(v);
+                    setSheetExpanded(true);
+                    map?.flyTo({
+                      center: [v.lng, v.lat],
+                      zoom: 14,
+                    });
+                  }}
+                  className="min-w-[160px] rounded-2xl bg-white/[0.07] p-3 text-left active:scale-[0.98] transition"
+                >
+                  <p className="text-sm font-bold">{v.name}</p>
+
+                  <p className="text-[11px] text-white/45 mt-1">
+                    {v.music_genre || "Mixed"}
+                  </p>
+
+                  <p className="text-xs font-black mt-2">
+                    {statusLabel(v.status)}
+                  </p>
+
+                  <p className="text-[11px] text-red-400 font-bold">
+                    🔥 {v.voteCount || 0} active now
+                  </p>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div
         className="absolute bottom-3 left-3 right-3 z-30"
@@ -268,7 +554,7 @@ export default function Home() {
         <div
           className={`overflow-y-auto rounded-[2rem] border border-white/10 bg-zinc-950/90 p-4 shadow-2xl backdrop-blur-2xl transition-all duration-300 ${
             selected
-              ? "max-h-[58vh]"
+              ? "max-h-[66vh]"
               : sheetExpanded
               ? "max-h-[58vh]"
               : "max-h-[28vh]"
@@ -285,9 +571,17 @@ export default function Home() {
             <>
               <div className="mb-4 flex items-center justify-between">
                 <div>
-                  <h2 className="text-lg font-black">Top Spots Tonight</h2>
+                  <h2 className="text-lg font-black">
+                    {viewMode === "events"
+                      ? "Events Tonight"
+                      : query || activeChip !== "All"
+                      ? "Matching Spots"
+                      : "Top Spots Tonight"}
+                  </h2>
                   <p className="text-xs text-white/45">
-                    Swipe up to see more spots
+                    {viewMode === "events"
+                      ? `${eventSpots.length} events found`
+                      : `${filteredVenues.length} spots found`}
                   </p>
                 </div>
 
@@ -295,44 +589,117 @@ export default function Home() {
                   onClick={() => setSheetExpanded((prev) => !prev)}
                   className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10"
                 >
-                  {sheetExpanded ? (
-                    <X size={18} />
-                  ) : (
-                    <ChevronUp size={20} />
-                  )}
+                  {sheetExpanded ? <X size={18} /> : <ChevronUp size={20} />}
                 </button>
               </div>
 
-              <div className="space-y-2">
-                {visibleTopSpots.map((venue) => (
-                  <button
-                    key={venue.id}
-                    onClick={() => {
-                      setSelected(venue);
-                      setSheetExpanded(true);
-                      map?.flyTo({
-                        center: [venue.lng, venue.lat],
-                        zoom: 14,
-                      });
-                    }}
-                    className="flex w-full items-center justify-between rounded-2xl bg-white/[0.07] px-4 py-3 text-left active:scale-[0.99]"
-                  >
-                    <div>
-                      <p className="text-sm font-bold">{venue.name}</p>
-                      <p className="text-xs text-white/40">{venue.city}</p>
-                    </div>
+              {viewMode === "events" ? (
+                <div className="space-y-2">
+                  {eventSpots.map((venue) => (
+                    <button
+                      key={venue.id}
+                      onClick={() => {
+                        setSelected(venue);
+                        setSheetExpanded(true);
+                        setViewMode("map");
+                        map?.flyTo({
+                          center: [venue.lng, venue.lat],
+                          zoom: 14,
+                        });
+                      }}
+                      className="w-full rounded-2xl bg-white/[0.07] p-4 text-left active:scale-[0.99]"
+                    >
+                      <div className="mb-2 flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-black">
+                            {venue.tonightEvent?.title}
+                          </p>
+                          <p className="text-xs text-white/45">
+                            {venue.name} • {venue.city}
+                          </p>
+                        </div>
 
-                    <div className="text-right">
-                      <p className="text-sm font-black">
-                        {statusLabel(venue.status)}
-                      </p>
-                      <p className="text-[11px] text-white/40">
-                        {minutesAgo(venue.lastUpdated)}
-                      </p>
+                        <p className="shrink-0 text-xs font-black">
+                          {statusLabel(venue.status)}
+                        </p>
+                      </div>
+
+                      <div className="rounded-xl bg-black/30 p-3 text-xs text-white/55">
+                        <p>
+                          {venue.tonightEvent?.genre || "Mixed"}
+                          {venue.tonightEvent?.dj
+                            ? ` • DJ: ${venue.tonightEvent.dj}`
+                            : ""}
+                        </p>
+
+                        <p className="mt-1">
+                          Cover: {venue.tonightEvent?.cover_price || "Varies"}
+                          {venue.tonightEvent?.start_time
+                            ? ` • Starts: ${venue.tonightEvent.start_time}`
+                            : ""}
+                        </p>
+
+                        <p className="mt-1 text-white/40">
+                          {venue.voteCount || 0} active •{" "}
+                          {minutesAgo(venue.lastUpdated)}
+                        </p>
+                      </div>
+                    </button>
+                  ))}
+
+                  {eventSpots.length === 0 && (
+                    <div className="rounded-2xl bg-white/[0.07] p-4 text-sm text-white/50">
+                      No events listed for tonight yet.
                     </div>
-                  </button>
-                ))}
-              </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {visibleTopSpots.map((venue) => (
+                    <button
+                      key={venue.id}
+                      onClick={() => {
+                        setSelected(venue);
+                        setSheetExpanded(true);
+                        map?.flyTo({
+                          center: [venue.lng, venue.lat],
+                          zoom: 14,
+                        });
+                      }}
+                      className="flex w-full items-center justify-between rounded-2xl bg-white/[0.07] px-4 py-3 text-left active:scale-[0.99]"
+                    >
+                      <div>
+                        <p className="text-sm font-bold">{venue.name}</p>
+                        <p className="text-xs text-white/40">
+                          {venue.tonightEvent
+                            ? `${venue.tonightEvent.title} • ${
+                                venue.tonightEvent.genre || "Mixed"
+                              }`
+                            : `${venue.music_genre || "Mixed"} • ${
+                                venue.age_limit || "21+"
+                              }`}
+                        </p>
+                      </div>
+
+                      <div className="text-right">
+                        <p className="text-sm font-black">
+                          {statusLabel(venue.status)}
+                        </p>
+                        <p className="text-[11px] text-white/40">
+                          {venue.voteCount || 0} active •{" "}
+                          {minutesAgo(venue.lastUpdated)}
+                        </p>
+                      </div>
+                    </button>
+                  ))}
+
+                  {visibleTopSpots.length === 0 && (
+                    <div className="rounded-2xl bg-white/[0.07] p-4 text-sm text-white/50">
+                      No spots match that yet.
+                    </div>
+                  )}
+                </div>
+              )}
             </>
           ) : (
             <>
@@ -368,6 +735,80 @@ export default function Home() {
                   {selected.name}
                 </h2>
                 <p className="text-sm text-white/45">{venueType(selected)}</p>
+                <p className="mt-2 text-sm font-bold text-red-400">
+                  🔥 {selected.voteCount || 0} active right now
+                </p>
+              </div>
+
+              {selected.tonightEvent && (
+                <div className="mb-4 rounded-2xl border border-white/10 bg-white/[0.08] p-4">
+                  <div className="mb-2 flex items-center gap-2">
+                    <CalendarDays size={16} className="text-white/60" />
+                    <p className="text-[10px] font-bold uppercase text-white/35">
+                      Tonight's Event
+                    </p>
+                  </div>
+
+                  <p className="text-base font-black">
+                    {selected.tonightEvent.title}
+                  </p>
+
+                  <p className="mt-1 text-xs text-white/50">
+                    {selected.tonightEvent.genre || "Mixed"}
+                    {selected.tonightEvent.dj
+                      ? ` • DJ: ${selected.tonightEvent.dj}`
+                      : ""}
+                  </p>
+
+                  <p className="mt-1 text-xs text-white/45">
+                    Cover: {selected.tonightEvent.cover_price || "Varies"}
+                    {selected.tonightEvent.start_time
+                      ? ` • Starts: ${selected.tonightEvent.start_time}`
+                      : ""}
+                  </p>
+
+                  {selected.tonightEvent.description && (
+                    <p className="mt-2 text-xs text-white/45">
+                      {selected.tonightEvent.description}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <div className="mb-4 grid grid-cols-3 gap-2">
+                <div className="rounded-2xl bg-white/[0.07] p-3">
+                  <Music size={15} className="mb-2 text-white/50" />
+                  <p className="text-[10px] font-bold uppercase text-white/35">
+                    Music
+                  </p>
+                  <p className="mt-1 text-xs font-black">
+                    {selected.tonightEvent?.genre ||
+                      selected.music_genre ||
+                      "Mixed"}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl bg-white/[0.07] p-3">
+                  <UserRoundCheck size={15} className="mb-2 text-white/50" />
+                  <p className="text-[10px] font-bold uppercase text-white/35">
+                    Age
+                  </p>
+                  <p className="mt-1 text-xs font-black">
+                    {selected.age_limit || "21+"}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl bg-white/[0.07] p-3">
+                  <BadgeDollarSign size={15} className="mb-2 text-white/50" />
+                  <p className="text-[10px] font-bold uppercase text-white/35">
+                    Cover
+                  </p>
+                  <p className="mt-1 text-xs font-black">
+                    {selected.tonightEvent?.cover_price ||
+                      selected.cover ||
+                      "Varies"}
+                  </p>
+                </div>
               </div>
 
               <div className="mb-4 grid grid-cols-2 gap-2">
@@ -390,8 +831,18 @@ export default function Home() {
                 </div>
               </div>
 
+              <div className="mb-4 rounded-2xl bg-white/[0.07] p-3 text-xs text-white/55">
+                <p>Parking: {selected.parking || "Unknown"}</p>
+                <p>
+                  Dress:{" "}
+                  {selected.tonightEvent?.dress_code ||
+                    selected.dress_code ||
+                    "Casual"}
+                </p>
+              </div>
+
               <p className="mb-2 text-sm font-bold text-white/80">
-                How’s the vibe?
+                How's the vibe?
               </p>
 
               <div className="mb-3 grid grid-cols-4 gap-2">
