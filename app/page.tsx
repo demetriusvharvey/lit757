@@ -21,19 +21,38 @@ import {
 type VenueWithEvent = Venue & {
   tonightEvent?: Event | null;
   voteCount?: number;
+  confidence?: "high" | "medium" | "low";
 };
 
 const VIBE_SCORE: Record<Vibe, number> = {
-  lit: 2,
-  decent: 1,
-  dead: -2,
-  line_crazy: 1,
+  lit: 4,
+  decent: 2,
+  dead: -3,
+  line_crazy: 2,
 };
 
-function getStatus(score: number) {
-  if (score >= 5) return "lit";
-  if (score >= 1) return "decent";
+function voteWeight(createdAt?: string | null) {
+  if (!createdAt) return 0;
+
+  const minutes = (Date.now() - new Date(createdAt).getTime()) / 60000;
+
+  if (minutes <= 30) return 1;
+  if (minutes <= 60) return 0.7;
+  if (minutes <= 90) return 0.5;
+  return 0;
+}
+
+function getStatus(score: number, voteCount: number) {
+  if (score >= 6) return "lit";
+  if (score >= 2) return "decent";
+  if (voteCount >= 1 && score >= 0) return "decent";
   return "dead";
+}
+
+function confidenceLabel(confidence?: "high" | "medium" | "low") {
+  if (confidence === "high") return "High confidence";
+  if (confidence === "medium") return "Medium confidence";
+  return "Low confidence";
 }
 
 function pinColor(status?: string) {
@@ -86,6 +105,59 @@ export default function Home() {
   const [viewMode, setViewMode] = useState<"map" | "events">("map");
   const [map, setMap] = useState<mapboxgl.Map | null>(null);
   const [sheetExpanded, setSheetExpanded] = useState(false);
+  const [summary, setSummary] = useState("");
+  const [summaryLoading, setSummaryLoading] = useState(true);
+  const [recommendation, setRecommendation] = useState("");
+  const [recommendationVenue, setRecommendationVenue] = useState("");
+  const [recommendationLoading, setRecommendationLoading] = useState(false);
+  const [suggestionOpen, setSuggestionOpen] = useState(false);
+  const [suggestionType, setSuggestionType] = useState("Event info");
+  const [suggestionMessage, setSuggestionMessage] = useState("");
+  const [suggestionLoading, setSuggestionLoading] = useState(false);
+  const [suggestionFeedback, setSuggestionFeedback] = useState("");
+  const [suggestionStatus, setSuggestionStatus] = useState<"success" | "error" | null>(null);
+
+  useEffect(() => {
+    async function fetchSummary() {
+      try {
+        setSummaryLoading(true);
+        const response = await fetch("/api/summary");
+        if (!response.ok) {
+          throw new Error("Summary fetch failed");
+        }
+        const data = await response.json();
+        setSummary(data.summary || "");
+      } catch (error) {
+        console.error("Summary error:", error);
+      } finally {
+        setSummaryLoading(false);
+      }
+    }
+
+    fetchSummary();
+  }, []);
+
+  async function fetchRecommendation() {
+    try {
+      setRecommendationLoading(true);
+      setRecommendation("");
+      setRecommendationVenue("");
+
+      const response = await fetch("/api/recommendation");
+      if (!response.ok) {
+        throw new Error("Recommendation fetch failed");
+      }
+
+      const data = await response.json();
+      setRecommendation(data.recommendation || "");
+      setRecommendationVenue(data.venueName || "");
+    } catch (error) {
+      console.error("Recommendation error:", error);
+      setRecommendation("Unable to find a recommendation right now.");
+    } finally {
+      setRecommendationLoading(false);
+    }
+  }
 
   async function loadVenues() {
     const { data: venuesData, error: venuesError } = await supabase
@@ -120,12 +192,13 @@ export default function Home() {
         const venueVotes =
           votesData?.filter((vote) => vote.venue_id === venue.id) || [];
 
+        const voteCount = venueVotes.length;
+
         const score = venueVotes.reduce(
-          (sum, vote) => sum + VIBE_SCORE[vote.vibe as Vibe],
+          (sum, vote) =>
+            sum + VIBE_SCORE[vote.vibe as Vibe] * voteWeight(vote.created_at),
           0
         );
-
-        const voteCount = venueVotes.length;
 
         const sortedVotes = [...venueVotes].sort(
           (a, b) =>
@@ -140,7 +213,9 @@ export default function Home() {
           ...venue,
           score,
           voteCount,
-          status: getStatus(score),
+          confidence:
+            voteCount >= 5 ? "high" : voteCount >= 2 ? "medium" : "low",
+          status: getStatus(score, voteCount),
           lastUpdated: sortedVotes[0]?.created_at || null,
           tonightEvent,
         };
@@ -262,35 +337,41 @@ export default function Home() {
       const size =
         activity >= 10 ? 46 : activity >= 5 ? 40 : activity >= 1 ? 34 : 28;
 
-      const glow =
-        venue.status === "lit"
-          ? "0 0 18px rgba(239,68,68,.95), 0 0 42px rgba(239,68,68,.55)"
-          : venue.status === "decent"
-          ? "0 0 16px rgba(245,179,1,.85), 0 0 34px rgba(245,179,1,.4)"
-          : "0 0 10px rgba(156,163,175,.5)";
-
       el.type = "button";
       el.setAttribute("aria-label", venue.name);
       el.className = "lit-marker";
       el.style.width = `${size}px`;
       el.style.height = `${size}px`;
-      el.style.borderRadius = "9999px";
-      el.style.background = pinColor(venue.status);
-      el.style.border = "3px solid white";
-      el.style.boxShadow = glow;
+      el.style.border = "0";
+      el.style.padding = "0";
+      el.style.background = "transparent";
       el.style.cursor = "pointer";
-      el.style.transform = "translateZ(0)";
-      el.style.animation =
+
+      const core = document.createElement("div");
+      core.className = "lit-marker-core";
+      core.style.width = "100%";
+      core.style.height = "100%";
+      core.style.borderRadius = "9999px";
+      core.style.background = pinColor(venue.status);
+      core.style.border = "3px solid white";
+      core.style.boxShadow =
+        venue.status === "lit"
+          ? "0 0 18px rgba(239,68,68,.95), 0 0 42px rgba(239,68,68,.55)"
+          : venue.status === "decent"
+          ? "0 0 16px rgba(245,179,1,.85), 0 0 34px rgba(245,179,1,.4)"
+          : "0 0 10px rgba(156,163,175,.5)";
+      core.style.animation =
         activity > 0 ? "litPulse 1.6s ease-in-out infinite" : "none";
 
-      const inner = document.createElement("div");
-      inner.style.width = "100%";
-      inner.style.height = "100%";
-      inner.style.borderRadius = "9999px";
-      inner.style.background =
+      const shine = document.createElement("div");
+      shine.style.width = "100%";
+      shine.style.height = "100%";
+      shine.style.borderRadius = "9999px";
+      shine.style.background =
         "radial-gradient(circle at 35% 30%, rgba(255,255,255,.95), transparent 28%)";
 
-      el.appendChild(inner);
+      core.appendChild(shine);
+      el.appendChild(core);
 
       el.addEventListener("click", (event) => {
         event.preventDefault();
@@ -380,6 +461,37 @@ export default function Home() {
     if ("vibrate" in navigator) navigator.vibrate(40);
   }
 
+  async function submitSuggestion() {
+    if (!selected) return;
+
+    setSuggestionLoading(true);
+    setSuggestionStatus(null);
+    setSuggestionFeedback("");
+
+    try {
+      const { error } = await supabase.from("suggested_updates").insert({
+        venue_id: selected.id,
+        venue_name: selected.name,
+        update_type: suggestionType,
+        message: suggestionMessage.trim(),
+      });
+
+      if (error) throw error;
+
+      setSuggestionStatus("success");
+      setSuggestionFeedback("Update sent — thanks for helping the city.");
+      setSuggestionMessage("");
+      setSuggestionType("Event info");
+      setSuggestionOpen(false);
+    } catch (error) {
+      console.error("Suggestion error:", error);
+      setSuggestionStatus("error");
+      setSuggestionFeedback("Could not send update. Please try again.");
+    } finally {
+      setSuggestionLoading(false);
+    }
+  }
+
   function handleTouchEnd(e: React.TouchEvent<HTMLDivElement>) {
     if (touchStartY.current === null) return;
 
@@ -409,6 +521,13 @@ export default function Home() {
     )
     .slice(0, 5);
 
+  const heroSpot = trending[0] || topSpots[0];
+
+  const activeCount = filteredVenues.reduce(
+    (sum, venue) => sum + (venue.voteCount || 0),
+    0
+  );
+
   const chips = [
     "All",
     "Hip-Hop",
@@ -419,6 +538,12 @@ export default function Home() {
     "Lit",
     "Events",
   ];
+
+  const vibeGlowClass = selected?.status === "lit"
+    ? "border-red-400/20 bg-red-500/10 shadow-[0_0_30px_rgba(239,68,68,0.22)]"
+    : selected?.status === "decent"
+    ? "border-yellow-300/20 bg-yellow-400/10 shadow-[0_0_30px_rgba(245,179,1,0.22)]"
+    : "border-slate-400/20 bg-slate-500/10 shadow-[0_0_30px_rgba(148,163,184,0.22)]";
 
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-black text-white">
@@ -438,32 +563,96 @@ export default function Home() {
           }
         }
 
-        .lit-marker {
-          transition: width 0.25s ease, height 0.25s ease,
-            box-shadow 0.25s ease, filter 0.25s ease;
+        .lit-marker-core {
+          transition: box-shadow 0.25s ease, filter 0.25s ease;
         }
 
-        .lit-marker:hover {
+        .lit-marker:hover .lit-marker-core {
           filter: brightness(1.25);
+        }
+
+        select option {
+          background: #111827;
+          color: white;
         }
       `}</style>
 
       <div ref={mapContainerRef} className="absolute inset-0 h-full w-full" />
 
-      <div className="absolute left-3 right-3 top-3 z-20">
-        <div className="rounded-3xl border border-white/10 bg-black/70 px-4 py-3 shadow-2xl backdrop-blur-2xl">
-          <div className="mb-3 flex items-center justify-between gap-3">
+      <div className="absolute inset-x-0 top-3 z-20 px-3 sm:left-3 sm:right-3 sm:px-0">
+        <div className="rounded-[2rem] border border-white/10 bg-black/75 p-3 sm:p-4 shadow-2xl backdrop-blur-2xl">
+          <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <h1 className="text-xl font-black tracking-tight">
-                What&apos;s lit tonight? 🔥
+              <p className="text-[11px] font-bold uppercase tracking-wide text-red-400">
+                Live in the 757
+              </p>
+
+              <h1 className="mt-1 text-xl font-black leading-tight tracking-tight sm:text-2xl">
+                {activeCount > 0
+                  ? `🔥 ${activeCount} active right now`
+                  : "What’s lit tonight? 🔥"}
               </h1>
-              <p className="text-xs text-white/50">Hampton Roads nightlife</p>
+
+              <p className="mt-1 text-xs text-white/50">
+                {heroSpot
+                  ? `Best move: ${heroSpot.name}`
+                  : "Real-time nightlife map for Hampton Roads"}
+              </p>
+              <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-white/55">
+                  {summaryLoading
+                    ? "Scanning the city..."
+                    : summary || "Scanning the city..."}
+                </p>
+                <button
+                  onClick={fetchRecommendation}
+                  disabled={recommendationLoading}
+                  className="inline-flex items-center justify-center gap-2 rounded-full border border-white/10 bg-gradient-to-r from-white/10 to-white/5 px-4 py-2 text-xs font-semibold text-white shadow-lg shadow-black/20 transition hover:from-white/20 hover:to-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {recommendationLoading ? (
+                    <>
+                      <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-emerald-400" />
+                      Finding your best move...
+                    </>
+                  ) : (
+                    "Ask AI where to go"
+                  )}
+                </button>
+              </div>
+
+              {(recommendationLoading || recommendation) && (
+                <div className="mt-3 rounded-3xl border border-white/10 bg-white/10 px-4 py-3 text-sm shadow-xl shadow-black/20 backdrop-blur-xl sm:max-w-2xl">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="rounded-full bg-white/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-white/75">
+                      AI Pick
+                    </span>
+                    <p className="text-[10px] uppercase tracking-[0.25em] text-white/45">
+                      {recommendationLoading ? "Analyzing tonight’s best move" : "Premium insight"}
+                    </p>
+                  </div>
+                  <p className="mt-2 text-sm leading-5 text-white/90">
+                    {recommendationLoading
+                      ? "Crunching the latest signals for your best spot."
+                      : recommendationVenue ? (
+                          <>
+                            <span className="font-semibold text-white">
+                              {recommendationVenue}
+                            </span>
+                            {" — "}
+                            {recommendation}
+                          </>
+                        ) : (
+                          recommendation
+                        )}
+                  </p>
+                </div>
+              )}
             </div>
 
             <select
               value={city}
               onChange={(e) => setCity(e.target.value)}
-              className="max-w-[115px] rounded-full bg-white/10 px-3 py-2 text-xs font-semibold outline-none"
+              className="w-full max-w-[120px] rounded-full bg-zinc-900 px-3 py-2 text-xs font-semibold text-white outline-none sm:w-auto sm:max-w-[115px]"
             >
               <option>All 757</option>
               <option>Norfolk</option>
@@ -476,7 +665,7 @@ export default function Home() {
             </select>
           </div>
 
-          <div className="flex items-center gap-2 rounded-2xl bg-white/10 px-3 py-2">
+          <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.08] px-3 py-2">
             <Search size={16} className="text-white/50" />
             <input
               value={query}
@@ -500,7 +689,7 @@ export default function Home() {
                   setSheetExpanded(true);
                   if (chip === "Events") setViewMode("events");
                 }}
-                className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-bold transition ${
+                className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-bold transition ${
                   activeChip === chip
                     ? "bg-white text-black"
                     : "bg-white/10 text-white/75"
@@ -511,7 +700,7 @@ export default function Home() {
             ))}
           </div>
 
-          <div className="mt-3 grid grid-cols-2 gap-2 rounded-2xl bg-white/10 p-1">
+          <div className="mt-3 grid grid-cols-2 gap-2 rounded-2xl bg-white/[0.08] p-1">
             <button
               onClick={() => {
                 setViewMode("map");
@@ -548,63 +737,62 @@ export default function Home() {
       </button>
 
       {!selected && trending.length > 0 && viewMode === "map" && (
-        <div className="absolute bottom-[32vh] left-3 right-3 z-30">
-          <div className="rounded-3xl border border-red-500/20 bg-black/80 p-3 shadow-xl backdrop-blur-2xl">
-            <div className="mb-2 flex items-center justify-between">
-              <p className="text-xs font-black tracking-wide text-red-400">
-                🔥 TRENDING NOW
-              </p>
-              <p className="text-[10px] text-white/40">Live signals</p>
-            </div>
+        <div className="absolute inset-x-3 bottom-[14vh] z-30 sm:left-3 sm:right-auto sm:bottom-[23vh]">
+          <div className="flex w-full justify-start">
+            <div className="w-full rounded-3xl border border-red-500/20 bg-black/80 p-3 shadow-xl shadow-red-500/15 backdrop-blur-2xl sm:w-fit sm:max-w-[min(620px,calc(100vw-2rem))]">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-[11px] font-black uppercase tracking-[0.28em] text-red-400">
+                  🔥 Trending now
+                </p>
+                <p className="text-[10px] text-white/45">Live signals</p>
+              </div>
 
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              {trending.map((v) => (
-                <button
-                  key={v.id}
-                  onClick={() => {
-                    setSelected(v);
-                    setSheetExpanded(true);
-                    map?.flyTo({
-                      center: [v.lng, v.lat],
-                      zoom: 14,
-                    });
-                  }}
-                  className="min-w-[160px] rounded-2xl bg-white/[0.07] p-3 text-left transition active:scale-[0.98]"
-                >
-                  <p className="text-sm font-bold">{v.name}</p>
-
-                  <p className="mt-1 text-[11px] text-white/45">
-                    {v.music_genre || "Mixed"}
-                  </p>
-
-                  <p className="mt-2 text-xs font-black">
-                    {statusLabel(v.status)}
-                  </p>
-
-                  <p className="text-[11px] font-bold text-red-400">
-                    🔥 {v.voteCount || 0} active now
-                  </p>
-                </button>
-              ))}
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {trending.map((v) => (
+                  <button
+                    key={v.id}
+                    onClick={() => {
+                      setSelected(v);
+                      setSheetExpanded(true);
+                      map?.flyTo({
+                        center: [v.lng, v.lat],
+                        zoom: 14,
+                      });
+                    }}
+                    className="min-w-[150px] rounded-3xl border border-white/10 bg-white/5 px-3 py-3 text-left shadow-[0_8px_30px_rgba(255,255,255,0.04)] transition hover:-translate-y-0.5 active:scale-[0.98] sm:min-w-[160px]"
+                  >
+                    <p className="text-sm font-bold text-white">{v.name}</p>
+                    <p className="mt-1 text-[11px] text-white/45">
+                      {v.music_genre || "Mixed"}
+                    </p>
+                    <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/75">
+                      {statusLabel(v.status)}
+                    </p>
+                    <p className="mt-1 text-[11px] font-bold text-red-400">
+                      🔥 {v.voteCount || 0} active now
+                    </p>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </div>
       )}
 
       <div
-        className="absolute bottom-3 left-3 right-3 z-30"
+        className="absolute inset-x-0 bottom-0 z-30 px-3 sm:left-3 sm:right-3 sm:px-0"
         onTouchStart={(e) => {
           touchStartY.current = e.touches[0].clientY;
         }}
         onTouchEnd={handleTouchEnd}
       >
         <div
-          className={`overflow-y-auto rounded-[2rem] border border-white/10 bg-zinc-950/90 p-4 shadow-2xl backdrop-blur-2xl transition-all duration-300 ${
+          className={`overflow-y-auto rounded-t-[2.5rem] border border-white/10 bg-zinc-950/95 p-4 shadow-[0_-18px_80px_rgba(0,0,0,0.55)] backdrop-blur-3xl transition-all duration-300 select-none ${
             selected
-              ? "max-h-[66vh]"
+              ? "max-h-[70vh] sm:max-h-[64vh]"
               : sheetExpanded
-              ? "max-h-[58vh]"
-              : "max-h-[28vh]"
+              ? "max-h-[50vh] sm:max-h-[52vh]"
+              : "max-h-[16vh] sm:max-h-[18vh]"
           }`}
         >
           <button
@@ -713,7 +901,7 @@ export default function Home() {
                           zoom: 14,
                         });
                       }}
-                      className="flex w-full items-center justify-between rounded-2xl bg-white/[0.07] px-4 py-3 text-left active:scale-[0.99]"
+                      className="flex w-full items-center justify-between rounded-2xl border border-white/5 bg-white/[0.055] px-4 py-3 text-left shadow-sm active:scale-[0.99]"
                     >
                       <div>
                         <p className="text-sm font-bold">{venue.name}</p>
@@ -750,64 +938,101 @@ export default function Home() {
             </>
           ) : (
             <>
-              <div className="mb-4 flex items-center justify-between">
-                <button
-                  onClick={() => {
-                    navigator.share?.({
-                      title: selected.name,
-                      text: `${selected.name} is ${statusLabel(
-                        selected.status
-                      )} right now on Lit757. Check before you pull up.`,
-                      url: window.location.href,
-                    });
-                  }}
-                  className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10"
-                >
-                  <Share2 size={18} />
-                </button>
+              <div className="mb-3 overflow-hidden rounded-[2rem] bg-white/5 bg-gradient-to-br from-white/10 via-white/5 to-transparent p-4 shadow-[0_0_40px_rgba(255,255,255,0.08)] backdrop-blur-xl">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="truncate text-3xl font-extrabold leading-tight tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-white to-slate-200 drop-shadow-[0_0_14px_rgba(255,255,255,0.2)] sm:text-4xl">
+                        {selected.name}
+                      </h2>
+                      <span className="select-none rounded-full border border-white/10 bg-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-white/65 backdrop-blur-xl">
+                        {venueType(selected)}
+                      </span>
+                    </div>
 
-                <button
-                  onClick={() => {
-                    setSelected(null);
-                    setSheetExpanded(false);
-                  }}
-                  className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10"
-                >
-                  <X size={20} />
-                </button>
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+                      <span className="select-none rounded-full bg-red-500/15 px-2.5 py-1 font-semibold uppercase tracking-[0.18em] text-red-100 ring-1 ring-red-400/20">
+                        🔥 {selected.voteCount || 0} active
+                      </span>
+                      <span className="select-none rounded-full bg-white/10 px-2.5 py-1 font-semibold uppercase tracking-[0.18em] text-white/70 ring-1 ring-white/10 backdrop-blur-xl">
+                        {confidenceLabel(selected.confidence)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => {
+                        setSuggestionOpen(true);
+                        setSuggestionStatus(null);
+                        setSuggestionFeedback("");
+                      }}
+                      className="select-none flex h-10 items-center justify-center rounded-3xl bg-white/10 px-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-white transition hover:bg-white/15 focus:outline-none"
+                    >
+                      Suggest Update
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        navigator.share?.({
+                          title: selected.name,
+                          text: `${selected.name} is ${statusLabel(
+                            selected.status
+                          )} right now on Lit757. Check before you pull up.`,
+                          url: window.location.href,
+                        });
+                      }}
+                      className="select-none flex h-10 w-10 items-center justify-center rounded-3xl bg-white/10 text-white transition hover:bg-white/15 focus:outline-none"
+                    >
+                      <Share2 size={18} />
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setSelected(null);
+                        setSheetExpanded(false);
+                      }}
+                      className="select-none flex h-10 w-10 items-center justify-center rounded-3xl bg-white/10 text-white transition hover:bg-white/15 focus:outline-none"
+                    >
+                      <X size={20} />
+                    </button>
+                  </div>
+                </div>
               </div>
 
-              <div className="mb-4">
-                <h2 className="text-2xl font-black tracking-tight">
-                  {selected.name}
-                </h2>
-                <p className="text-sm text-white/45">{venueType(selected)}</p>
-                <p className="mt-2 text-sm font-bold text-red-400">
-                  🔥 {selected.voteCount || 0} active right now
-                </p>
-              </div>
+              {suggestionStatus && suggestionFeedback && (
+                <div
+                  className={`mb-3 rounded-3xl border px-3 py-2 text-sm ${
+                    suggestionStatus === "success"
+                      ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-100"
+                      : "border-rose-400/20 bg-rose-500/10 text-rose-100"
+                  }`}
+                >
+                  {suggestionFeedback}
+                </div>
+              )}
 
               {selected.tonightEvent && (
-                <div className="mb-4 rounded-2xl border border-white/10 bg-white/[0.08] p-4">
+                <div className="mb-4 rounded-3xl border border-white/10 bg-white/5 p-4">
                   <div className="mb-2 flex items-center gap-2">
                     <CalendarDays size={16} className="text-white/60" />
-                    <p className="text-[10px] font-bold uppercase text-white/35">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-white/35">
                       Tonight&apos;s Event
                     </p>
                   </div>
 
-                  <p className="text-base font-black">
+                  <p className="text-sm font-black leading-tight">
                     {selected.tonightEvent.title}
                   </p>
 
-                  <p className="mt-1 text-xs text-white/50">
+                  <p className="mt-1 text-[11px] text-white/50">
                     {selected.tonightEvent.genre || "Mixed"}
                     {selected.tonightEvent.dj
                       ? ` • DJ: ${selected.tonightEvent.dj}`
                       : ""}
                   </p>
 
-                  <p className="mt-1 text-xs text-white/45">
+                  <p className="mt-2 text-[11px] text-white/45">
                     Cover: {selected.tonightEvent.cover_price || "Varies"}
                     {selected.tonightEvent.start_time
                       ? ` • Starts: ${selected.tonightEvent.start_time}`
@@ -815,42 +1040,48 @@ export default function Home() {
                   </p>
 
                   {selected.tonightEvent.description && (
-                    <p className="mt-2 text-xs text-white/45">
+                    <p className="mt-3 text-sm text-white/45">
                       {selected.tonightEvent.description}
                     </p>
                   )}
                 </div>
               )}
 
-              <div className="mb-4 grid grid-cols-3 gap-2">
-                <div className="rounded-2xl bg-white/[0.07] p-3">
-                  <Music size={15} className="mb-2 text-white/50" />
-                  <p className="text-[10px] font-bold uppercase text-white/35">
-                    Music
-                  </p>
-                  <p className="mt-1 text-xs font-black">
+              <div className="mb-3 grid gap-2 sm:grid-cols-3">
+                <div className="select-none rounded-3xl bg-white/10 backdrop-blur-xl border border-white/10 p-3 shadow-inner shadow-white/5 transition duration-200 ease-out hover:-translate-y-0.5 active:scale-[0.98]">
+                  <div className="mb-2 flex items-center gap-2">
+                    <Music size={16} className="text-white/60" />
+                    <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-white/35">
+                      Music
+                    </p>
+                  </div>
+                  <p className="text-sm font-black leading-tight text-white">
                     {selected.tonightEvent?.genre ||
                       selected.music_genre ||
                       "Mixed"}
                   </p>
                 </div>
 
-                <div className="rounded-2xl bg-white/[0.07] p-3">
-                  <UserRoundCheck size={15} className="mb-2 text-white/50" />
-                  <p className="text-[10px] font-bold uppercase text-white/35">
-                    Age
-                  </p>
-                  <p className="mt-1 text-xs font-black">
+                <div className="select-none rounded-3xl bg-white/10 backdrop-blur-xl border border-white/10 p-3 shadow-inner shadow-white/5 transition duration-200 ease-out hover:-translate-y-0.5 active:scale-[0.98]">
+                  <div className="mb-2 flex items-center gap-2">
+                    <UserRoundCheck size={16} className="text-white/60" />
+                    <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-white/35">
+                      Age
+                    </p>
+                  </div>
+                  <p className="text-sm font-black leading-tight text-white">
                     {selected.age_limit || "21+"}
                   </p>
                 </div>
 
-                <div className="rounded-2xl bg-white/[0.07] p-3">
-                  <BadgeDollarSign size={15} className="mb-2 text-white/50" />
-                  <p className="text-[10px] font-bold uppercase text-white/35">
-                    Cover
-                  </p>
-                  <p className="mt-1 text-xs font-black">
+                <div className="select-none rounded-3xl bg-white/10 backdrop-blur-xl border border-white/10 p-3 shadow-inner shadow-white/5 transition duration-200 ease-out hover:-translate-y-0.5 active:scale-[0.98]">
+                  <div className="mb-2 flex items-center gap-2">
+                    <BadgeDollarSign size={16} className="text-white/60" />
+                    <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-white/35">
+                      Cover
+                    </p>
+                  </div>
+                  <p className="text-sm font-black leading-tight text-white">
                     {selected.tonightEvent?.cover_price ||
                       selected.cover ||
                       "Varies"}
@@ -858,79 +1089,85 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="mb-4 grid grid-cols-2 gap-2">
-                <div className="rounded-2xl bg-white/[0.07] p-3">
-                  <p className="text-[10px] font-bold uppercase tracking-wide text-white/35">
+              <div className="mb-3 grid grid-cols-2 gap-2">
+                <div className={`select-none rounded-3xl border p-3 ${vibeGlowClass}`}>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/45">
                     Current Vibe
                   </p>
-                  <p className="mt-1 text-lg font-black">
+                  <p className="mt-3 text-lg font-extrabold text-white sm:text-xl">
                     {statusLabel(selected.status)}
                   </p>
                 </div>
 
-                <div className="rounded-2xl bg-white/[0.07] p-3">
-                  <p className="text-[10px] font-bold uppercase tracking-wide text-white/35">
+                <div className="select-none rounded-3xl border border-white/10 bg-black/10 p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/45">
                     Freshness
                   </p>
-                  <p className="mt-1 text-sm font-bold">
+                  <p className="mt-2 text-sm font-semibold text-white/70">
                     {minutesAgo(selected.lastUpdated)}
                   </p>
                 </div>
               </div>
 
-              <div className="mb-4 rounded-2xl bg-white/[0.07] p-3 text-xs text-white/55">
-                <p>Parking: {selected.parking || "Unknown"}</p>
-                <p>
-                  Dress:{" "}
-                  {selected.tonightEvent?.dress_code ||
+              <div className="mb-4 rounded-3xl border border-white/10 bg-white/5 p-3 text-xs text-white/55">
+                <p className="select-none">Parking: {selected.parking || "Unknown"}</p>
+                <p className="select-none">
+                  Dress: {selected.tonightEvent?.dress_code ||
                     selected.dress_code ||
                     "Casual"}
                 </p>
               </div>
 
-              <p className="mb-2 text-sm font-bold text-white/80">
+              <p className="mb-2 text-sm font-bold text-white/80 select-none">
                 How&apos;s the vibe?
               </p>
 
-              <div className="mb-3 grid grid-cols-4 gap-2">
+              <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <button
                   onClick={() => vote("lit")}
-                  className="rounded-2xl bg-red-500/90 px-2 py-3 text-xs font-black"
+                  className="select-none rounded-[1.75rem] border border-red-300/20 bg-gradient-to-br from-red-500 via-red-500 to-red-700 px-3 py-3 text-sm font-black shadow-lg shadow-red-500/15 transition hover:-translate-y-0.5 active:scale-[0.98]"
                 >
-                  🔥
-                  <br />
-                  Lit
+                  <span className="block text-xl">🔥</span>
+                  <span className="mt-1 block text-[10px] uppercase tracking-[0.24em]">
+                    Lit
+                  </span>
                 </button>
+
                 <button
                   onClick={() => vote("decent")}
-                  className="rounded-2xl bg-yellow-400 px-2 py-3 text-xs font-black text-black"
+                  className="select-none rounded-[1.75rem] border border-yellow-200/30 bg-gradient-to-br from-yellow-400 to-yellow-600 px-3 py-3 text-sm font-black text-black shadow-lg shadow-yellow-400/15 transition hover:-translate-y-0.5 active:scale-[0.98]"
                 >
-                  👍
-                  <br />
-                  Decent
+                  <span className="block text-xl">👍</span>
+                  <span className="mt-1 block text-[10px] uppercase tracking-[0.24em]">
+                    Decent
+                  </span>
                 </button>
+
                 <button
                   onClick={() => vote("dead")}
-                  className="rounded-2xl bg-slate-500 px-2 py-3 text-xs font-black"
+                  className="select-none rounded-[1.75rem] border border-slate-300/20 bg-gradient-to-br from-slate-600 via-slate-700 to-slate-900 px-3 py-3 text-sm font-black shadow-lg shadow-slate-800/25 transition hover:-translate-y-0.5 active:scale-[0.98]"
                 >
-                  💤
-                  <br />
-                  Dead
+                  <span className="block text-xl">💤</span>
+                  <span className="mt-1 block text-[10px] uppercase tracking-[0.24em]">
+                    Dead
+                  </span>
                 </button>
+
                 <button
                   onClick={() => vote("line_crazy")}
-                  className="rounded-2xl bg-purple-500 px-2 py-3 text-xs font-black"
+                  className="select-none rounded-[1.75rem] border border-purple-300/20 bg-gradient-to-br from-purple-500 to-fuchsia-700 px-3 py-3 text-sm font-black shadow-lg shadow-purple-500/15 transition hover:-translate-y-0.5 active:scale-[0.98]"
                 >
-                  🚫
-                  <br />
-                  Line
+                  <span className="block text-xl">🚫</span>
+                  <span className="mt-1 block text-[10px] uppercase tracking-[0.24em]">
+                    Line
+                  </span>
                 </button>
               </div>
 
               <a
                 href={`https://www.google.com/maps/dir/?api=1&destination=${selected.lat},${selected.lng}`}
                 target="_blank"
-                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-white py-3 text-sm font-black text-black"
+                className="select-none sticky bottom-0 z-10 block w-full rounded-3xl border border-white/10 bg-white py-3 text-center text-sm font-black text-black shadow-xl shadow-black/20"
               >
                 <MapPin size={17} />
                 Get Directions
@@ -939,6 +1176,84 @@ export default function Home() {
           )}
         </div>
       </div>
+
+      {suggestionOpen && selected && (
+        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/60 px-4 py-6 sm:items-center">
+          <div className="w-full max-w-md rounded-[2rem] border border-white/15 bg-zinc-950/95 p-5 shadow-2xl backdrop-blur-3xl">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/45">
+                  Suggest Update
+                </p>
+                <h3 className="mt-2 text-lg font-black text-white">
+                  Help keep the city current
+                </h3>
+                <p className="mt-1 text-xs text-white/50">
+                  Suggest a quick update for {selected.name}.
+                </p>
+              </div>
+              <button
+                onClick={() => setSuggestionOpen(false)}
+                className="rounded-full bg-white/10 p-2 text-white transition hover:bg-white/15"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/45">
+                  Update type
+                </label>
+                <select
+                  value={suggestionType}
+                  onChange={(e) => setSuggestionType(e.target.value)}
+                  className="mt-2 w-full rounded-3xl border border-white/10 bg-black/80 px-4 py-3 text-sm text-white outline-none"
+                >
+                  <option>Event info</option>
+                  <option>Cover charge</option>
+                  <option>Music/DJ</option>
+                  <option>Line update</option>
+                  <option>Crowd/vibe</option>
+                  <option>Other</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/45">
+                  Message
+                </label>
+                <textarea
+                  value={suggestionMessage}
+                  onChange={(e) => setSuggestionMessage(e.target.value)}
+                  rows={4}
+                  placeholder="Share what’s happening now…"
+                  className="mt-2 w-full rounded-3xl border border-white/10 bg-black/80 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35"
+                />
+              </div>
+
+              <div className="rounded-3xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-white/55">
+                <p className="font-semibold text-white">Venue</p>
+                <p>{selected.name}</p>
+              </div>
+
+              {suggestionStatus === "error" && suggestionFeedback && (
+                <div className="rounded-3xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+                  {suggestionFeedback}
+                </div>
+              )}
+
+              <button
+                onClick={submitSuggestion}
+                disabled={suggestionLoading || !suggestionMessage.trim()}
+                className="w-full rounded-3xl bg-white py-3 text-sm font-black text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {suggestionLoading ? "Sending update..." : "Send update"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
