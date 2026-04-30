@@ -21,6 +21,9 @@ import {
 type VenueWithEvent = Venue & {
   tonightEvent?: Event | null;
   voteCount?: number;
+  updateCount?: number;
+  trendingScore?: number;
+  momentumLabel?: string;
   confidence?: "high" | "medium" | "low";
 };
 
@@ -42,10 +45,10 @@ function voteWeight(createdAt?: string | null) {
   return 0;
 }
 
-function getStatus(score: number, voteCount: number) {
+function getStatus(score: number, signalCount: number) {
   if (score >= 6) return "lit";
   if (score >= 2) return "decent";
-  if (voteCount >= 1 && score >= 0) return "decent";
+  if (signalCount >= 1 && score >= 0) return "decent";
   return "dead";
 }
 
@@ -67,6 +70,13 @@ function statusLabel(status?: string) {
   return "💤 Dead";
 }
 
+function trendingLabel(score?: number) {
+  if (score === undefined || score === null) return "🔥 active";
+  if (score >= 8) return "🔥 exploding";
+  if (score >= 4) return "🔥 active";
+  return "😴 slow";
+}
+
 function updateTypeIcon(type?: string) {
   switch (type) {
     case "Crowd/vibe":
@@ -82,6 +92,24 @@ function updateTypeIcon(type?: string) {
     default:
       return "📝";
   }
+}
+
+function getUpdateScore(update: { update_type?: string | null; message?: string | null }) {
+  const type = update.update_type || "";
+  const message = (update.message || "").toLowerCase();
+
+  if (type === "Crowd/vibe") {
+    const positive = ["packed", "lit", "crowded", "busy", "good", "jumping"];
+    const negative = ["dead", "empty", "slow", "quiet"];
+
+    if (positive.some((word) => message.includes(word))) return 2;
+    if (negative.some((word) => message.includes(word))) return -2;
+    return 0;
+  }
+
+  if (type === "Line update") return 1;
+  if (type === "Music/DJ" || type === "Event info") return 1;
+  return 0;
 }
 
 function venueType(venue: VenueWithEvent) {
@@ -133,6 +161,18 @@ export default function Home() {
   const [suggestionLoading, setSuggestionLoading] = useState(false);
   const [suggestionFeedback, setSuggestionFeedback] = useState("");
   const [suggestionStatus, setSuggestionStatus] = useState<"success" | "error" | null>(null);
+  const [eventOpen, setEventOpen] = useState(false);
+  const [eventTitle, setEventTitle] = useState("");
+  const [eventDate, setEventDate] = useState("");
+  const [eventTime, setEventTime] = useState("");
+  const [eventGenre, setEventGenre] = useState("");
+  const [eventDj, setEventDj] = useState("");
+  const [eventCoverPrice, setEventCoverPrice] = useState("");
+  const [eventAgeLimit, setEventAgeLimit] = useState("");
+  const [eventDescription, setEventDescription] = useState("");
+  const [eventLoading, setEventLoading] = useState(false);
+  const [eventFeedback, setEventFeedback] = useState("");
+  const [eventStatus, setEventStatus] = useState<"success" | "error" | null>(null);
   const [recentUpdates, setRecentUpdates] = useState<Array<{
     id: string;
     update_type: string | null;
@@ -210,18 +250,55 @@ export default function Home() {
 
     if (votesError) console.error("Votes error:", votesError);
 
+    const { data: updatesData, error: updatesError } = await supabase
+      .from("suggested_updates")
+      .select("*")
+      .gte("created_at", since);
+
+    if (updatesError) console.error("Suggested updates error:", updatesError);
+
     const enriched =
       venuesData?.map((venue) => {
         const venueVotes =
           votesData?.filter((vote) => vote.venue_id === venue.id) || [];
 
-        const voteCount = venueVotes.length;
+        const updateMatches =
+          updatesData?.filter(
+            (update) =>
+              update.venue_id === venue.id ||
+              (!update.venue_id && update.venue_name === venue.name)
+          ) || [];
 
-        const score = venueVotes.reduce(
-          (sum, vote) =>
-            sum + VIBE_SCORE[vote.vibe as Vibe] * voteWeight(vote.created_at),
+        const updateCount = updateMatches.length;
+
+        const updateScore = updateMatches.reduce(
+          (sum, update) => sum + getUpdateScore(update),
           0
         );
+
+        const voteCount = venueVotes.length;
+
+        const positiveWords = ["packed", "lit", "busy", "good", "jumping"];
+        const recentPositiveVote = venueVotes.some(
+          (vote) =>
+            ["lit", "decent"].includes(vote.vibe) &&
+            Date.now() - new Date(vote.created_at).getTime() <= 30 * 60 * 1000
+        );
+
+        const recentPositiveUpdate = updateMatches.some((update) => {
+          const message = (update.message || "").toLowerCase();
+          return (
+            update.update_type === "Crowd/vibe" &&
+            positiveWords.some((word) => message.includes(word)) &&
+            Date.now() - new Date(update.created_at).getTime() <= 30 * 60 * 1000
+          );
+        });
+
+        const hasLineUpdate = updateMatches.some(
+          (update) => update.update_type === "Line update"
+        );
+
+        const hasSignals = voteCount > 0 || updateCount > 0;
 
         const sortedVotes = [...venueVotes].sort(
           (a, b) =>
@@ -229,17 +306,63 @@ export default function Home() {
             new Date(a.created_at).getTime()
         );
 
+        const sortedUpdates = [...updateMatches].sort(
+          (a, b) =>
+            new Date(b.created_at).getTime() -
+            new Date(a.created_at).getTime()
+        );
+
+        const lastActivity =
+          sortedVotes[0]?.created_at || sortedUpdates[0]?.created_at || null;
+        const recentBonus =
+          lastActivity && Date.now() - new Date(lastActivity).getTime() <= 30 * 60 * 1000
+            ? 2
+            : 0;
+
+        const score = venueVotes.reduce(
+          (sum, vote) =>
+            sum + VIBE_SCORE[vote.vibe as Vibe] * voteWeight(vote.created_at),
+          0
+        );
+
+        const finalScore = score + updateScore;
+
+        const voteScore = voteCount * 2;
+        const eventBonus = eventsData?.some((event) => event.venue_id === venue.id)
+          ? 2
+          : 0;
+
+        const trendingScore = voteScore + updateScore + eventBonus + recentBonus;
+
+        const momentumLabel = recentPositiveVote || recentPositiveUpdate
+          ? "📈 gaining fast"
+          : score >= 6
+          ? "🔥 heating up"
+          : hasLineUpdate
+          ? "🚶 line building"
+          : !hasSignals
+          ? "😴 quiet"
+          : "🔥 heating up";
+
         const tonightEvent =
           eventsData?.find((event) => event.venue_id === venue.id) || null;
 
         return {
           ...venue,
-          score,
+          score: finalScore,
           voteCount,
+          updateCount,
+          trendingScore,
+          momentumLabel,
           confidence:
-            voteCount >= 5 ? "high" : voteCount >= 2 ? "medium" : "low",
-          status: getStatus(score, voteCount),
-          lastUpdated: sortedVotes[0]?.created_at || null,
+            voteCount + updateCount >= 5
+              ? "high"
+              : voteCount + updateCount >= 2
+              ? "medium"
+              : "low",
+          status: getStatus(finalScore, voteCount + updateCount),
+          lastUpdated:
+            sortedVotes[0]?.created_at || sortedUpdates[0]?.created_at || null,
           tonightEvent,
         };
       }) || [];
@@ -561,6 +684,15 @@ export default function Home() {
       if (error) throw error;
 
       await loadRecentUpdates();
+      await loadVenues();
+      setSelected((prev) =>
+        prev
+          ? {
+              ...prev,
+              updateCount: (prev.updateCount || 0) + 1,
+            }
+          : prev
+      );
 
       setSuggestionStatus("success");
       setSuggestionFeedback("Update sent — thanks for helping the city.");
@@ -573,6 +705,49 @@ export default function Home() {
       setSuggestionFeedback("Could not send update. Please try again.");
     } finally {
       setSuggestionLoading(false);
+    }
+  }
+
+  async function submitEvent() {
+    if (!selected) return;
+
+    setEventLoading(true);
+    setEventStatus(null);
+    setEventFeedback("");
+
+    try {
+      const { error } = await supabase.from("suggested_events").insert({
+        venue_id: selected.id || null,
+        venue_name: selected.name,
+        event_title: eventTitle.trim(),
+        event_date: eventDate || null,
+        start_time: eventTime.trim() || null,
+        genre: eventGenre.trim() || null,
+        dj: eventDj.trim() || null,
+        cover_price: eventCoverPrice.trim() || null,
+        age_limit: eventAgeLimit.trim() || null,
+        description: eventDescription.trim() || null,
+      });
+
+      if (error) throw error;
+
+      setEventStatus("success");
+      setEventFeedback("Event submitted — we’ll review it.");
+      setEventTitle("");
+      setEventDate("");
+      setEventTime("");
+      setEventGenre("");
+      setEventDj("");
+      setEventCoverPrice("");
+      setEventAgeLimit("");
+      setEventDescription("");
+      setEventOpen(false);
+    } catch (error) {
+      console.error("Event submit error:", error);
+      setEventStatus("error");
+      setEventFeedback("Could not submit event. Please try again.");
+    } finally {
+      setEventLoading(false);
     }
   }
 
@@ -596,15 +771,10 @@ export default function Home() {
   const visibleTopSpots = sheetExpanded ? topSpots : topSpots.slice(0, 3);
 
   const trending = [...filteredVenues]
-    .filter((v) => (v.voteCount || 0) > 0)
-    .sort(
-      (a, b) =>
-        (b.voteCount || 0) +
-        (b.score || 0) -
-        ((a.voteCount || 0) + (a.score || 0))
-    )
+    .sort((a, b) => (b.trendingScore || 0) - (a.trendingScore || 0))
     .slice(0, 5);
 
+  const trendingLabelText = trendingLabel(trending[0]?.trendingScore);
   const heroSpot = trending[0] || topSpots[0];
 
   const activeCount = filteredVenues.reduce(
@@ -826,7 +996,7 @@ export default function Home() {
             <div className="w-full rounded-3xl border border-red-500/20 bg-black/80 p-3 shadow-xl shadow-red-500/15 backdrop-blur-2xl sm:w-fit sm:max-w-[min(620px,calc(100vw-2rem))]">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
                 <p className="text-[11px] font-black uppercase tracking-[0.28em] text-red-400">
-                  🔥 Trending now
+                  {trendingLabelText}
                 </p>
                 <p className="text-[10px] text-white/45">Live signals</p>
               </div>
@@ -849,6 +1019,7 @@ export default function Home() {
                     <p className="mt-1 text-[11px] text-white/45">
                       {v.music_genre || "Mixed"}
                     </p>
+                    <p className="mt-1 text-[11px] text-white/50">{v.momentumLabel}</p>
                     <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/75">
                       {statusLabel(v.status)}
                     </p>
@@ -998,6 +1169,9 @@ export default function Home() {
                                 venue.age_limit || "21+"
                               }`}
                         </p>
+                        <p className="mt-1 text-[10px] text-white/50">
+                          {venue.momentumLabel}
+                        </p>
                       </div>
 
                       <div className="text-right">
@@ -1036,7 +1210,7 @@ export default function Home() {
 
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
                       <span className="select-none rounded-full bg-red-500/15 px-2.5 py-1 font-semibold uppercase tracking-[0.18em] text-red-100 ring-1 ring-red-400/20">
-                        🔥 {selected.voteCount || 0} active
+                        🔥 {selected.voteCount || 0} active • {selected.updateCount || 0} updates
                       </span>
                       <span className="select-none rounded-full bg-white/10 px-2.5 py-1 font-semibold uppercase tracking-[0.18em] text-white/70 ring-1 ring-white/10 backdrop-blur-xl">
                         {confidenceLabel(selected.confidence)}
@@ -1054,6 +1228,17 @@ export default function Home() {
                       className="select-none flex h-10 items-center justify-center rounded-3xl bg-white/10 px-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-white transition hover:bg-white/15 focus:outline-none"
                     >
                       Suggest Update
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setEventOpen(true);
+                        setEventStatus(null);
+                        setEventFeedback("");
+                      }}
+                      className="select-none flex h-10 items-center justify-center rounded-3xl bg-white/10 px-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-white transition hover:bg-white/15 focus:outline-none"
+                    >
+                      Submit Event
                     </button>
 
                     <button
@@ -1093,6 +1278,18 @@ export default function Home() {
                   }`}
                 >
                   {suggestionFeedback}
+                </div>
+              )}
+
+              {eventStatus && eventFeedback && (
+                <div
+                  className={`mb-3 rounded-3xl border px-3 py-2 text-sm ${
+                    eventStatus === "success"
+                      ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-100"
+                      : "border-rose-400/20 bg-rose-500/10 text-rose-100"
+                  }`}
+                >
+                  {eventFeedback}
                 </div>
               )}
 
@@ -1181,14 +1378,8 @@ export default function Home() {
                   <p className="mt-3 text-lg font-extrabold text-white sm:text-xl">
                     {statusLabel(selected.status)}
                   </p>
-                </div>
-
-                <div className="select-none rounded-3xl border border-white/10 bg-black/10 p-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/45">
-                    Freshness
-                  </p>
-                  <p className="mt-2 text-sm font-semibold text-white/70">
-                    {minutesAgo(selected.lastUpdated)}
+                  <p className="mt-2 text-[11px] text-white/50">
+                    {selected.momentumLabel}
                   </p>
                 </div>
               </div>
@@ -1367,6 +1558,150 @@ export default function Home() {
                 className="w-full rounded-3xl bg-white py-3 text-sm font-black text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {suggestionLoading ? "Sending update..." : "Send update"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {eventOpen && selected && (
+        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/60 px-4 py-6 sm:items-center">
+          <div className="w-full max-w-md rounded-[2rem] border border-white/15 bg-zinc-950/95 p-5 shadow-2xl backdrop-blur-3xl">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/45">
+                  Submit Event
+                </p>
+                <h3 className="mt-2 text-lg font-black text-white">
+                  Share event details for {selected.name}
+                </h3>
+              </div>
+              <button
+                onClick={() => setEventOpen(false)}
+                className="rounded-full bg-white/10 p-2 text-white transition hover:bg-white/15"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/45">
+                  Event title
+                </label>
+                <input
+                  value={eventTitle}
+                  onChange={(e) => setEventTitle(e.target.value)}
+                  placeholder="Name of the event"
+                  className="mt-2 w-full rounded-3xl border border-white/10 bg-black/80 px-4 py-3 text-sm text-white outline-none"
+                />
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/45">
+                    Event date
+                  </label>
+                  <input
+                    type="date"
+                    value={eventDate}
+                    onChange={(e) => setEventDate(e.target.value)}
+                    className="mt-2 w-full rounded-3xl border border-white/10 bg-black/80 px-4 py-3 text-sm text-white outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/45">
+                    Start time
+                  </label>
+                  <input
+                    type="time"
+                    value={eventTime}
+                    onChange={(e) => setEventTime(e.target.value)}
+                    className="mt-2 w-full rounded-3xl border border-white/10 bg-black/80 px-4 py-3 text-sm text-white outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/45">
+                    Genre
+                  </label>
+                  <input
+                    value={eventGenre}
+                    onChange={(e) => setEventGenre(e.target.value)}
+                    placeholder="Hip-Hop, EDM, etc."
+                    className="mt-2 w-full rounded-3xl border border-white/10 bg-black/80 px-4 py-3 text-sm text-white outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/45">
+                    DJ
+                  </label>
+                  <input
+                    value={eventDj}
+                    onChange={(e) => setEventDj(e.target.value)}
+                    placeholder="DJ name"
+                    className="mt-2 w-full rounded-3xl border border-white/10 bg-black/80 px-4 py-3 text-sm text-white outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/45">
+                    Cover price
+                  </label>
+                  <input
+                    value={eventCoverPrice}
+                    onChange={(e) => setEventCoverPrice(e.target.value)}
+                    placeholder="$20, Free, etc."
+                    className="mt-2 w-full rounded-3xl border border-white/10 bg-black/80 px-4 py-3 text-sm text-white outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/45">
+                    Age limit
+                  </label>
+                  <input
+                    value={eventAgeLimit}
+                    onChange={(e) => setEventAgeLimit(e.target.value)}
+                    placeholder="21+, All ages"
+                    className="mt-2 w-full rounded-3xl border border-white/10 bg-black/80 px-4 py-3 text-sm text-white outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/45">
+                  Description
+                </label>
+                <textarea
+                  value={eventDescription}
+                  onChange={(e) => setEventDescription(e.target.value)}
+                  rows={4}
+                  placeholder="Add extra details for the event"
+                  className="mt-2 w-full rounded-3xl border border-white/10 bg-black/80 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35"
+                />
+              </div>
+
+              <div className="rounded-3xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-white/55">
+                <p className="font-semibold text-white">Venue</p>
+                <p>{selected.name}</p>
+              </div>
+
+              {eventStatus === "error" && eventFeedback && (
+                <div className="rounded-3xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+                  {eventFeedback}
+                </div>
+              )}
+
+              <button
+                onClick={submitEvent}
+                disabled={eventLoading || !eventTitle.trim()}
+                className="w-full rounded-3xl bg-white py-3 text-sm font-black text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {eventLoading ? "Submitting event..." : "Submit event"}
               </button>
             </div>
           </div>
