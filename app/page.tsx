@@ -25,6 +25,7 @@ type VenueWithEvent = Venue & {
   trendingScore?: number;
   momentumLabel?: string;
   confidence?: "high" | "medium" | "low";
+  energyLevel?: "high" | "medium" | "low" | "negative";
 };
 
 const VIBE_SCORE: Record<Vibe, number> = {
@@ -75,6 +76,27 @@ function trendingLabel(score?: number) {
   if (score >= 8) return "🔥 exploding";
   if (score >= 4) return "🔥 active";
   return "😴 slow";
+}
+
+function energyColor(level?: string) {
+  if (level === "high") return "#fb923c";
+  if (level === "medium") return "#facc15";
+  if (level === "negative") return "#60a5fa";
+  return "#94a3b8";
+}
+
+function energyGlow(level?: string) {
+  if (level === "high") return "shadow-[0_0_40px_rgba(251,146,60,0.3)]";
+  if (level === "medium") return "shadow-[0_0_30px_rgba(250,204,21,0.28)]";
+  if (level === "negative") return "shadow-[0_0_26px_rgba(96,165,250,0.22)]";
+  return "shadow-[0_0_16px_rgba(148,163,184,0.14)]";
+}
+
+function energyLabel(level?: string) {
+  if (level === "high") return "🔥 heating up";
+  if (level === "medium") return "📈 gaining fast";
+  if (level === "negative") return "🧊 dead right now";
+  return "😴 quiet night";
 }
 
 function updateTypeIcon(type?: string) {
@@ -144,6 +166,8 @@ export default function Home() {
 
   const [venues, setVenues] = useState<VenueWithEvent[]>([]);
   const [selected, setSelected] = useState<VenueWithEvent | null>(null);
+  const selectedRef = useRef<VenueWithEvent | null>(null);
+  const refreshIntervalRef = useRef<number | null>(null);
   const [city, setCity] = useState("All 757");
   const [query, setQuery] = useState("");
   const [activeChip, setActiveChip] = useState("All");
@@ -298,7 +322,23 @@ export default function Home() {
           (update) => update.update_type === "Line update"
         );
 
+        const signalWindow = 30 * 60 * 1000;
+        const recentVotes = venueVotes.filter(
+          (vote) => Date.now() - new Date(vote.created_at).getTime() <= signalWindow
+        );
+        const recentUpdates = updateMatches.filter(
+          (update) => Date.now() - new Date(update.created_at).getTime() <= signalWindow
+        );
+        const recentSignalCount = recentVotes.length + recentUpdates.length;
         const hasSignals = voteCount > 0 || updateCount > 0;
+        const positiveVoteCount = venueVotes.filter((vote) =>
+          ["lit", "decent"].includes(vote.vibe)
+        ).length;
+        const negativeVoteCount = venueVotes.filter(
+          (vote) => vote.vibe === "dead"
+        ).length;
+        const negativeDominant =
+          negativeVoteCount > positiveVoteCount && negativeVoteCount > 0;
 
         const sortedVotes = [...venueVotes].sort(
           (a, b) =>
@@ -341,11 +381,24 @@ export default function Home() {
           : hasLineUpdate
           ? "🚶 line building"
           : !hasSignals
-          ? "😴 quiet"
+          ? "😴 quiet night"
           : "🔥 heating up";
 
         const tonightEvent =
           eventsData?.find((event) => event.venue_id === venue.id) || null;
+
+        const status = getStatus(finalScore, voteCount + updateCount);
+        let energyLevel: "high" | "medium" | "low" | "negative" = "low";
+
+        if (!hasSignals) {
+          energyLevel = "low";
+        } else if (negativeDominant) {
+          energyLevel = "negative";
+        } else if (recentSignalCount >= 2) {
+          energyLevel = "high";
+        } else {
+          energyLevel = "medium";
+        }
 
         return {
           ...venue,
@@ -360,7 +413,8 @@ export default function Home() {
               : voteCount + updateCount >= 2
               ? "medium"
               : "low",
-          status: getStatus(finalScore, voteCount + updateCount),
+          status,
+          energyLevel,
           lastUpdated:
             sortedVotes[0]?.created_at || sortedUpdates[0]?.created_at || null,
           tonightEvent,
@@ -368,10 +422,39 @@ export default function Home() {
       }) || [];
 
     setVenues(enriched);
+
+    if (selectedRef.current) {
+      const refreshedSelected = enriched.find(
+        (venue) => venue.id === selectedRef.current?.id
+      );
+      if (refreshedSelected) {
+        setSelected(refreshedSelected);
+      }
+    }
   }
 
   useEffect(() => {
     loadVenues();
+  }, []);
+
+  useEffect(() => {
+    selectedRef.current = selected;
+  }, [selected]);
+
+  useEffect(() => {
+    if (refreshIntervalRef.current) {
+      window.clearInterval(refreshIntervalRef.current);
+    }
+
+    refreshIntervalRef.current = window.setInterval(() => {
+      loadVenues();
+    }, 20000);
+
+    return () => {
+      if (refreshIntervalRef.current) {
+        window.clearInterval(refreshIntervalRef.current);
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -557,16 +640,13 @@ export default function Home() {
       core.style.width = "100%";
       core.style.height = "100%";
       core.style.borderRadius = "9999px";
-      core.style.background = pinColor(venue.status);
+      core.style.background = energyColor(venue.energyLevel);
       core.style.border = "3px solid white";
-      core.style.boxShadow =
-        venue.status === "lit"
-          ? "0 0 18px rgba(239,68,68,.95), 0 0 42px rgba(239,68,68,.55)"
-          : venue.status === "decent"
-          ? "0 0 16px rgba(245,179,1,.85), 0 0 34px rgba(245,179,1,.4)"
-          : "0 0 10px rgba(156,163,175,.5)";
+      core.style.boxShadow = energyGlow(venue.energyLevel);
+      core.style.transform =
+        venue.energyLevel === "high" ? "scale(1.08)" : "scale(1)";
       core.style.animation =
-        activity > 0 ? "litPulse 1.6s ease-in-out infinite" : "none";
+        venue.energyLevel === "high" ? "litPulse 1.8s ease-in-out infinite" : "none";
 
       const shine = document.createElement("div");
       shine.style.width = "100%";
@@ -798,6 +878,7 @@ export default function Home() {
     : selected?.status === "decent"
     ? "border-yellow-300/20 bg-yellow-400/10 shadow-[0_0_30px_rgba(245,179,1,0.22)]"
     : "border-slate-400/20 bg-slate-500/10 shadow-[0_0_30px_rgba(148,163,184,0.22)]";
+  const selectedEnergyGlowClass = energyGlow(selected?.energyLevel);
 
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-black text-white">
@@ -847,11 +928,17 @@ export default function Home() {
                   : "What’s lit tonight? 🔥"}
               </h1>
 
-              <p className="mt-1 text-xs text-white/50">
-                {heroSpot
-                  ? `Best move: ${heroSpot.name}`
-                  : "Real-time nightlife map for Hampton Roads"}
-              </p>
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-white/50">
+                <p>
+                  {heroSpot
+                    ? `Best move: ${heroSpot.name}`
+                    : "Real-time nightlife map for Hampton Roads"}
+                </p>
+                <span className="inline-flex items-center gap-2 rounded-full border border-red-500/20 bg-red-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-red-100 shadow-[0_0_12px_rgba(251,146,60,0.12)]">
+                  <span className="h-2.5 w-2.5 rounded-full bg-red-400 animate-pulse" />
+                  Live
+                </span>
+              </div>
               <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-sm text-white/55">
                   {summaryLoading
@@ -1013,13 +1100,20 @@ export default function Home() {
                         zoom: 14,
                       });
                     }}
-                    className="min-w-[150px] rounded-3xl border border-white/10 bg-white/5 px-3 py-3 text-left shadow-[0_8px_30px_rgba(255,255,255,0.04)] transition hover:-translate-y-0.5 active:scale-[0.98] sm:min-w-[160px]"
+                    className="min-w-[150px] rounded-3xl border bg-white/5 px-3 py-3 text-left transition hover:-translate-y-0.5 active:scale-[0.98] sm:min-w-[160px]"
+                    style={{
+                      borderColor: energyColor(v.energyLevel),
+                      boxShadow: `0 10px 30px ${energyColor(v.energyLevel)}22`,
+                    }}
                   >
                     <p className="text-sm font-bold text-white">{v.name}</p>
                     <p className="mt-1 text-[11px] text-white/45">
                       {v.music_genre || "Mixed"}
                     </p>
                     <p className="mt-1 text-[11px] text-white/50">{v.momentumLabel}</p>
+                    <p className="mt-1 text-[10px] uppercase tracking-[0.12em] text-white/40">
+                      {energyLabel(v.energyLevel)}
+                    </p>
                     <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/75">
                       {statusLabel(v.status)}
                     </p>
@@ -1156,7 +1250,11 @@ export default function Home() {
                           zoom: 14,
                         });
                       }}
-                      className="flex w-full items-center justify-between rounded-2xl border border-white/5 bg-white/[0.055] px-4 py-3 text-left shadow-sm active:scale-[0.99]"
+                      className="flex w-full items-center justify-between rounded-2xl border bg-white/[0.055] px-4 py-3 text-left shadow-sm active:scale-[0.99]"
+                      style={{
+                        borderColor: energyColor(venue.energyLevel),
+                        boxShadow: `0 10px 24px ${energyColor(venue.energyLevel)}18`,
+                      }}
                     >
                       <div>
                         <p className="text-sm font-bold">{venue.name}</p>
@@ -1171,6 +1269,9 @@ export default function Home() {
                         </p>
                         <p className="mt-1 text-[10px] text-white/50">
                           {venue.momentumLabel}
+                        </p>
+                        <p className="mt-1 text-[10px] uppercase tracking-[0.12em] text-white/40">
+                          {energyLabel(venue.energyLevel)}
                         </p>
                       </div>
 
@@ -1209,7 +1310,13 @@ export default function Home() {
                     </div>
 
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
-                      <span className="select-none rounded-full bg-red-500/15 px-2.5 py-1 font-semibold uppercase tracking-[0.18em] text-red-100 ring-1 ring-red-400/20">
+                      <span
+                        className="select-none rounded-full border px-2.5 py-1 font-semibold uppercase tracking-[0.18em] text-white/85 ring-1 ring-white/10"
+                        style={{
+                          backgroundColor: `${energyColor(selected.energyLevel)}1f`,
+                          borderColor: energyColor(selected.energyLevel),
+                        }}
+                      >
                         🔥 {selected.voteCount || 0} active • {selected.updateCount || 0} updates
                       </span>
                       <span className="select-none rounded-full bg-white/10 px-2.5 py-1 font-semibold uppercase tracking-[0.18em] text-white/70 ring-1 ring-white/10 backdrop-blur-xl">
@@ -1371,7 +1478,7 @@ export default function Home() {
               </div>
 
               <div className="mb-3 grid grid-cols-2 gap-2">
-                <div className={`select-none rounded-3xl border p-3 ${vibeGlowClass}`}>
+                <div className={`select-none rounded-3xl border p-3 ${vibeGlowClass} ${selectedEnergyGlowClass}`}>
                   <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/45">
                     Current Vibe
                   </p>
@@ -1380,6 +1487,9 @@ export default function Home() {
                   </p>
                   <p className="mt-2 text-[11px] text-white/50">
                     {selected.momentumLabel}
+                  </p>
+                  <p className="mt-1 text-[10px] uppercase tracking-[0.18em] text-white/40">
+                    {energyLabel(selected.energyLevel)}
                   </p>
                 </div>
               </div>
