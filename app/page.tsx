@@ -257,18 +257,40 @@ export default function Home() {
     filteredVenues.forEach((venue) => {
       const el = document.createElement("button");
 
+      const activity = venue.voteCount || 0;
+
+      const size =
+        activity >= 10 ? 46 : activity >= 5 ? 40 : activity >= 1 ? 34 : 28;
+
+      const glow =
+        venue.status === "lit"
+          ? "0 0 18px rgba(239,68,68,.95), 0 0 42px rgba(239,68,68,.55)"
+          : venue.status === "decent"
+          ? "0 0 16px rgba(245,179,1,.85), 0 0 34px rgba(245,179,1,.4)"
+          : "0 0 10px rgba(156,163,175,.5)";
+
       el.type = "button";
       el.setAttribute("aria-label", venue.name);
-      el.style.width = venue.status === "lit" ? "34px" : "30px";
-      el.style.height = venue.status === "lit" ? "34px" : "30px";
+      el.className = "lit-marker";
+      el.style.width = `${size}px`;
+      el.style.height = `${size}px`;
       el.style.borderRadius = "9999px";
       el.style.background = pinColor(venue.status);
       el.style.border = "3px solid white";
-      el.style.boxShadow =
-        venue.status === "lit"
-          ? "0 0 26px rgba(239,68,68,.95)"
-          : "0 0 12px rgba(0,0,0,.8)";
+      el.style.boxShadow = glow;
       el.style.cursor = "pointer";
+      el.style.transform = "translateZ(0)";
+      el.style.animation =
+        activity > 0 ? "litPulse 1.6s ease-in-out infinite" : "none";
+
+      const inner = document.createElement("div");
+      inner.style.width = "100%";
+      inner.style.height = "100%";
+      inner.style.borderRadius = "9999px";
+      inner.style.background =
+        "radial-gradient(circle at 35% 30%, rgba(255,255,255,.95), transparent 28%)";
+
+      el.appendChild(inner);
 
       el.addEventListener("click", (event) => {
         event.preventDefault();
@@ -377,12 +399,12 @@ export default function Home() {
   const eventSpots = filteredVenues.filter((venue) => venue.tonightEvent);
   const visibleTopSpots = sheetExpanded ? topSpots : topSpots.slice(0, 3);
 
-  // 🔥 TRENDING LOGIC
   const trending = [...filteredVenues]
     .filter((v) => (v.voteCount || 0) > 0)
     .sort(
       (a, b) =>
-        (b.voteCount || 0) + (b.score || 0) -
+        (b.voteCount || 0) +
+        (b.score || 0) -
         ((a.voteCount || 0) + (a.score || 0))
     )
     .slice(0, 5);
@@ -400,6 +422,32 @@ export default function Home() {
 
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-black text-white">
+      <style jsx global>{`
+        @keyframes litPulse {
+          0% {
+            transform: scale(1);
+            filter: brightness(1);
+          }
+          50% {
+            transform: scale(1.16);
+            filter: brightness(1.25);
+          }
+          100% {
+            transform: scale(1);
+            filter: brightness(1);
+          }
+        }
+
+        .lit-marker {
+          transition: width 0.25s ease, height 0.25s ease,
+            box-shadow 0.25s ease, filter 0.25s ease;
+        }
+
+        .lit-marker:hover {
+          filter: brightness(1.25);
+        }
+      `}</style>
+
       <div ref={mapContainerRef} className="absolute inset-0 h-full w-full" />
 
       <div className="absolute left-3 right-3 top-3 z-20">
@@ -407,7 +455,7 @@ export default function Home() {
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
               <h1 className="text-xl font-black tracking-tight">
-                What's lit tonight? 🔥
+                What&apos;s lit tonight? 🔥
               </h1>
               <p className="text-xs text-white/50">Hampton Roads nightlife</p>
             </div>
@@ -499,12 +547,11 @@ export default function Home() {
         <Navigation size={18} />
       </button>
 
-      {/* 🔥 TRENDING NOW SECTION */}
       {!selected && trending.length > 0 && viewMode === "map" && (
         <div className="absolute bottom-[32vh] left-3 right-3 z-30">
-          <div className="rounded-3xl border border-red-500/20 bg-black/80 p-3 backdrop-blur-2xl shadow-xl">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-black text-red-400 tracking-wide">
+          <div className="rounded-3xl border border-red-500/20 bg-black/80 p-3 shadow-xl backdrop-blur-2xl">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-xs font-black tracking-wide text-red-400">
                 🔥 TRENDING NOW
               </p>
               <p className="text-[10px] text-white/40">Live signals</p>
@@ -522,19 +569,19 @@ export default function Home() {
                       zoom: 14,
                     });
                   }}
-                  className="min-w-[160px] rounded-2xl bg-white/[0.07] p-3 text-left active:scale-[0.98] transition"
+                  className="min-w-[160px] rounded-2xl bg-white/[0.07] p-3 text-left transition active:scale-[0.98]"
                 >
                   <p className="text-sm font-bold">{v.name}</p>
 
-                  <p className="text-[11px] text-white/45 mt-1">
+                  <p className="mt-1 text-[11px] text-white/45">
                     {v.music_genre || "Mixed"}
                   </p>
 
-                  <p className="text-xs font-black mt-2">
+                  <p className="mt-2 text-xs font-black">
                     {statusLabel(v.status)}
                   </p>
 
-                  <p className="text-[11px] text-red-400 font-bold">
+                  <p className="text-[11px] font-bold text-red-400">
                     🔥 {v.voteCount || 0} active now
                   </p>
                 </button>
@@ -745,7 +792,7 @@ export default function Home() {
                   <div className="mb-2 flex items-center gap-2">
                     <CalendarDays size={16} className="text-white/60" />
                     <p className="text-[10px] font-bold uppercase text-white/35">
-                      Tonight's Event
+                      Tonight&apos;s Event
                     </p>
                   </div>
 
@@ -842,7 +889,7 @@ export default function Home() {
               </div>
 
               <p className="mb-2 text-sm font-bold text-white/80">
-                How's the vibe?
+                How&apos;s the vibe?
               </p>
 
               <div className="mb-3 grid grid-cols-4 gap-2">
