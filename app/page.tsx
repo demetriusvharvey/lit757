@@ -1680,7 +1680,7 @@ export default function Home() {
       title,
       message,
       icon,
-      createdAt: "createdAt" in item ? item.createdAt : item.created_at,
+      createdAt: "createdAt" in item ? item.createdAt : (item as CityPulseItem).created_at,
     };
 
     spotlightActivityVenue(nextToast.venueId);
