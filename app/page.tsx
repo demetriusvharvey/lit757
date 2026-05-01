@@ -25,6 +25,10 @@ type VenueWithEvent = Venue & {
   momentumLabel?: string;
   confidence?: "high" | "medium" | "low";
   energyLevel?: "high" | "medium" | "low" | "negative";
+  vibeScore?: number;
+  vibeTier?: "lit" | "decent" | "dead";
+  vibeTrend?: "surging" | "heating" | "steady" | "cooling" | "quiet";
+  vibeReason?: string;
 };
 
 type MapMode = "day" | "night";
@@ -70,6 +74,153 @@ const VIBE_SCORE: Record<Vibe, number> = {
   dead: -3,
   line_crazy: 2,
 };
+
+const VIBE_ENGINE_CONFIG = {
+  voteMultiplier: 9,
+  updateMultiplier: 7,
+  eventBoost: 12,
+  recentBoost: 10,
+  lineBoost: 5,
+  negativePenalty: 14,
+};
+
+function clampScore(value: number) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function getMinutesSince(date?: string | null) {
+  if (!date) return null;
+  return Math.max(0, (Date.now() - new Date(date).getTime()) / 60000);
+}
+
+function getVibeTier(score: number, signalCount: number): "lit" | "decent" | "dead" {
+  if (score >= 68 && signalCount >= 2) return "lit";
+  if (score >= 36 || signalCount >= 1) return "decent";
+  return "dead";
+}
+
+function getVibeTrend(args: {
+  score: number;
+  recentSignalCount: number;
+  hasRecentPositive: boolean;
+  negativeDominant: boolean;
+  hasSignals: boolean;
+}): "surging" | "heating" | "steady" | "cooling" | "quiet" {
+  if (!args.hasSignals) return "quiet";
+  if (args.negativeDominant) return "cooling";
+  if (args.score >= 75 && args.recentSignalCount >= 3) return "surging";
+  if (args.hasRecentPositive || args.recentSignalCount >= 2) return "heating";
+  return "steady";
+}
+
+function vibeTrendLabel(trend?: string) {
+  if (trend === "surging") return "⚡ Surging";
+  if (trend === "heating") return "📈 Heating up";
+  if (trend === "steady") return "🌙 Steady";
+  if (trend === "cooling") return "🧊 Cooling off";
+  return "😴 Quiet";
+}
+
+function vibeReasonText(args: {
+  tier: "lit" | "decent" | "dead";
+  voteCount: number;
+  updateCount: number;
+  hasEvent: boolean;
+  negativeDominant: boolean;
+}) {
+  if (args.negativeDominant) return "Recent dead votes are pulling the vibe down.";
+  if (args.tier === "lit") return "Strong live signals, recent activity, and tonight context are pushing this spot up.";
+  if (args.tier === "decent") return args.hasEvent
+    ? "Some live activity plus event context makes this worth watching."
+    : "There are some signals, but it needs more fresh check-ins to call it lit.";
+  if (args.voteCount + args.updateCount === 0) return "No fresh crowd signals yet. The app needs votes or updates from people nearby.";
+  return "Signals are light right now, so check again before making the move.";
+}
+
+function calculateVenueVibe(args: {
+  venueVotes: any[];
+  updateMatches: any[];
+  tonightEvent: Event | null;
+}) {
+  const now = Date.now();
+  const voteCount = args.venueVotes.length;
+  const updateCount = args.updateMatches.length;
+  const signalCount = voteCount + updateCount;
+
+  const weightedVoteScore = args.venueVotes.reduce((sum, vote) => {
+    const raw = VIBE_SCORE[vote.vibe as Vibe] || 0;
+    return sum + raw * voteWeight(vote.created_at) * VIBE_ENGINE_CONFIG.voteMultiplier;
+  }, 0);
+
+  const weightedUpdateScore = args.updateMatches.reduce((sum, update) => {
+    const minutes = getMinutesSince(update.created_at);
+    const recency = minutes === null ? 0.35 : minutes <= 30 ? 1 : minutes <= 60 ? 0.7 : minutes <= 90 ? 0.45 : 0.2;
+    return sum + getUpdateScore(update) * VIBE_ENGINE_CONFIG.updateMultiplier * recency;
+  }, 0);
+
+  const recentVotes = args.venueVotes.filter((vote) => now - new Date(vote.created_at).getTime() <= 30 * 60 * 1000);
+  const recentUpdates = args.updateMatches.filter((update) => now - new Date(update.created_at).getTime() <= 30 * 60 * 1000);
+  const recentSignalCount = recentVotes.length + recentUpdates.length;
+
+  const positiveVoteCount = args.venueVotes.filter((vote) => ["lit", "decent", "line_crazy"].includes(vote.vibe)).length;
+  const negativeVoteCount = args.venueVotes.filter((vote) => vote.vibe === "dead").length;
+  const negativeDominant = negativeVoteCount > positiveVoteCount && negativeVoteCount > 0;
+
+  const positiveWords = ["packed", "lit", "crowded", "busy", "good", "jumping", "full", "live", "fun"];
+  const hasRecentPositiveUpdate = recentUpdates.some((update) =>
+    positiveWords.some((word) => (update.message || "").toLowerCase().includes(word))
+  );
+  const hasRecentPositiveVote = recentVotes.some((vote) => ["lit", "decent", "line_crazy"].includes(vote.vibe));
+  const hasRecentPositive = hasRecentPositiveVote || hasRecentPositiveUpdate;
+  const hasLineUpdate = args.updateMatches.some((update) => update.update_type === "Line update");
+
+  const eventBoost = args.tonightEvent ? VIBE_ENGINE_CONFIG.eventBoost : 0;
+  const recentBoost = recentSignalCount > 0 ? Math.min(18, recentSignalCount * VIBE_ENGINE_CONFIG.recentBoost) : 0;
+  const lineBoost = hasLineUpdate ? VIBE_ENGINE_CONFIG.lineBoost : 0;
+  const penalty = negativeDominant ? VIBE_ENGINE_CONFIG.negativePenalty : 0;
+  const hasRealSignals = signalCount > 0 || !!args.tonightEvent;
+  const baseline = hasRealSignals ? 18 : 0;
+  const effectiveSignalCount = signalCount + (args.tonightEvent ? 1 : 0);
+
+  // No votes, no live updates, no event = no fake heat.
+  // Quiet venues should stay visible as subtle dots, not red/orange heat.
+  const score = clampScore(baseline + weightedVoteScore + weightedUpdateScore + eventBoost + recentBoost + lineBoost - penalty);
+  const tier = getVibeTier(score, effectiveSignalCount);
+  const trend = getVibeTrend({ score, recentSignalCount, hasRecentPositive, negativeDominant, hasSignals: hasRealSignals });
+  const reason = vibeReasonText({ tier, voteCount, updateCount, hasEvent: !!args.tonightEvent, negativeDominant });
+
+  let energyLevel: "high" | "medium" | "low" | "negative" = "low";
+  if (tier === "lit" || trend === "surging") energyLevel = "high";
+  else if (negativeDominant || trend === "cooling") energyLevel = "negative";
+  else if (tier === "decent" || trend === "heating") energyLevel = "medium";
+
+  const momentumLabel = trend === "surging"
+    ? "⚡ surging now"
+    : trend === "heating"
+    ? "📈 gaining fast"
+    : trend === "cooling"
+    ? "🧊 cooling off"
+    : trend === "steady"
+    ? "🌙 steady signals"
+    : "😴 quiet night";
+
+  const trendingScore = hasRealSignals
+    ? Math.round(score + recentSignalCount * 4 + (args.tonightEvent ? 8 : 0))
+    : 0;
+
+  return {
+    score,
+    finalScore: score,
+    status: tier,
+    vibeScore: score,
+    vibeTier: tier,
+    vibeTrend: trend,
+    vibeReason: reason,
+    momentumLabel,
+    trendingScore,
+    energyLevel,
+  };
+}
 
 function voteWeight(createdAt?: string | null) {
   if (!createdAt) return 0;
@@ -195,21 +346,32 @@ function getDeviceId() {
   return deviceId;
 }
 
+function hasRealVenueSignals(venue: VenueWithEvent) {
+  return (
+    (venue.voteCount || 0) > 0 ||
+    (venue.updateCount || 0) > 0 ||
+    !!venue.tonightEvent
+  );
+}
+
 function getHeatWeight(venue: VenueWithEvent) {
+  if (!hasRealVenueSignals(venue)) return 0;
+
   const baseVotes = venue.voteCount || 0;
   const baseUpdates = venue.updateCount || 0;
-  const score = Math.max(0, venue.score || 0);
+  const eventWeight = venue.tonightEvent ? 6 : 0;
+  const score = Math.max(0, venue.vibeScore || venue.score || 0);
   const trending = Math.max(0, venue.trendingScore || 0);
 
-  const rawValue = baseVotes + baseUpdates + score + trending;
+  const rawValue = baseVotes * 8 + baseUpdates * 7 + eventWeight + score * 0.25 + trending * 0.15;
   return Math.max(1, rawValue);
 }
 
 function updateMarkerElement(el: HTMLElement, venue: VenueWithEvent, zoom: number) {
   const signals = (venue.voteCount || 0) + (venue.updateCount || 0);
-  const trending = (venue.trendingScore || 0);
+  const trending = hasRealVenueSignals(venue) ? (venue.trendingScore || 0) : 0;
   const hasRecentVotes = (venue.lastUpdated && Date.now() - new Date(venue.lastUpdated).getTime() <= 30 * 60 * 1000);
-  const active = signals > 0 || trending > 2 || venue.status === "lit";
+  const active = hasRealVenueSignals(venue) && (signals > 0 || trending > 2 || venue.status === "lit" || !!venue.tonightEvent);
   
   let shouldShow = true;
   let displaySize = 0;
@@ -279,10 +441,7 @@ function buildVenueHeatmapGeoJSON(
   >;
 
   const features: HeatFeature[] = venues.flatMap((venue) => {
-    const active =
-      (venue.voteCount || 0) > 0 ||
-      (venue.updateCount || 0) > 0 ||
-      (venue.score || 0) > 0;
+    const active = hasRealVenueSignals(venue);
 
     if (!active || !venue.lng || !venue.lat) return [];
 
@@ -316,24 +475,16 @@ function buildVenueHeatmapGeoJSON(
 
 function getVibeIntensity(venue: VenueWithEvent | null) {
   if (!venue) return 12;
-
-  const signalCount = (venue.voteCount || 0) + (venue.updateCount || 0);
-  const score = Math.max(0, venue.score || 0);
-  const trending = Math.max(0, venue.trendingScore || 0);
-  const raw = signalCount * 12 + score * 6 + trending * 5;
-
-  if (venue.energyLevel === "high") return Math.min(100, Math.max(72, raw));
-  if (venue.energyLevel === "medium") return Math.min(78, Math.max(44, raw));
-  if (venue.energyLevel === "negative") return Math.min(40, Math.max(18, raw));
-  return Math.min(34, Math.max(12, raw));
+  return clampScore(venue.vibeScore ?? venue.score ?? 12);
 }
 
 function vibeMeterLabel(venue: VenueWithEvent | null) {
   if (!venue) return "Warming up";
-  if (venue.energyLevel === "high") return "City is moving here";
-  if (venue.energyLevel === "medium") return "Momentum building";
-  if (venue.energyLevel === "negative") return "Cold right now";
-  return "Needs more signals";
+  if (venue.vibeTrend === "surging") return "Live signals are surging";
+  if (venue.vibeTrend === "heating") return "Momentum is building";
+  if (venue.vibeTrend === "steady") return "Steady but not explosive";
+  if (venue.vibeTrend === "cooling") return "Recent signals are cooling";
+  return "Needs more live signals";
 }
 
 function buildVenuePointsGeoJSON(
@@ -343,10 +494,15 @@ function buildVenuePointsGeoJSON(
     if (!venue.lng || !venue.lat) return [];
 
     const signalCount = (venue.voteCount || 0) + (venue.updateCount || 0);
-    const activeScore =
-      signalCount > 0 || (venue.trendingScore || 0) >= 4 || venue.status === "lit"
-        ? Math.max(1, signalCount + Math.max(0, venue.trendingScore || 0))
-        : 0;
+    const realSignals = hasRealVenueSignals(venue);
+    const vibeScore = realSignals ? Math.max(0, venue.vibeScore || venue.score || 0) : 0;
+    const trending = realSignals ? Math.max(0, venue.trendingScore || 0) : 0;
+    const activeScore = realSignals
+      ? Math.max(1, signalCount * 6 + (venue.tonightEvent ? 6 : 0) + trending + vibeScore * 0.35)
+      : 0;
+    const isSurging = realSignals && (venue.vibeTrend === "surging" || vibeScore >= 78 || trending >= 90);
+    const isHeating = realSignals && (venue.vibeTrend === "heating" || venue.energyLevel === "medium");
+    const isCooling = realSignals && (venue.vibeTrend === "cooling" || venue.energyLevel === "negative");
 
     return [
       {
@@ -363,10 +519,15 @@ function buildVenuePointsGeoJSON(
           energyLevel: venue.energyLevel || "low",
           voteCount: venue.voteCount || 0,
           updateCount: venue.updateCount || 0,
-          score: venue.score || 0,
-          trendingScore: venue.trendingScore || 0,
+          score: realSignals ? venue.score || 0 : 0,
+          vibeScore,
+          vibeTrend: realSignals ? venue.vibeTrend || "quiet" : "quiet",
+          trendingScore: trending,
           signalCount,
           activeScore,
+          isSurging,
+          isHeating,
+          isCooling,
         },
       },
     ];
@@ -472,20 +633,101 @@ export default function Home() {
       setRecommendationVenue("");
       setRecommendationQuestion(question || "");
 
-      const params = new URLSearchParams();
-      if (selectedPreference) params.set("preference", selectedPreference);
-      if (question) params.set("question", question);
-      const url = `/api/recommendation${params.toString() ? `?${params.toString()}` : ""}`;
+      // Fast local recommendation engine. This uses the same live venue data
+      // powering the map instead of waiting on the API, so the button feels instant.
+      const userQuestion = (question || "").toLowerCase();
+      const preference = (selectedPreference || "").toLowerCase();
+      const pool = filteredVenues.length > 0 ? filteredVenues : venues;
+      const withSignals = pool.filter((venue) => hasRealVenueSignals(venue));
+      const candidates = withSignals.length > 0 ? withSignals : pool;
 
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error("Recommendation fetch failed");
+      const scored = candidates.map((venue) => {
+        const vibeScore = venue.vibeScore || venue.score || 0;
+        const signals = (venue.voteCount || 0) + (venue.updateCount || 0);
+        const eventBoost = venue.tonightEvent ? 14 : 0;
+        const photoBoost = (venue as any).photo_url ? 4 : 0;
+        const confidenceBoost = venue.confidence === "high" ? 8 : venue.confidence === "medium" ? 4 : 0;
+        const trendBoost = venue.vibeTrend === "surging" ? 18 : venue.vibeTrend === "heating" ? 10 : venue.vibeTrend === "steady" ? 4 : 0;
+        const realSignalBoost = hasRealVenueSignals(venue) ? 18 : -8;
+
+        const searchable = [
+          venue.name,
+          venue.city,
+          venue.category,
+          venue.type,
+          venue.music_genre,
+          venue.cover,
+          venue.age_limit,
+          venue.tonightEvent?.title,
+          venue.tonightEvent?.genre,
+          venue.tonightEvent?.dj,
+          venue.tonightEvent?.cover_price,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+
+        const preferenceBoost = preference && searchable.includes(preference.replace("-", " ")) ? 18 : 0;
+        const questionBoost = userQuestion && searchable.split(" ").some((word) => userQuestion.includes(word) && word.length > 3) ? 8 : 0;
+        const cheapBoost = (preference.includes("cheap") || userQuestion.includes("cheap")) && /free|cheap|\$0|no cover/i.test(String(venue.cover || venue.tonightEvent?.cover_price || "")) ? 16 : 0;
+        const turnUpBoost = (preference.includes("turn") || userQuestion.includes("lit") || userQuestion.includes("party")) && ["lit", "decent"].includes(String(venue.status)) ? 12 : 0;
+        const chillBoost = (preference.includes("chill") || userQuestion.includes("chill")) && venue.vibeTrend !== "surging" ? 10 : 0;
+
+        return {
+          venue,
+          rank:
+            vibeScore +
+            signals * 8 +
+            eventBoost +
+            photoBoost +
+            confidenceBoost +
+            trendBoost +
+            realSignalBoost +
+            preferenceBoost +
+            questionBoost +
+            cheapBoost +
+            turnUpBoost +
+            chillBoost,
+        };
+      });
+
+      scored.sort((a, b) => b.rank - a.rank);
+      const pick = scored[0]?.venue || null;
+
+      if (!pick) {
+        const fallback = "I don’t have enough venue data yet. Try switching city filters or check back after more votes come in.";
+        setRecommendation(fallback);
+        return fallback;
       }
 
-      const data = await response.json();
-      const recommendationText = data.recommendation || "";
+      const signals = (pick.voteCount || 0) + (pick.updateCount || 0);
+      const confidence = confidenceLabel(pick.confidence);
+      const trend = vibeTrendLabel(pick.vibeTrend);
+      const eventText = pick.tonightEvent
+        ? ` There’s also ${pick.tonightEvent.title} tonight${pick.tonightEvent.dj ? ` with ${pick.tonightEvent.dj}` : ""}.`
+        : "";
+      const urgency = pick.vibeTrend === "surging"
+        ? "Go now before it cools off."
+        : pick.vibeTrend === "heating"
+        ? "This is the move to watch over the next hour."
+        : signals > 0
+        ? "It has real signals, but keep checking before you commit."
+        : "No fresh crowd signals yet, so treat this as a discovery pick.";
+
+      const reason = pick.vibeReason || "The live score, venue context, and latest signals make this the best move right now.";
+      const recommendationText = `${trend} · ${pick.vibeScore || pick.score || 0}/100 vibe score · ${signals} live signal${signals === 1 ? "" : "s"}. ${reason}${eventText} ${confidence}. ${urgency}`;
+
+      setRecommendationVenue(pick.name);
       setRecommendation(recommendationText);
-      setRecommendationVenue(data.venueName || "");
+
+      if (map && pick.lng && pick.lat) {
+        map.flyTo({
+          center: [pick.lng, pick.lat],
+          zoom: Math.max(map.getZoom(), 13.7),
+          duration: 850,
+        });
+      }
+
       return recommendationText;
     } catch (error) {
       console.error("Recommendation error:", error);
@@ -656,44 +898,6 @@ export default function Home() {
 
         const voteCount = venueVotes.length;
 
-        const positiveWords = ["packed", "lit", "busy", "good", "jumping"];
-        const recentPositiveVote = venueVotes.some(
-          (vote) =>
-            ["lit", "decent"].includes(vote.vibe) &&
-            Date.now() - new Date(vote.created_at).getTime() <= 30 * 60 * 1000
-        );
-
-        const recentPositiveUpdate = updateMatches.some((update) => {
-          const message = (update.message || "").toLowerCase();
-          return (
-            update.update_type === "Crowd/vibe" &&
-            positiveWords.some((word) => message.includes(word)) &&
-            Date.now() - new Date(update.created_at).getTime() <= 30 * 60 * 1000
-          );
-        });
-
-        const hasLineUpdate = updateMatches.some(
-          (update) => update.update_type === "Line update"
-        );
-
-        const signalWindow = 30 * 60 * 1000;
-        const recentVotes = venueVotes.filter(
-          (vote) => Date.now() - new Date(vote.created_at).getTime() <= signalWindow
-        );
-        const recentUpdates = updateMatches.filter(
-          (update) => Date.now() - new Date(update.created_at).getTime() <= signalWindow
-        );
-        const recentSignalCount = recentVotes.length + recentUpdates.length;
-        const hasSignals = voteCount > 0 || updateCount > 0;
-        const positiveVoteCount = venueVotes.filter((vote) =>
-          ["lit", "decent"].includes(vote.vibe)
-        ).length;
-        const negativeVoteCount = venueVotes.filter(
-          (vote) => vote.vibe === "dead"
-        ).length;
-        const negativeDominant =
-          negativeVoteCount > positiveVoteCount && negativeVoteCount > 0;
-
         const sortedVotes = [...venueVotes].sort(
           (a, b) =>
             new Date(b.created_at).getTime() -
@@ -706,53 +910,20 @@ export default function Home() {
             new Date(a.created_at).getTime()
         );
 
-        const lastActivity =
-          sortedVotes[0]?.created_at || sortedUpdates[0]?.created_at || null;
-        const recentBonus =
-          lastActivity && Date.now() - new Date(lastActivity).getTime() <= 30 * 60 * 1000
-            ? 2
-            : 0;
-
-        const score = venueVotes.reduce(
-          (sum, vote) =>
-            sum + VIBE_SCORE[vote.vibe as Vibe] * voteWeight(vote.created_at),
-          0
-        );
-
-        const finalScore = score + updateScore;
-
-        const voteScore = voteCount * 2;
-        const eventBonus = eventsData?.some((event) => event.venue_id === venue.id)
-          ? 2
-          : 0;
-
-        const trendingScore = voteScore + updateScore + eventBonus + recentBonus;
-
-        const momentumLabel = recentPositiveVote || recentPositiveUpdate
-          ? "📈 gaining fast"
-          : score >= 6
-          ? "🔥 heating up"
-          : hasLineUpdate
-          ? "🚶 line building"
-          : !hasSignals
-          ? "😴 quiet night"
-          : "🔥 heating up";
-
         const tonightEvent =
           eventsData?.find((event) => event.venue_id === venue.id) || null;
 
-        const status = getStatus(finalScore, voteCount + updateCount);
-        let energyLevel: "high" | "medium" | "low" | "negative" = "low";
+        const vibeEngine = calculateVenueVibe({
+          venueVotes,
+          updateMatches,
+          tonightEvent,
+        });
 
-        if (!hasSignals) {
-          energyLevel = "low";
-        } else if (negativeDominant) {
-          energyLevel = "negative";
-        } else if (recentSignalCount >= 2) {
-          energyLevel = "high";
-        } else {
-          energyLevel = "medium";
-        }
+        const finalScore = vibeEngine.finalScore;
+        const trendingScore = vibeEngine.trendingScore;
+        const momentumLabel = vibeEngine.momentumLabel;
+        const status = vibeEngine.status;
+        const energyLevel = vibeEngine.energyLevel;
 
         return {
           ...venue,
@@ -761,6 +932,10 @@ export default function Home() {
           updateCount,
           trendingScore,
           momentumLabel,
+          vibeScore: vibeEngine.vibeScore,
+          vibeTier: vibeEngine.vibeTier,
+          vibeTrend: vibeEngine.vibeTrend,
+          vibeReason: vibeEngine.vibeReason,
           confidence:
             voteCount + updateCount >= 5
               ? "high"
@@ -944,6 +1119,78 @@ export default function Home() {
       }
 
       const activeExpression: any = [">", ["get", "activeScore"], 0];
+      const surgingExpression: any = ["==", ["get", "isSurging"], true];
+      const heatingExpression: any = ["==", ["get", "isHeating"], true];
+      const coolingExpression: any = ["==", ["get", "isCooling"], true];
+      const hotColorExpression: any = [
+        "case",
+        surgingExpression,
+        "#ff3b30",
+        heatingExpression,
+        "#fb923c",
+        coolingExpression,
+        "#60a5fa",
+        ["match", ["get", "energyLevel"], "high", "#fb923c", "medium", "#facc15", "negative", "#60a5fa", "#64748b"],
+      ];
+
+      if (!newMap.getLayer("venue-pins-mega-halo")) {
+        newMap.addLayer({
+          id: "venue-pins-mega-halo",
+          type: "circle",
+          source: "venue-points",
+          paint: {
+            "circle-radius": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              8,
+              ["case", surgingExpression, 24, heatingExpression, 16, activeExpression, 10, 0],
+              11,
+              ["case", surgingExpression, 38, heatingExpression, 26, activeExpression, 16, 0],
+              14,
+              ["case", surgingExpression, 62, heatingExpression, 44, activeExpression, 26, 0],
+            ],
+            "circle-color": hotColorExpression,
+            "circle-blur": ["case", surgingExpression, 0.9, 0.82],
+            "circle-opacity": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              8,
+              ["case", surgingExpression, 0.3, heatingExpression, 0.18, activeExpression, 0.08, 0],
+              12,
+              ["case", surgingExpression, 0.42, heatingExpression, 0.27, activeExpression, 0.12, 0],
+              15,
+              ["case", surgingExpression, 0.52, heatingExpression, 0.34, activeExpression, 0.16, 0],
+            ],
+          },
+        });
+      }
+
+      if (!newMap.getLayer("venue-pins-ring")) {
+        newMap.addLayer({
+          id: "venue-pins-ring",
+          type: "circle",
+          source: "venue-points",
+          paint: {
+            "circle-radius": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              9,
+              ["case", surgingExpression, 9, heatingExpression, 7, activeExpression, 5, 0],
+              12,
+              ["case", surgingExpression, 16, heatingExpression, 12, activeExpression, 8, 0],
+              15,
+              ["case", surgingExpression, 24, heatingExpression, 18, activeExpression, 12, 0],
+            ],
+            "circle-color": "rgba(0,0,0,0)",
+            "circle-stroke-color": hotColorExpression,
+            "circle-stroke-width": ["case", surgingExpression, 3, heatingExpression, 2.2, activeExpression, 1.2, 0],
+            "circle-stroke-opacity": ["case", surgingExpression, 0.95, heatingExpression, 0.72, activeExpression, 0.35, 0],
+          },
+        });
+      }
 
       if (!newMap.getLayer("venue-pins-glow")) {
         newMap.addLayer({
@@ -956,26 +1203,16 @@ export default function Home() {
               ["linear"],
               ["zoom"],
               8,
-              ["case", activeExpression, 10, 3],
+              ["case", surgingExpression, 18, heatingExpression, 14, activeExpression, 10, 3],
               10,
-              ["case", activeExpression, 15, 5],
+              ["case", surgingExpression, 26, heatingExpression, 20, activeExpression, 15, 5],
               12,
-              ["case", activeExpression, 22, 7],
+              ["case", surgingExpression, 36, heatingExpression, 28, activeExpression, 22, 7],
               15,
-              ["case", activeExpression, 32, 10],
+              ["case", surgingExpression, 50, heatingExpression, 38, activeExpression, 32, 10],
             ],
-            "circle-color": [
-              "match",
-              ["get", "energyLevel"],
-              "high",
-              "#fb923c",
-              "medium",
-              "#facc15",
-              "negative",
-              "#60a5fa",
-              "#64748b",
-            ],
-            "circle-blur": ["case", activeExpression, 0.75, 0.95],
+            "circle-color": hotColorExpression,
+            "circle-blur": ["case", surgingExpression, 0.65, activeExpression, 0.78, 0.95],
             "circle-opacity": [
               "interpolate",
               ["linear"],
@@ -1004,30 +1241,15 @@ export default function Home() {
               ["linear"],
               ["zoom"],
               8,
-              ["case", activeExpression, 4, 2.2],
+              ["case", surgingExpression, 6, heatingExpression, 5, activeExpression, 4, 2.2],
               10,
-              ["case", activeExpression, 6, 3.2],
+              ["case", surgingExpression, 9, heatingExpression, 7, activeExpression, 6, 3.2],
               12,
-              ["case", activeExpression, 8, 4.2],
+              ["case", surgingExpression, 13, heatingExpression, 10, activeExpression, 8, 4.2],
               15,
-              [
-                "case",
-                activeExpression,
-                ["case", [">=", ["get", "activeScore"], 8], 12, 10],
-                4.5,
-              ],
+              ["case", surgingExpression, 18, heatingExpression, 14, activeExpression, ["case", [">=", ["get", "activeScore"], 8], 12, 10], 4.5],
             ],
-            "circle-color": [
-              "match",
-              ["get", "energyLevel"],
-              "high",
-              "#fb923c",
-              "medium",
-              "#facc15",
-              "negative",
-              "#60a5fa",
-              "#64748b",
-            ],
+            "circle-color": hotColorExpression,
             "circle-opacity": [
               "interpolate",
               ["linear"],
@@ -1624,6 +1846,78 @@ export default function Home() {
     }
 
     const activeExpression: any = [">", ["get", "activeScore"], 0];
+    const surgingExpression: any = ["==", ["get", "isSurging"], true];
+    const heatingExpression: any = ["==", ["get", "isHeating"], true];
+    const coolingExpression: any = ["==", ["get", "isCooling"], true];
+    const hotColorExpression: any = [
+      "case",
+      surgingExpression,
+      "#ff3b30",
+      heatingExpression,
+      "#fb923c",
+      coolingExpression,
+      "#60a5fa",
+      ["match", ["get", "energyLevel"], "high", "#fb923c", "medium", "#facc15", "negative", "#60a5fa", effectiveMode === "day" ? "#334155" : "#64748b"],
+    ];
+
+    if (!targetMap.getLayer("venue-pins-mega-halo")) {
+      targetMap.addLayer({
+        id: "venue-pins-mega-halo",
+        type: "circle",
+        source: "venue-points",
+        paint: {
+          "circle-radius": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            8,
+            ["case", surgingExpression, 24, heatingExpression, 16, activeExpression, 10, 0],
+            11,
+            ["case", surgingExpression, 38, heatingExpression, 26, activeExpression, 16, 0],
+            14,
+            ["case", surgingExpression, 62, heatingExpression, 44, activeExpression, 26, 0],
+          ],
+          "circle-color": hotColorExpression,
+          "circle-blur": ["case", surgingExpression, 0.9, 0.82],
+          "circle-opacity": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            8,
+            ["case", surgingExpression, 0.3, heatingExpression, 0.18, activeExpression, 0.08, 0],
+            12,
+            ["case", surgingExpression, 0.42, heatingExpression, 0.27, activeExpression, 0.12, 0],
+            15,
+            ["case", surgingExpression, 0.52, heatingExpression, 0.34, activeExpression, 0.16, 0],
+          ],
+        },
+      });
+    }
+
+    if (!targetMap.getLayer("venue-pins-ring")) {
+      targetMap.addLayer({
+        id: "venue-pins-ring",
+        type: "circle",
+        source: "venue-points",
+        paint: {
+          "circle-radius": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            9,
+            ["case", surgingExpression, 9, heatingExpression, 7, activeExpression, 5, 0],
+            12,
+            ["case", surgingExpression, 16, heatingExpression, 12, activeExpression, 8, 0],
+            15,
+            ["case", surgingExpression, 24, heatingExpression, 18, activeExpression, 12, 0],
+          ],
+          "circle-color": "rgba(0,0,0,0)",
+          "circle-stroke-color": hotColorExpression,
+          "circle-stroke-width": ["case", surgingExpression, 3, heatingExpression, 2.2, activeExpression, 1.2, 0],
+          "circle-stroke-opacity": ["case", surgingExpression, 0.95, heatingExpression, 0.72, activeExpression, 0.35, 0],
+        },
+      });
+    }
 
     if (!targetMap.getLayer("venue-pins-glow")) {
       targetMap.addLayer({
@@ -1636,26 +1930,16 @@ export default function Home() {
             ["linear"],
             ["zoom"],
             8,
-            ["case", activeExpression, 10, 3],
+            ["case", surgingExpression, 18, heatingExpression, 14, activeExpression, 10, 3],
             10,
-            ["case", activeExpression, 15, 5],
+            ["case", surgingExpression, 26, heatingExpression, 20, activeExpression, 15, 5],
             12,
-            ["case", activeExpression, 22, 7],
+            ["case", surgingExpression, 36, heatingExpression, 28, activeExpression, 22, 7],
             15,
-            ["case", activeExpression, 32, 10],
+            ["case", surgingExpression, 50, heatingExpression, 38, activeExpression, 32, 10],
           ],
-          "circle-color": [
-            "match",
-            ["get", "energyLevel"],
-            "high",
-            "#fb923c",
-            "medium",
-            "#facc15",
-            "negative",
-            "#60a5fa",
-            effectiveMode === "day" ? "#334155" : "#64748b",
-          ],
-          "circle-blur": ["case", activeExpression, 0.75, 0.95],
+          "circle-color": hotColorExpression,
+          "circle-blur": ["case", surgingExpression, 0.65, activeExpression, 0.78, 0.95],
           "circle-opacity": [
             "interpolate",
             ["linear"],
@@ -1684,30 +1968,15 @@ export default function Home() {
             ["linear"],
             ["zoom"],
             8,
-            ["case", activeExpression, 4, 2.2],
+            ["case", surgingExpression, 6, heatingExpression, 5, activeExpression, 4, 2.2],
             10,
-            ["case", activeExpression, 6, 3.2],
+            ["case", surgingExpression, 9, heatingExpression, 7, activeExpression, 6, 3.2],
             12,
-            ["case", activeExpression, 8, 4.2],
+            ["case", surgingExpression, 13, heatingExpression, 10, activeExpression, 8, 4.2],
             15,
-            [
-              "case",
-              activeExpression,
-              ["case", [">=", ["get", "activeScore"], 8], 12, 10],
-              4.5,
-            ],
+            ["case", surgingExpression, 18, heatingExpression, 14, activeExpression, ["case", [">=", ["get", "activeScore"], 8], 12, 10], 4.5],
           ],
-          "circle-color": [
-            "match",
-            ["get", "energyLevel"],
-            "high",
-            "#fb923c",
-            "medium",
-            "#facc15",
-            "negative",
-            "#60a5fa",
-            effectiveMode === "day" ? "#334155" : "#64748b",
-          ],
+          "circle-color": hotColorExpression,
           "circle-opacity": [
             "interpolate",
             ["linear"],
@@ -1984,7 +2253,7 @@ export default function Home() {
   }
 
   const topSpots = [...filteredVenues].sort(
-    (a, b) => (b.score || 0) - (a.score || 0)
+    (a, b) => (b.vibeScore || b.score || 0) - (a.vibeScore || a.score || 0)
   );
 
   const eventSpots = filteredVenues.filter((venue) => venue.tonightEvent);
@@ -2331,7 +2600,7 @@ export default function Home() {
                     Finding...
                   </>
                 ) : (
-                  "Ask AI"
+                  "Where should I go?"
                 )}
               </button>
             </div>
@@ -2349,12 +2618,12 @@ export default function Home() {
                   </span>
                 )}
                 <p className={`text-[9px] uppercase tracking-[0.25em] ${isDay ? "text-slate-500" : "text-white/45"}`}>
-                  {recommendationLoading ? "Analyzing tonight’s best move" : "Premium insight"}
+                  {recommendationLoading ? "Reading the city right now" : "Tonight’s best move"}
                 </p>
               </div>
               <p className={`mt-1 text-xs leading-4 ${isDay ? "text-slate-700" : "text-white/90"}`}>
                 {recommendationLoading
-                  ? "Crunching the latest signals for your best spot."
+                  ? "Scanning live votes, updates, events, and vibe score."
                   : recommendationVenue ? (
                       <>
                         <span className={isDay ? "font-semibold text-slate-950" : "font-semibold text-white"}>
@@ -3149,14 +3418,14 @@ export default function Home() {
                   </div>
                   <div className="shrink-0 rounded-3xl border border-white/10 bg-black/35 px-3 py-2 text-center shadow-inner shadow-white/5">
                     <p className="text-2xl font-black text-white">{Math.round(selectedVibeIntensity)}</p>
-                    <p className="text-[9px] font-bold uppercase tracking-[0.22em] text-white/40">Vibe</p>
+                    <p className="text-[9px] font-bold uppercase tracking-[0.22em] text-white/40">Score</p>
                   </div>
                 </div>
 
                 <div className="mt-4">
                   <div className="mb-2 flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.22em] text-white/45">
                     <span>{selectedVibeMeterLabel}</span>
-                    <span>{statusLabel(selected.status)}</span>
+                    <span>{vibeTrendLabel(selected.vibeTrend)} · {statusLabel(selected.status)}</span>
                   </div>
                   <div className="h-3 overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10">
                     <div
@@ -3164,6 +3433,9 @@ export default function Home() {
                       style={{ width: `${selectedVibeIntensity}%` }}
                     />
                   </div>
+                  <p className="mt-3 rounded-2xl border border-white/10 bg-black/25 px-3 py-2 text-[11px] leading-5 text-white/60">
+                    <span className="font-bold text-white/80">Vibe engine:</span> {selected.vibeReason || "Score is based on fresh votes, live updates, event context, and time decay."}
+                  </p>
                 </div>
 
                 <div className="mt-4 grid grid-cols-3 gap-2 text-center">
@@ -3176,8 +3448,8 @@ export default function Home() {
                     <p className="mt-1 text-[9px] font-bold uppercase tracking-[0.18em] text-white/40">Updates</p>
                   </div>
                   <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3">
-                    <p className="text-base font-black text-white">{selected.trendingScore || 0}</p>
-                    <p className="mt-1 text-[9px] font-bold uppercase tracking-[0.18em] text-white/40">Heat</p>
+                    <p className="text-base font-black text-white">{selected.vibeScore || 0}</p>
+                    <p className="mt-1 text-[9px] font-bold uppercase tracking-[0.18em] text-white/40">Score</p>
                   </div>
                 </div>
               </div>
@@ -3415,10 +3687,10 @@ export default function Home() {
                     </div>
                   </div>
                   <p className="mt-3 text-[11px] font-semibold text-white/65">
-                    {selected.momentumLabel}
+                    {selected.momentumLabel} · {vibeTrendLabel(selected.vibeTrend)}
                   </p>
                   <p className="mt-1 text-[10px] uppercase tracking-[0.18em] text-white/40">
-                    {energyLabel(selected.energyLevel)}
+                    Live score: {selected.vibeScore || 0}/100 · {energyLabel(selected.energyLevel)}
                   </p>
                 </div>
 
@@ -3430,7 +3702,7 @@ export default function Home() {
                     {confidenceLabel(selected.confidence)}
                   </p>
                   <p className="mt-3 text-[11px] leading-5 text-white/50">
-                    Based on recent votes, suggested updates, event info, and last activity. More live check-ins make this smarter.
+                    Based on the vibe engine: recent votes, user updates, event boosts, crowd signals, and time decay. More live check-ins make this smarter.
                   </p>
                 </div>
               </div>
