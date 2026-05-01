@@ -501,6 +501,26 @@ function buildVenuePointsGeoJSON(
   venues: VenueWithEvent[],
   spotlightVenueId?: string | null
 ): GeoJSON.FeatureCollection<GeoJSON.Point, GeoJSON.GeoJsonProperties> {
+  const rankedLiveVenues = [...venues]
+    .filter((venue) => venue.lng && venue.lat && hasRealVenueSignals(venue))
+    .sort((a, b) => {
+      const aScore =
+        (a.vibeScore || a.score || 0) +
+        (a.trendingScore || 0) +
+        ((a.voteCount || 0) + (a.updateCount || 0)) * 10 +
+        (a.tonightEvent ? 12 : 0);
+      const bScore =
+        (b.vibeScore || b.score || 0) +
+        (b.trendingScore || 0) +
+        ((b.voteCount || 0) + (b.updateCount || 0)) * 10 +
+        (b.tonightEvent ? 12 : 0);
+
+      return bScore - aScore;
+    });
+
+  const topMoveIds = new Set(rankedLiveVenues.slice(0, 3).map((venue) => venue.id));
+  const topMoveOneId = rankedLiveVenues[0]?.id || null;
+
   const features = venues.flatMap((venue) => {
     if (!venue.lng || !venue.lat) return [];
 
@@ -541,6 +561,8 @@ function buildVenuePointsGeoJSON(
           isHeating,
           isCooling,
           isSpotlight,
+          isTopMove: topMoveIds.has(venue.id),
+          isTopMoveOne: topMoveOneId === venue.id,
         },
       },
     ];
@@ -1260,6 +1282,9 @@ export default function Home() {
 
 
       const spotlightExpression: any = ["==", ["get", "isSpotlight"], true];
+      const topMoveExpression: any = ["==", ["get", "isTopMove"], true];
+      const topMoveOneExpression: any = ["==", ["get", "isTopMoveOne"], true];
+      const liveTargetExpression: any = ["any", spotlightExpression, topMoveOneExpression];
 
       if (!newMap.getLayer("venue-pins-activity-spotlight")) {
         newMap.addLayer({
@@ -1310,6 +1335,49 @@ export default function Home() {
         });
       }
 
+      if (!newMap.getLayer("venue-pins-live-radar-wave")) {
+        newMap.addLayer({
+          id: "venue-pins-live-radar-wave",
+          type: "circle",
+          source: "venue-points",
+          paint: {
+            "circle-radius": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              8,
+              ["case", liveTargetExpression, 42, topMoveExpression, 22, surgingExpression, 28, 0],
+              11,
+              ["case", liveTargetExpression, 70, topMoveExpression, 36, surgingExpression, 48, 0],
+              14,
+              ["case", liveTargetExpression, 108, topMoveExpression, 58, surgingExpression, 72, 0]
+            ],
+            "circle-color": [
+              "case",
+              spotlightExpression,
+              "#fb923c",
+              topMoveOneExpression,
+              "#ff3b30",
+              topMoveExpression,
+              "#facc15",
+              hotColorExpression
+            ],
+            "circle-blur": ["case", liveTargetExpression, 0.86, 0.92],
+            "circle-opacity": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              8,
+              ["case", liveTargetExpression, 0.34, topMoveExpression, 0.16, surgingExpression, 0.18, 0],
+              12,
+              ["case", liveTargetExpression, 0.46, topMoveExpression, 0.22, surgingExpression, 0.26, 0],
+              15,
+              ["case", liveTargetExpression, 0.56, topMoveExpression, 0.28, surgingExpression, 0.34, 0]
+            ]
+          }
+        });
+      }
+
       if (!newMap.getLayer("venue-pins-mega-halo")) {
         newMap.addLayer({
           id: "venue-pins-mega-halo",
@@ -1321,11 +1389,11 @@ export default function Home() {
               ["linear"],
               ["zoom"],
               8,
-              ["case", surgingExpression, 24, heatingExpression, 16, activeExpression, 10, 0],
+              ["case", liveTargetExpression, 34, topMoveExpression, 26, surgingExpression, 24, heatingExpression, 16, activeExpression, 10, 0],
               11,
-              ["case", surgingExpression, 38, heatingExpression, 26, activeExpression, 16, 0],
+              ["case", liveTargetExpression, 54, topMoveExpression, 42, surgingExpression, 38, heatingExpression, 26, activeExpression, 16, 0],
               14,
-              ["case", surgingExpression, 62, heatingExpression, 44, activeExpression, 26, 0],
+              ["case", liveTargetExpression, 86, topMoveExpression, 68, surgingExpression, 62, heatingExpression, 44, activeExpression, 26, 0],
             ],
             "circle-color": hotColorExpression,
             "circle-blur": ["case", surgingExpression, 0.9, 0.82],
@@ -1334,11 +1402,11 @@ export default function Home() {
               ["linear"],
               ["zoom"],
               8,
-              ["case", surgingExpression, 0.3, heatingExpression, 0.18, activeExpression, 0.08, 0],
+              ["case", liveTargetExpression, 0.44, topMoveExpression, 0.34, surgingExpression, 0.3, heatingExpression, 0.18, activeExpression, 0.08, 0],
               12,
-              ["case", surgingExpression, 0.42, heatingExpression, 0.27, activeExpression, 0.12, 0],
+              ["case", liveTargetExpression, 0.58, topMoveExpression, 0.46, surgingExpression, 0.42, heatingExpression, 0.27, activeExpression, 0.12, 0],
               15,
-              ["case", surgingExpression, 0.52, heatingExpression, 0.34, activeExpression, 0.16, 0],
+              ["case", liveTargetExpression, 0.68, topMoveExpression, 0.54, surgingExpression, 0.52, heatingExpression, 0.34, activeExpression, 0.16, 0],
             ],
           },
         });
@@ -1355,15 +1423,15 @@ export default function Home() {
               ["linear"],
               ["zoom"],
               9,
-              ["case", surgingExpression, 9, heatingExpression, 7, activeExpression, 5, 0],
+              ["case", liveTargetExpression, 14, topMoveExpression, 11, surgingExpression, 9, heatingExpression, 7, activeExpression, 5, 0],
               12,
-              ["case", surgingExpression, 16, heatingExpression, 12, activeExpression, 8, 0],
+              ["case", liveTargetExpression, 24, topMoveExpression, 19, surgingExpression, 16, heatingExpression, 12, activeExpression, 8, 0],
               15,
-              ["case", surgingExpression, 24, heatingExpression, 18, activeExpression, 12, 0],
+              ["case", liveTargetExpression, 36, topMoveExpression, 30, surgingExpression, 24, heatingExpression, 18, activeExpression, 12, 0],
             ],
             "circle-color": "rgba(0,0,0,0)",
             "circle-stroke-color": hotColorExpression,
-            "circle-stroke-width": ["case", surgingExpression, 3, heatingExpression, 2.2, activeExpression, 1.2, 0],
+            "circle-stroke-width": ["case", liveTargetExpression, 4, topMoveExpression, 3.2, surgingExpression, 3, heatingExpression, 2.2, activeExpression, 1.2, 0],
             "circle-stroke-opacity": ["case", surgingExpression, 0.95, heatingExpression, 0.72, activeExpression, 0.35, 0],
           },
         });
@@ -1380,13 +1448,13 @@ export default function Home() {
               ["linear"],
               ["zoom"],
               8,
-              ["case", surgingExpression, 18, heatingExpression, 14, activeExpression, 10, 3],
+              ["case", liveTargetExpression, 26, topMoveExpression, 22, surgingExpression, 18, heatingExpression, 14, activeExpression, 10, 3],
               10,
-              ["case", surgingExpression, 26, heatingExpression, 20, activeExpression, 15, 5],
+              ["case", liveTargetExpression, 38, topMoveExpression, 32, surgingExpression, 26, heatingExpression, 20, activeExpression, 15, 5],
               12,
-              ["case", surgingExpression, 36, heatingExpression, 28, activeExpression, 22, 7],
+              ["case", liveTargetExpression, 54, topMoveExpression, 44, surgingExpression, 36, heatingExpression, 28, activeExpression, 22, 7],
               15,
-              ["case", surgingExpression, 50, heatingExpression, 38, activeExpression, 32, 10],
+              ["case", liveTargetExpression, 72, topMoveExpression, 60, surgingExpression, 50, heatingExpression, 38, activeExpression, 32, 10],
             ],
             "circle-color": hotColorExpression,
             "circle-blur": ["case", surgingExpression, 0.65, activeExpression, 0.78, 0.95],
@@ -1418,13 +1486,13 @@ export default function Home() {
               ["linear"],
               ["zoom"],
               8,
-              ["case", surgingExpression, 6, heatingExpression, 5, activeExpression, 4, 2.2],
+              ["case", liveTargetExpression, 8, topMoveExpression, 7, surgingExpression, 6, heatingExpression, 5, activeExpression, 4, 2.2],
               10,
-              ["case", surgingExpression, 9, heatingExpression, 7, activeExpression, 6, 3.2],
+              ["case", liveTargetExpression, 12, topMoveExpression, 10, surgingExpression, 9, heatingExpression, 7, activeExpression, 6, 3.2],
               12,
-              ["case", surgingExpression, 13, heatingExpression, 10, activeExpression, 8, 4.2],
+              ["case", liveTargetExpression, 17, topMoveExpression, 15, surgingExpression, 13, heatingExpression, 10, activeExpression, 8, 4.2],
               15,
-              ["case", surgingExpression, 18, heatingExpression, 14, activeExpression, ["case", [">=", ["get", "activeScore"], 8], 12, 10], 4.5],
+              ["case", liveTargetExpression, 24, topMoveExpression, 21, surgingExpression, 18, heatingExpression, 14, activeExpression, ["case", [">=", ["get", "activeScore"], 8], 12, 10], 4.5],
             ],
             "circle-color": hotColorExpression,
             "circle-opacity": [
@@ -2213,6 +2281,49 @@ export default function Home() {
         });
       }
 
+      if (!targetMap.getLayer("venue-pins-live-radar-wave")) {
+        targetMap.addLayer({
+          id: "venue-pins-live-radar-wave",
+          type: "circle",
+          source: "venue-points",
+          paint: {
+            "circle-radius": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              8,
+              ["case", liveTargetExpression, 42, topMoveExpression, 22, surgingExpression, 28, 0],
+              11,
+              ["case", liveTargetExpression, 70, topMoveExpression, 36, surgingExpression, 48, 0],
+              14,
+              ["case", liveTargetExpression, 108, topMoveExpression, 58, surgingExpression, 72, 0]
+            ],
+            "circle-color": [
+              "case",
+              spotlightExpression,
+              "#fb923c",
+              topMoveOneExpression,
+              "#ff3b30",
+              topMoveExpression,
+              "#facc15",
+              hotColorExpression
+            ],
+            "circle-blur": ["case", liveTargetExpression, 0.86, 0.92],
+            "circle-opacity": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              8,
+              ["case", liveTargetExpression, 0.34, topMoveExpression, 0.16, surgingExpression, 0.18, 0],
+              12,
+              ["case", liveTargetExpression, 0.46, topMoveExpression, 0.22, surgingExpression, 0.26, 0],
+              15,
+              ["case", liveTargetExpression, 0.56, topMoveExpression, 0.28, surgingExpression, 0.34, 0]
+            ]
+          }
+        });
+      }
+
     if (!targetMap.getLayer("venue-pins-mega-halo")) {
       targetMap.addLayer({
         id: "venue-pins-mega-halo",
@@ -2224,11 +2335,11 @@ export default function Home() {
             ["linear"],
             ["zoom"],
             8,
-            ["case", surgingExpression, 24, heatingExpression, 16, activeExpression, 10, 0],
+            ["case", liveTargetExpression, 34, topMoveExpression, 26, surgingExpression, 24, heatingExpression, 16, activeExpression, 10, 0],
             11,
-            ["case", surgingExpression, 38, heatingExpression, 26, activeExpression, 16, 0],
+            ["case", liveTargetExpression, 54, topMoveExpression, 42, surgingExpression, 38, heatingExpression, 26, activeExpression, 16, 0],
             14,
-            ["case", surgingExpression, 62, heatingExpression, 44, activeExpression, 26, 0],
+            ["case", liveTargetExpression, 86, topMoveExpression, 68, surgingExpression, 62, heatingExpression, 44, activeExpression, 26, 0],
           ],
           "circle-color": hotColorExpression,
           "circle-blur": ["case", surgingExpression, 0.9, 0.82],
@@ -2237,11 +2348,11 @@ export default function Home() {
             ["linear"],
             ["zoom"],
             8,
-            ["case", surgingExpression, 0.3, heatingExpression, 0.18, activeExpression, 0.08, 0],
+            ["case", liveTargetExpression, 0.44, topMoveExpression, 0.34, surgingExpression, 0.3, heatingExpression, 0.18, activeExpression, 0.08, 0],
             12,
-            ["case", surgingExpression, 0.42, heatingExpression, 0.27, activeExpression, 0.12, 0],
+            ["case", liveTargetExpression, 0.58, topMoveExpression, 0.46, surgingExpression, 0.42, heatingExpression, 0.27, activeExpression, 0.12, 0],
             15,
-            ["case", surgingExpression, 0.52, heatingExpression, 0.34, activeExpression, 0.16, 0],
+            ["case", liveTargetExpression, 0.68, topMoveExpression, 0.54, surgingExpression, 0.52, heatingExpression, 0.34, activeExpression, 0.16, 0],
           ],
         },
       });
@@ -2258,15 +2369,15 @@ export default function Home() {
             ["linear"],
             ["zoom"],
             9,
-            ["case", surgingExpression, 9, heatingExpression, 7, activeExpression, 5, 0],
+            ["case", liveTargetExpression, 14, topMoveExpression, 11, surgingExpression, 9, heatingExpression, 7, activeExpression, 5, 0],
             12,
-            ["case", surgingExpression, 16, heatingExpression, 12, activeExpression, 8, 0],
+            ["case", liveTargetExpression, 24, topMoveExpression, 19, surgingExpression, 16, heatingExpression, 12, activeExpression, 8, 0],
             15,
-            ["case", surgingExpression, 24, heatingExpression, 18, activeExpression, 12, 0],
+            ["case", liveTargetExpression, 36, topMoveExpression, 30, surgingExpression, 24, heatingExpression, 18, activeExpression, 12, 0],
           ],
           "circle-color": "rgba(0,0,0,0)",
           "circle-stroke-color": hotColorExpression,
-          "circle-stroke-width": ["case", surgingExpression, 3, heatingExpression, 2.2, activeExpression, 1.2, 0],
+          "circle-stroke-width": ["case", liveTargetExpression, 4, topMoveExpression, 3.2, surgingExpression, 3, heatingExpression, 2.2, activeExpression, 1.2, 0],
           "circle-stroke-opacity": ["case", surgingExpression, 0.95, heatingExpression, 0.72, activeExpression, 0.35, 0],
         },
       });
@@ -2283,13 +2394,13 @@ export default function Home() {
             ["linear"],
             ["zoom"],
             8,
-            ["case", surgingExpression, 18, heatingExpression, 14, activeExpression, 10, 3],
+            ["case", liveTargetExpression, 26, topMoveExpression, 22, surgingExpression, 18, heatingExpression, 14, activeExpression, 10, 3],
             10,
-            ["case", surgingExpression, 26, heatingExpression, 20, activeExpression, 15, 5],
+            ["case", liveTargetExpression, 38, topMoveExpression, 32, surgingExpression, 26, heatingExpression, 20, activeExpression, 15, 5],
             12,
-            ["case", surgingExpression, 36, heatingExpression, 28, activeExpression, 22, 7],
+            ["case", liveTargetExpression, 54, topMoveExpression, 44, surgingExpression, 36, heatingExpression, 28, activeExpression, 22, 7],
             15,
-            ["case", surgingExpression, 50, heatingExpression, 38, activeExpression, 32, 10],
+            ["case", liveTargetExpression, 72, topMoveExpression, 60, surgingExpression, 50, heatingExpression, 38, activeExpression, 32, 10],
           ],
           "circle-color": hotColorExpression,
           "circle-blur": ["case", surgingExpression, 0.65, activeExpression, 0.78, 0.95],
@@ -2321,13 +2432,13 @@ export default function Home() {
             ["linear"],
             ["zoom"],
             8,
-            ["case", surgingExpression, 6, heatingExpression, 5, activeExpression, 4, 2.2],
+            ["case", liveTargetExpression, 8, topMoveExpression, 7, surgingExpression, 6, heatingExpression, 5, activeExpression, 4, 2.2],
             10,
-            ["case", surgingExpression, 9, heatingExpression, 7, activeExpression, 6, 3.2],
+            ["case", liveTargetExpression, 12, topMoveExpression, 10, surgingExpression, 9, heatingExpression, 7, activeExpression, 6, 3.2],
             12,
-            ["case", surgingExpression, 13, heatingExpression, 10, activeExpression, 8, 4.2],
+            ["case", liveTargetExpression, 17, topMoveExpression, 15, surgingExpression, 13, heatingExpression, 10, activeExpression, 8, 4.2],
             15,
-            ["case", surgingExpression, 18, heatingExpression, 14, activeExpression, ["case", [">=", ["get", "activeScore"], 8], 12, 10], 4.5],
+            ["case", liveTargetExpression, 24, topMoveExpression, 21, surgingExpression, 18, heatingExpression, 14, activeExpression, ["case", [">=", ["get", "activeScore"], 8], 12, 10], 4.5],
           ],
           "circle-color": hotColorExpression,
           "circle-opacity": [
@@ -2759,6 +2870,16 @@ export default function Home() {
           100% {
             transform: scale(1);
             filter: brightness(1);
+          }
+        }
+
+
+        @keyframes radarBreathe {
+          0%, 100% {
+            filter: drop-shadow(0 0 8px rgba(251, 146, 60, 0.28));
+          }
+          50% {
+            filter: drop-shadow(0 0 18px rgba(251, 146, 60, 0.48));
           }
         }
 
