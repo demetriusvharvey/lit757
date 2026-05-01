@@ -566,6 +566,7 @@ export default function Home() {
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [recommendation, setRecommendation] = useState("");
   const [recommendationVenue, setRecommendationVenue] = useState("");
+  const [recommendationReasons, setRecommendationReasons] = useState<string[]>([]);
   const [recommendationLoading, setRecommendationLoading] = useState(false);
   const [recommendationQuestion, setRecommendationQuestion] = useState("");
   const [recognitionActive, setRecognitionActive] = useState(false);
@@ -631,6 +632,7 @@ export default function Home() {
       setRecommendationLoading(true);
       setRecommendation("");
       setRecommendationVenue("");
+      setRecommendationReasons([]);
       setRecommendationQuestion(question || "");
 
       // Fast local recommendation engine. This uses the same live venue data
@@ -696,6 +698,10 @@ export default function Home() {
 
       if (!pick) {
         const fallback = "I don’t have enough venue data yet. Try switching city filters or check back after more votes come in.";
+        setRecommendationReasons([
+          "No strong live signals were found in the current filters.",
+          "Try widening the city/category filters or check back after more votes come in.",
+        ]);
         setRecommendation(fallback);
         return fallback;
       }
@@ -715,9 +721,26 @@ export default function Home() {
         : "No fresh crowd signals yet, so treat this as a discovery pick.";
 
       const reason = pick.vibeReason || "The live score, venue context, and latest signals make this the best move right now.";
-      const recommendationText = `${trend} · ${pick.vibeScore || pick.score || 0}/100 vibe score · ${signals} live signal${signals === 1 ? "" : "s"}. ${reason}${eventText} ${confidence}. ${urgency}`;
+      const vibeScoreText = `${pick.vibeScore || pick.score || 0}/100 vibe score`;
+      const recommendationText = `${trend} · ${vibeScoreText} · ${signals} live signal${signals === 1 ? "" : "s"}. ${reason}${eventText} ${confidence}. ${urgency}`;
+
+      const whyReasons = [
+        `Best current match in your filters with a ${vibeScoreText}.`,
+        signals > 0
+          ? `${signals} live signal${signals === 1 ? "" : "s"} from recent votes or updates.`
+          : pick.tonightEvent
+          ? "Event context is carrying this recommendation tonight."
+          : "Discovery pick because no venue has strong live signals yet.",
+        pick.vibeTrend && pick.vibeTrend !== "quiet"
+          ? `${vibeTrendLabel(pick.vibeTrend)} trend detected from the live scoring engine.`
+          : "Quiet trend, so this is a safer pick rather than a hype pick.",
+        pick.tonightEvent
+          ? `${pick.tonightEvent.title} is on the schedule tonight${pick.tonightEvent.dj ? ` with ${pick.tonightEvent.dj}` : ""}.`
+          : `${confidence} based on current vote/update volume.`,
+      ];
 
       setRecommendationVenue(pick.name);
+      setRecommendationReasons(whyReasons);
       setRecommendation(recommendationText);
 
       if (map && pick.lng && pick.lat) {
@@ -731,11 +754,29 @@ export default function Home() {
       return recommendationText;
     } catch (error) {
       console.error("Recommendation error:", error);
+      setRecommendationReasons(["The recommendation engine hit an error before it could rank venues."]);
       setRecommendation("Unable to find a recommendation right now.");
       return "";
     } finally {
       setRecommendationLoading(false);
     }
+  }
+
+  function closeRecommendationPanel() {
+    setRecommendationLoading(false);
+    setRecommendation("");
+    setRecommendationVenue("");
+    setRecommendationReasons([]);
+    setRecommendationQuestion("");
+  }
+
+  function handleRecommendationButtonClick() {
+    if (recommendation || recommendationLoading) {
+      closeRecommendationPanel();
+      return;
+    }
+
+    fetchRecommendation();
   }
 
   function speakRecommendation(text: string) {
@@ -2590,8 +2631,8 @@ export default function Home() {
                 ))}
               </div>
               <button
-                onClick={() => fetchRecommendation()}
-                disabled={recommendationLoading}
+                onClick={handleRecommendationButtonClick}
+                disabled={false}
                 className={`inline-flex items-center justify-center gap-1 rounded-full border px-3 py-1.5 text-xs font-semibold shadow-lg transition disabled:cursor-not-allowed disabled:opacity-60 ${isDay ? "border-slate-300/70 bg-slate-950 text-white shadow-slate-900/10 hover:bg-slate-800" : "border-white/10 bg-gradient-to-r from-white/10 to-white/5 text-white shadow-black/20 hover:from-white/20 hover:to-white/10"}`}
               >
                 {recommendationLoading ? (
@@ -2599,6 +2640,8 @@ export default function Home() {
                     <span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
                     Finding...
                   </>
+                ) : recommendation ? (
+                  "Hide pick"
                 ) : (
                   "Where should I go?"
                 )}
@@ -2607,7 +2650,14 @@ export default function Home() {
           </div>
 
           {(recommendationLoading || recommendation) && (
-            <div className={`mt-2 rounded-2xl border px-3 py-2 text-xs shadow-xl backdrop-blur-xl ${isDay ? "border-slate-200/80 bg-white/75 text-slate-900 shadow-slate-900/10" : "border-white/10 bg-white/10 text-white shadow-black/20"}`}>
+            <div className={`relative mt-2 rounded-2xl border px-3 py-2 pr-10 text-xs shadow-xl backdrop-blur-xl ${isDay ? "border-slate-200/80 bg-white/75 text-slate-900 shadow-slate-900/10" : "border-white/10 bg-white/10 text-white shadow-black/20"}`}>
+              <button
+                onClick={closeRecommendationPanel}
+                className={`absolute right-2 top-2 z-20 inline-flex h-7 w-7 items-center justify-center rounded-full border transition ${isDay ? "border-slate-300/80 bg-white/80 text-slate-700 hover:bg-slate-100" : "border-white/10 bg-black/30 text-white/70 hover:bg-white/10 hover:text-white"}`}
+                aria-label="Close AI recommendation"
+              >
+                <X size={14} />
+              </button>
               <div className="flex flex-wrap items-center gap-2">
                 <span className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.22em] ${isDay ? "bg-slate-900/10 text-slate-700" : "bg-white/10 text-white/75"}`}>
                   AI Pick
@@ -2636,6 +2686,26 @@ export default function Home() {
                       recommendation
                     )}
               </p>
+
+              {!recommendationLoading && recommendationReasons.length > 0 && (
+                <div className={`mt-2 rounded-2xl border px-3 py-2 ${isDay ? "border-slate-200 bg-slate-50/90" : "border-white/10 bg-black/20"}`}>
+                  <p className={`text-[9px] font-black uppercase tracking-[0.22em] ${isDay ? "text-slate-500" : "text-white/45"}`}>
+                    Why this recommendation
+                  </p>
+                  <div className="mt-2 grid gap-1.5">
+                    {recommendationReasons.map((reason, index) => (
+                      <div key={`${reason}-${index}`} className="flex items-start gap-2">
+                        <span className="mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-[9px] font-black text-emerald-300 ring-1 ring-emerald-300/20">
+                          {index + 1}
+                        </span>
+                        <p className={`text-[11px] leading-4 ${isDay ? "text-slate-600" : "text-white/70"}`}>
+                          {reason}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -2719,7 +2789,11 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="pointer-events-none absolute left-3 top-[260px] z-20 hidden w-[320px] lg:block">
+      <div
+        className={`pointer-events-none absolute left-3 z-20 hidden w-[320px] transition-all duration-300 lg:block ${
+          recommendation || recommendationLoading ? "top-[410px]" : "top-[260px]"
+        }`}
+      >
         <div className={`pointer-events-auto overflow-hidden rounded-2xl border p-3 shadow-2xl backdrop-blur-2xl ${
           isDay
             ? "border-white/70 bg-white/90 text-slate-950 shadow-slate-900/10"
@@ -2984,6 +3058,18 @@ export default function Home() {
                   {recommendationVenue ? `${recommendationVenue} — ` : ""}
                   {recommendation}
                 </p>
+                {recommendationReasons.length > 0 && (
+                  <div className="mt-2 rounded-xl bg-black/20 p-2 ring-1 ring-white/10">
+                    <p className="text-[9px] font-black uppercase tracking-[0.2em] text-emerald-200/60">
+                      Why
+                    </p>
+                    <ul className="mt-1 space-y-1 text-[11px] leading-4 text-white/70">
+                      {recommendationReasons.slice(0, 3).map((reason, index) => (
+                        <li key={`${reason}-${index}`}>• {reason}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
             )}
           </div>
