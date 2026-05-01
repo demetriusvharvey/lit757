@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.1",
+    "dotenv": "^17.4.2",
     "lucide-react": "^1.14.0",
     "mapbox-gl": "^3.23.0",
     "next": "16.2.4",

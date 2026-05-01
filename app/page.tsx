@@ -2059,6 +2059,49 @@ export default function Home() {
   const selectedEnergyGlowClass = energyGlow(selected?.energyLevel);
   const selectedVibeIntensity = getVibeIntensity(selected);
   const selectedVibeMeterLabel = vibeMeterLabel(selected);
+  const selectedVenuePhotoFields = selected
+    ? [
+        (selected as any).photo_url,
+        (selected as any).venue_photo_url,
+        (selected as any).building_photo_url,
+        (selected as any).exterior_photo_url,
+        (selected as any).image_url,
+        (selected as any).cover_image_url,
+        (selected as any).hero_image_url,
+      ].filter(Boolean)
+    : [];
+  const selectedVenuePhotoArray = selected
+    ? Array.isArray((selected as any).photos)
+      ? (selected as any).photos.filter(Boolean)
+      : []
+    : [];
+  const selectedOfficialVenuePhotos = [
+    ...selectedVenuePhotoFields.map((url, index) => ({
+      id: `official-venue-photo-${index}`,
+      url: String(url),
+      type: "image",
+      label: "Venue photo",
+      created_at: null,
+    })),
+    ...selectedVenuePhotoArray.map((url: string, index: number) => ({
+      id: `official-venue-gallery-${index}`,
+      url: String(url),
+      type: "image",
+      label: "Venue photo",
+      created_at: null,
+    })),
+  ].slice(0, 6);
+  const selectedVenueHeroPhoto = selectedOfficialVenuePhotos[0] || null;
+  const selectedUpdateMedia = recentUpdates
+    .filter((update) => update.media_url)
+    .map((update) => ({
+      id: update.id,
+      url: update.media_url as string,
+      type: update.media_type || "image",
+      label: update.update_type || "Live update",
+      created_at: update.created_at,
+    }))
+    .slice(0, 6);
   const isDay = mapMode === "day";
 
   return (
@@ -2190,6 +2233,15 @@ export default function Home() {
             transform: scale(1);
             opacity: 1;
           }
+        }
+
+        .no-scrollbar::-webkit-scrollbar {
+          display: none;
+        }
+
+        .no-scrollbar {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
         }
 
         select option {
@@ -3129,6 +3181,146 @@ export default function Home() {
                   </div>
                 </div>
               </div>
+
+              <div className="mb-4 overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.055] shadow-2xl shadow-black/20">
+                <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.26em] text-white/45">
+                      Venue Photo
+                    </p>
+                    <p className="mt-1 text-xs font-semibold text-white/55">
+                      Official building photo so people can recognize the spot
+                    </p>
+                  </div>
+                  <span className="shrink-0 rounded-full border border-white/10 bg-white/10 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.18em] text-white/70">
+                    {selectedVenueHeroPhoto ? "Building" : "Needs Photo"}
+                  </span>
+                </div>
+
+                {selectedVenueHeroPhoto ? (
+                  <>
+                    <div className="relative min-h-[280px] overflow-hidden bg-black sm:min-h-[340px] lg:min-h-[380px]">
+                      <img
+                        src={selectedVenueHeroPhoto.url}
+                        alt=""
+                        aria-hidden="true"
+                        className="absolute inset-0 h-full w-full scale-110 object-cover opacity-45 blur-2xl"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-br from-black/60 via-black/30 to-black/80" />
+                      <div className="absolute inset-x-0 top-0 z-10 h-24 bg-gradient-to-b from-black/55 to-transparent" />
+                      <div className="absolute inset-x-0 bottom-0 z-10 h-40 bg-gradient-to-t from-black/90 via-black/45 to-transparent" />
+
+                      <div className="relative z-10 flex min-h-[280px] items-center justify-center p-3 sm:min-h-[340px] sm:p-4 lg:min-h-[380px]">
+                        <img
+                          src={selectedVenueHeroPhoto.url}
+                          alt={`${selected.name} building exterior`}
+                          className="max-h-[250px] w-full rounded-[1.6rem] border border-white/10 object-contain shadow-2xl shadow-black/50 sm:max-h-[305px] lg:max-h-[345px]"
+                        />
+                      </div>
+
+                      <div className="absolute bottom-4 left-4 right-4 z-20 flex items-end justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-2xl font-black text-white drop-shadow sm:text-3xl">
+                            {selected.name}
+                          </p>
+                          <p className="mt-1 truncate text-xs font-semibold text-white/75">
+                            {selected.address || selected.city || "Venue exterior"}
+                          </p>
+                        </div>
+                        <span className="shrink-0 rounded-full border border-white/10 bg-black/65 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-white/80 shadow-lg backdrop-blur-xl">
+                          Venue
+                        </span>
+                      </div>
+                    </div>
+
+                    {selectedOfficialVenuePhotos.length > 1 && (
+                      <div className="no-scrollbar flex gap-2 overflow-x-auto p-3">
+                        {selectedOfficialVenuePhotos.slice(1).map((item) => (
+                          <div
+                            key={item.id}
+                            className="relative h-20 min-w-[112px] overflow-hidden rounded-2xl border border-white/10 bg-black/40"
+                          >
+                            <img
+                              src={item.url}
+                              alt={`${selected.name} venue building`}
+                              className="h-full w-full object-cover"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="p-4">
+                    <div className="flex min-h-[190px] flex-col items-center justify-center rounded-[1.75rem] border border-dashed border-white/15 bg-gradient-to-br from-white/[0.08] to-white/[0.025] p-5 text-center">
+                      <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10 text-2xl">
+                        🏢
+                      </div>
+                      <p className="text-base font-black text-white">
+                        Add this venue’s building photo
+                      </p>
+                      <p className="mt-2 max-w-sm text-xs leading-5 text-white/50">
+                        Add a Supabase `photo_url` for this venue. This should be an exterior/entrance shot like Google Maps, not a user-uploaded crowd picture.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {selectedUpdateMedia.length > 0 && (
+                <div className="mb-4 overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.045] p-4 shadow-xl shadow-black/20">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-[0.26em] text-white/45">
+                        Live Crowd Media
+                      </p>
+                      <p className="mt-1 text-xs font-semibold text-white/55">
+                        Recent user uploads from this spot
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setSuggestionOpen(true);
+                        setSuggestionType("Crowd/vibe");
+                        setSuggestionStatus(null);
+                        setSuggestionFeedback("");
+                      }}
+                      className="shrink-0 rounded-full border border-white/10 bg-white/10 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.18em] text-white transition hover:bg-white/15"
+                    >
+                      Add Photo
+                    </button>
+                  </div>
+                  <div className="no-scrollbar flex gap-2 overflow-x-auto">
+                    {selectedUpdateMedia.map((item) => (
+                      <div
+                        key={item.id}
+                        className="relative h-24 min-w-[132px] overflow-hidden rounded-2xl border border-white/10 bg-black/40"
+                      >
+                        {item.type === "video" ? (
+                          <>
+                            <video
+                              src={item.url}
+                              muted
+                              playsInline
+                              className="h-full w-full object-cover"
+                            />
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/20 text-lg">▶</div>
+                          </>
+                        ) : (
+                          <img
+                            src={item.url}
+                            alt={`${selected.name} crowd upload`}
+                            className="h-full w-full object-cover"
+                          />
+                        )}
+                        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2">
+                          <p className="truncate text-[10px] font-bold text-white/85">{item.label}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {selected.tonightEvent && (
                 <div className="mb-4 rounded-3xl border border-white/10 bg-white/5 p-4">
