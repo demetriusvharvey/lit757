@@ -8,6 +8,7 @@ export type Venue = {
   lat: number;
   lng: number;
   type?: string | null;
+  category?: string | null;
   music_genre?: string | null;
   age_limit?: string | null;
   cover?: string | null;

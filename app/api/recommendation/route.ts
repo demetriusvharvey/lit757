@@ -27,13 +27,16 @@ function getStatus(score: number, voteCount: number) {
   return "dead";
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   if (!process.env.OPENAI_API_KEY) {
     return NextResponse.json(
       { recommendation: "OpenAI key is not configured.", venueName: "" },
       { status: 500 }
     );
   }
+
+  const { searchParams } = new URL(request.url);
+  const preference = searchParams.get("preference");
 
   const { data: venuesData, error: venuesError } = await supabase
     .from("venues")
@@ -125,7 +128,7 @@ export async function GET() {
 
   const topVenue = sortedVenues[0];
 
-  const prompt = `You are a local nightlife friend. Pick the single best spot from these live signals and recommend it in 1-2 short casual sentences. Mention the venue and why. Keep it direct and friendly. If the data feels weak, say that clearly and suggest the safest choice.
+  const prompt = `You are a local nightlife friend. Pick the single best spot from these live signals and recommend it in 1-2 short casual sentences. Mention the venue and why. Keep it direct and friendly. If the data feels weak, say that clearly and suggest the safest choice.${preference ? ` Bias toward spots that match this preference: ${preference}.` : ""}
 
 Venue signals:
 ${venues
