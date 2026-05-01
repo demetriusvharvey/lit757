@@ -36,9 +36,9 @@ const MAPBOX_STYLES: Record<MapMode, string> = {
 };
 
 function getInitialMapMode(): MapMode {
-  if (typeof window === "undefined") return "night";
-  const hour = new Date().getHours();
-  return hour >= 7 && hour < 19 ? "day" : "night";
+  // Keep the first server render and first client render identical.
+  // Browser-only values like time/localStorage can cause hydration mismatches.
+  return "night";
 }
 
 const VIBE_SCORE: Record<Vibe, number> = {
@@ -1760,9 +1760,10 @@ export default function Home() {
     ? "border-yellow-300/20 bg-yellow-400/10 shadow-[0_0_30px_rgba(245,179,1,0.22)]"
     : "border-slate-400/20 bg-slate-500/10 shadow-[0_0_30px_rgba(148,163,184,0.22)]";
   const selectedEnergyGlowClass = energyGlow(selected?.energyLevel);
+  const isDay = mapMode === "day";
 
   return (
-    <main className={`relative h-screen w-screen overflow-hidden text-white ${mapMode === "day" ? "bg-slate-100" : "bg-black"}`}>
+    <main className={`relative h-screen w-screen overflow-hidden ${isDay ? "bg-slate-100 text-slate-950" : "bg-black text-white"}`}>
       <style jsx global>{`
         @keyframes litPulse {
           0% {
@@ -1891,18 +1892,18 @@ export default function Home() {
 
       <div className="absolute inset-x-0 top-2 z-20 px-3 sm:left-3 sm:right-3 sm:px-0">
         <div className={`rounded-2xl border p-2 sm:p-3 shadow-2xl backdrop-blur-2xl ${
-          mapMode === "day"
-            ? "border-white/70 bg-white/85 text-slate-950 shadow-slate-900/10"
+          isDay
+            ? "border-white/70 bg-white/90 text-slate-950 shadow-slate-900/10"
             : "border-white/10 bg-black/75 text-white"
         }`}>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-[10px] font-bold uppercase tracking-wide text-red-400">
+                  <p className={`text-[10px] font-bold uppercase tracking-wide ${isDay ? "text-red-600" : "text-red-400"}`}>
                     Live in the 757
                   </p>
-                  <h1 className="text-lg font-black leading-tight tracking-tight sm:text-xl truncate">
+                  <h1 className={`text-lg font-black leading-tight tracking-tight sm:text-xl truncate ${isDay ? "text-slate-950" : "text-white"}`}>
                     {activeCount > 0
                       ? `🔥 ${activeCount} active right now`
                       : "What’s lit tonight? 🔥"}
@@ -1924,13 +1925,13 @@ export default function Home() {
                 </select>
               </div>
 
-              <div className="mt-2 flex items-center gap-2 text-xs text-white/50">
+              <div className={`mt-2 flex items-center gap-2 text-xs ${isDay ? "text-slate-600" : "text-white/50"}`}>
                 <p className="truncate">
                   {heroSpot
                     ? `Best move: ${heroSpot.name}`
                     : "Real-time nightlife map for Hampton Roads"}
                 </p>
-                <span className="shrink-0 inline-flex items-center gap-2 rounded-full border border-red-500/20 bg-red-500/10 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.22em] text-red-100 shadow-[0_0_12px_rgba(251,146,60,0.12)]">
+                <span className={`shrink-0 inline-flex items-center gap-2 rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.22em] shadow-[0_0_12px_rgba(251,146,60,0.12)] ${isDay ? "border-red-500/30 bg-red-500/10 text-red-700" : "border-red-500/20 bg-red-500/10 text-red-100"}`}>
                   <span className="h-2 w-2 rounded-full bg-red-400 live-pulse" />
                   Live
                 </span>
@@ -1943,10 +1944,14 @@ export default function Home() {
                   <button
                     key={pref}
                     onClick={() => setSelectedPreference(selectedPreference === pref ? null : pref)}
-                    className={`px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.18em] rounded-full transition ${
+                    className={`px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.18em] rounded-full border transition ${
                       selectedPreference === pref
-                        ? "bg-emerald-500/20 text-emerald-100 border border-emerald-400/30"
-                        : "bg-white/5 text-white/60 border border-white/10 hover:bg-white/10"
+                        ? isDay
+                          ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-800"
+                          : "border-emerald-400/30 bg-emerald-500/20 text-emerald-100"
+                        : isDay
+                          ? "border-slate-300/70 bg-slate-900/5 text-slate-700 hover:bg-slate-900/10"
+                          : "border-white/10 bg-white/5 text-white/60 hover:bg-white/10"
                     }`}
                   >
                     {pref}
@@ -1956,7 +1961,7 @@ export default function Home() {
               <button
                 onClick={() => fetchRecommendation()}
                 disabled={recommendationLoading}
-                className="inline-flex items-center justify-center gap-1 rounded-full border border-white/10 bg-gradient-to-r from-white/10 to-white/5 px-3 py-1.5 text-xs font-semibold text-white shadow-lg shadow-black/20 transition hover:from-white/20 hover:to-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                className={`inline-flex items-center justify-center gap-1 rounded-full border px-3 py-1.5 text-xs font-semibold shadow-lg transition disabled:cursor-not-allowed disabled:opacity-60 ${isDay ? "border-slate-300/70 bg-slate-950 text-white shadow-slate-900/10 hover:bg-slate-800" : "border-white/10 bg-gradient-to-r from-white/10 to-white/5 text-white shadow-black/20 hover:from-white/20 hover:to-white/10"}`}
               >
                 {recommendationLoading ? (
                   <>
@@ -1971,9 +1976,9 @@ export default function Home() {
           </div>
 
           {(recommendationLoading || recommendation) && (
-            <div className="mt-2 rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-xs shadow-xl shadow-black/20 backdrop-blur-xl">
+            <div className={`mt-2 rounded-2xl border px-3 py-2 text-xs shadow-xl backdrop-blur-xl ${isDay ? "border-slate-200/80 bg-white/75 text-slate-900 shadow-slate-900/10" : "border-white/10 bg-white/10 text-white shadow-black/20"}`}>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full bg-white/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.22em] text-white/75">
+                <span className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.22em] ${isDay ? "bg-slate-900/10 text-slate-700" : "bg-white/10 text-white/75"}`}>
                   AI Pick
                 </span>
                 {selectedPreference && (
@@ -1981,16 +1986,16 @@ export default function Home() {
                     {selectedPreference}
                   </span>
                 )}
-                <p className="text-[9px] uppercase tracking-[0.25em] text-white/45">
+                <p className={`text-[9px] uppercase tracking-[0.25em] ${isDay ? "text-slate-500" : "text-white/45"}`}>
                   {recommendationLoading ? "Analyzing tonight’s best move" : "Premium insight"}
                 </p>
               </div>
-              <p className="mt-1 text-xs leading-4 text-white/90">
+              <p className={`mt-1 text-xs leading-4 ${isDay ? "text-slate-700" : "text-white/90"}`}>
                 {recommendationLoading
                   ? "Crunching the latest signals for your best spot."
                   : recommendationVenue ? (
                       <>
-                        <span className="font-semibold text-white">
+                        <span className={isDay ? "font-semibold text-slate-950" : "font-semibold text-white"}>
                           {recommendationVenue}
                         </span>
                         {" — "}
@@ -2003,8 +2008,8 @@ export default function Home() {
             </div>
           )}
 
-          <div className="mt-2 flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.08] px-2 py-1.5">
-            <Search size={14} className="text-white/50" />
+          <div className={`mt-2 flex items-center gap-2 rounded-xl border px-2 py-1.5 ${isDay ? "border-slate-300/70 bg-white/80" : "border-white/10 bg-white/[0.08]"}`}>
+            <Search size={14} className={isDay ? "text-slate-500" : "text-white/50"} />
             <input
               value={query}
               onChange={(e) => {
@@ -2013,7 +2018,7 @@ export default function Home() {
                 setSheetExpanded(true);
               }}
               placeholder="Search DJ, genre, event, age..."
-              className="w-full bg-transparent text-xs outline-none placeholder:text-white/35"
+              className={`w-full bg-transparent text-xs outline-none ${isDay ? "text-slate-950 placeholder:text-slate-500" : "text-white placeholder:text-white/35"}`}
             />
           </div>
 
@@ -2029,8 +2034,12 @@ export default function Home() {
                 }}
                 className={`shrink-0 whitespace-nowrap rounded-full px-2 py-1 text-xs font-bold transition ${
                   activeChip === chip
-                    ? "bg-white text-black"
-                    : "bg-white/10 text-white/75"
+                    ? isDay
+                      ? "bg-slate-950 text-white shadow-sm"
+                      : "bg-white text-black"
+                    : isDay
+                      ? "bg-slate-900/5 text-slate-700 hover:bg-slate-900/10"
+                      : "bg-white/10 text-white/75"
                 }`}
               >
                 {chip}
@@ -2038,14 +2047,20 @@ export default function Home() {
             ))}
           </div>
 
-          <div className="mt-2 grid grid-cols-2 gap-1 rounded-xl bg-white/[0.08] p-0.5">
+          <div className={`mt-2 grid grid-cols-2 gap-1 rounded-xl p-0.5 ${isDay ? "bg-slate-200/80" : "bg-white/[0.08]"}`}>
             <button
               onClick={() => {
                 setViewMode("map");
                 setSelected(null);
               }}
-              className={`rounded-lg py-1.5 text-xs font-black ${
-                viewMode === "map" ? "bg-white text-black" : "text-white/60"
+              className={`rounded-lg py-1.5 text-xs font-black transition ${
+                viewMode === "map"
+                  ? isDay
+                    ? "bg-white text-slate-950 shadow-sm"
+                    : "bg-white text-black"
+                  : isDay
+                    ? "text-slate-600 hover:text-slate-950"
+                    : "text-white/60"
               }`}
             >
               Map
@@ -2057,8 +2072,14 @@ export default function Home() {
                 setSelected(null);
                 setSheetExpanded(true);
               }}
-              className={`rounded-lg py-1.5 text-xs font-black ${
-                viewMode === "events" ? "bg-white text-black" : "text-white/60"
+              className={`rounded-lg py-1.5 text-xs font-black transition ${
+                viewMode === "events"
+                  ? isDay
+                    ? "bg-white text-slate-950 shadow-sm"
+                    : "bg-white text-black"
+                  : isDay
+                    ? "text-slate-600 hover:text-slate-950"
+                    : "text-white/60"
               }`}
             >
               Events
