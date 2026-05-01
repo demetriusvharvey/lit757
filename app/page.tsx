@@ -57,6 +57,16 @@ type CityPulseItem = {
   created_at: string | null;
 };
 
+type ActivityToast = {
+  id: string;
+  venueId?: string | null;
+  venueName: string;
+  title: string;
+  message: string;
+  icon: string;
+  createdAt?: string | null;
+};
+
 const MAPBOX_STYLES: Record<MapMode, string> = {
   day: "mapbox://styles/mapbox/outdoors-v12",
   night: "mapbox://styles/mapbox/dark-v11",
@@ -606,6 +616,10 @@ export default function Home() {
   }>>([]);
   const [cityFeed, setCityFeed] = useState<CityPulseItem[]>([]);
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
+  const [activityToasts, setActivityToasts] = useState<ActivityToast[]>([]);
+  const activityFeedPrimedRef = useRef(false);
+  const seenActivityIdsRef = useRef<Set<string>>(new Set());
+  const toastTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     async function fetchSummary() {
@@ -1434,6 +1448,66 @@ export default function Home() {
     setRecentUpdates(data || []);
   }
 
+  function dismissActivityToast(toastId: string) {
+    setActivityToasts((current) => current.filter((toast) => toast.id !== toastId));
+  }
+
+  function showActivityToast(item: CityPulseItem | ActivityToast) {
+    const venueName = "venueName" in item
+      ? item.venueName
+      : item.venue_name || "a spot nearby";
+    const updateType = "update_type" in item ? item.update_type : null;
+    const rawMessage = item.message;
+    const icon = "icon" in item ? item.icon : updateTypeIcon(updateType || undefined);
+    const title = "title" in item
+      ? item.title
+      : `${icon} New activity at ${venueName}`;
+    const message = rawMessage?.trim()
+      ? rawMessage.trim()
+      : updateType
+      ? `${updateType} just came in.`
+      : "The city just updated this spot.";
+
+    const nextToast: ActivityToast = {
+      id: item.id,
+      venueId: "venueId" in item ? item.venueId : item.venue_id,
+      venueName,
+      title,
+      message,
+      icon,
+      createdAt: "createdAt" in item ? item.createdAt : item.created_at,
+    };
+
+    setActivityToasts((current) => {
+      const withoutDuplicate = current.filter((toast) => toast.id !== nextToast.id);
+      return [nextToast, ...withoutDuplicate].slice(0, 3);
+    });
+
+    window.setTimeout(() => {
+      dismissActivityToast(nextToast.id);
+    }, 6500);
+  }
+
+  function openToastVenue(toast: ActivityToast) {
+    const venue = venues.find((item) => item.id === toast.venueId || item.name === toast.venueName);
+
+    if (venue) {
+      setSelected(venue);
+      setSheetExpanded(true);
+      setViewMode("map");
+
+      if (map && venue.lng && venue.lat) {
+        map.flyTo({
+          center: [venue.lng, venue.lat],
+          zoom: Math.max(map.getZoom(), 14),
+          duration: 850,
+        });
+      }
+    }
+
+    dismissActivityToast(toast.id);
+  }
+
   async function loadCityFeed() {
     const { data, error } = await supabase
       .from("suggested_updates")
@@ -1446,7 +1520,22 @@ export default function Home() {
       return;
     }
 
-    setCityFeed(data || []);
+    const nextFeed = data || [];
+
+    if (!activityFeedPrimedRef.current) {
+      nextFeed.forEach((item) => seenActivityIdsRef.current.add(item.id));
+      activityFeedPrimedRef.current = true;
+    } else {
+      const newItems = nextFeed.filter((item) => !seenActivityIdsRef.current.has(item.id));
+
+      if (newItems.length > 0) {
+        showActivityToast(newItems[0]);
+      }
+
+      nextFeed.forEach((item) => seenActivityIdsRef.current.add(item.id));
+    }
+
+    setCityFeed(nextFeed);
   }
 
   useEffect(() => {
@@ -1457,6 +1546,14 @@ export default function Home() {
     }, 15000);
 
     return () => window.clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current) {
+        window.clearTimeout(toastTimeoutRef.current);
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -1627,6 +1724,16 @@ export default function Home() {
         : prev
     );
 
+    showActivityToast({
+      id: `vote-${selected.id}-${Date.now()}`,
+      venueId: selected.id,
+      venueName: selected.name,
+      title: vibe === "lit" ? `🔥 ${selected.name} just got a Lit vote` : vibe === "dead" ? `🧊 ${selected.name} got a Dead vote` : `👍 ${selected.name} got a vibe check`,
+      message: vibe === "lit" ? "Someone nearby says this spot is lit right now." : vibe === "dead" ? "Someone nearby says the energy is low right now." : "Someone nearby says this spot is decent right now.",
+      icon: vibe === "lit" ? "🔥" : vibe === "dead" ? "🧊" : "👍",
+      createdAt: new Date().toISOString(),
+    });
+
     if ("vibrate" in navigator) navigator.vibrate(40);
   }
 
@@ -1700,6 +1807,16 @@ export default function Home() {
             }
           : prev
       );
+
+      showActivityToast({
+        id: `update-${selected.id}-${Date.now()}`,
+        venueId: selected.id,
+        venueName: selected.name,
+        title: `${updateTypeIcon(suggestionType)} New update at ${selected.name}`,
+        message: suggestionMessage.trim() || `${suggestionType} just came in.`,
+        icon: updateTypeIcon(suggestionType),
+        createdAt: new Date().toISOString(),
+      });
 
       setSuggestionStatus("success");
       setSuggestionFeedback("Update sent — thanks for helping the city.");
@@ -2545,6 +2662,44 @@ export default function Home() {
           }
         }
 
+        @keyframes premiumToastIn {
+          from {
+            opacity: 0;
+            transform: translateX(18px) translateY(-8px) scale(0.96);
+            filter: blur(8px);
+          }
+          to {
+            opacity: 1;
+            transform: translateX(0) translateY(0) scale(1);
+            filter: blur(0);
+          }
+        }
+
+        @keyframes premiumToastShine {
+          0% { transform: translateX(-120%); opacity: 0; }
+          25% { opacity: 0.75; }
+          100% { transform: translateX(140%); opacity: 0; }
+        }
+
+        @keyframes premiumToastProgress {
+          from { transform: scaleX(1); }
+          to { transform: scaleX(0); }
+        }
+
+        .premium-toast {
+          animation: premiumToastIn 0.38s cubic-bezier(0.16, 1, 0.3, 1) both;
+        }
+
+        .premium-toast-shine {
+          animation: premiumToastShine 2.8s ease-in-out infinite;
+        }
+
+        .premium-toast-progress {
+          transform-origin: left center;
+          animation: premiumToastProgress 6.5s linear forwards;
+        }
+
+
         .no-scrollbar::-webkit-scrollbar {
           display: none;
         }
@@ -2561,6 +2716,111 @@ export default function Home() {
       `}</style>
 
       <div ref={mapContainerRef} className="absolute inset-0 h-full w-full" />
+
+      {activityToasts.length > 0 && (
+        <div className="pointer-events-none fixed right-3 top-[188px] z-[60] flex w-[calc(100vw-1.5rem)] max-w-sm flex-col gap-2 sm:right-5 sm:top-[196px]">
+          {activityToasts.map((toast, index) => (
+            <button
+              key={toast.id}
+              type="button"
+              onClick={() => openToastVenue(toast)}
+              className={`premium-toast pointer-events-auto group relative w-full overflow-hidden rounded-[1.35rem] border text-left backdrop-blur-2xl cursor-pointer transition-all duration-300 hover:-translate-y-0.5 hover:scale-[1.015] active:scale-[0.985] ${
+                isDay
+                  ? "border-white/80 bg-white/90 text-slate-950 shadow-[0_24px_70px_rgba(15,23,42,0.22)]"
+                  : "border-white/15 bg-[linear-gradient(135deg,rgba(12,12,18,0.94),rgba(28,14,10,0.88),rgba(8,8,12,0.92))] text-white shadow-[0_24px_80px_rgba(251,113,33,0.22)]"
+              } ${index > 0 ? "opacity-90" : ""} ${index > 1 ? "opacity-80" : ""}`}
+              style={{
+                transform: `translateY(${index * 3}px) scale(${index === 0 ? 1 : index === 1 ? 0.982 : 0.965})`,
+                animationDelay: `${index * 70}ms`,
+              }}
+            >
+              <div className="absolute inset-0 opacity-80">
+                <div className={`absolute -left-16 top-0 h-full w-20 rotate-12 premium-toast-shine ${isDay ? "bg-white/55" : "bg-white/15"}`} />
+                <div className={`absolute inset-x-0 top-0 h-px ${isDay ? "bg-gradient-to-r from-transparent via-slate-300 to-transparent" : "bg-gradient-to-r from-transparent via-white/35 to-transparent"}`} />
+              </div>
+
+              <div className="h-1 w-full overflow-hidden bg-black/10">
+                <div className="premium-toast-progress h-full w-full bg-gradient-to-r from-amber-400 via-orange-500 via-rose-500 to-fuchsia-500" />
+              </div>
+
+              <div className="relative flex items-start gap-3 p-3.5">
+                <div className={`relative flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-xl ring-1 ${
+                  isDay
+                    ? "bg-gradient-to-br from-orange-100 via-rose-50 to-fuchsia-100 ring-orange-200 shadow-[0_10px_24px_rgba(251,146,60,0.22)]"
+                    : "bg-gradient-to-br from-orange-500/30 via-rose-500/20 to-fuchsia-500/25 ring-white/15 shadow-[0_0_32px_rgba(251,146,60,0.28)]"
+                }`}>
+                  <span className="absolute inset-0 rounded-2xl bg-gradient-to-br from-white/35 to-transparent opacity-60" />
+                  <span className="relative drop-shadow-sm">{toast.icon}</span>
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.2em] ${
+                        isDay
+                          ? "bg-orange-100 text-orange-700 ring-1 ring-orange-200"
+                          : "bg-orange-500/15 text-orange-100 ring-1 ring-orange-400/20"
+                      }`}
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full bg-orange-500 live-pulse" />
+                      Live
+                    </span>
+
+                    <span
+                      className={`rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-[0.18em] ${
+                        isDay
+                          ? "bg-slate-100 text-slate-500 ring-1 ring-slate-200"
+                          : "bg-white/10 text-white/55 ring-1 ring-white/10"
+                      }`}
+                    >
+                      {toast.createdAt ? minutesAgo(toast.createdAt).replace("Updated ", "") : "now"}
+                    </span>
+
+                    {index === 0 && activityToasts.length > 1 && (
+                      <span
+                        className={`rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-[0.18em] ${
+                          isDay
+                            ? "bg-fuchsia-100 text-fuchsia-700 ring-1 ring-fuchsia-200"
+                            : "bg-fuchsia-500/15 text-fuchsia-100 ring-1 ring-fuchsia-400/20"
+                        }`}
+                      >
+                        +{activityToasts.length - 1} more
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="mt-2 line-clamp-1 text-[15px] font-black leading-tight tracking-tight">
+                    {toast.title}
+                  </p>
+                  <p className={`mt-1 line-clamp-2 text-[12px] leading-snug ${isDay ? "text-slate-600" : "text-white/68"}`}>
+                    {toast.message}
+                  </p>
+
+                  <div className={`mt-3 flex items-center justify-between gap-3 text-[10px] font-black uppercase tracking-[0.18em] ${isDay ? "text-slate-500" : "text-white/42"}`}>
+                    <span>Tap to open spot</span>
+                    <span className="transition-transform duration-300 group-hover:translate-x-0.5">→</span>
+                  </div>
+                </div>
+
+                <span
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    dismissActivityToast(toast.id);
+                  }}
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition ${
+                    isDay
+                      ? "bg-slate-950/5 text-slate-500 hover:bg-slate-950/10 hover:text-slate-950"
+                      : "bg-white/10 text-white/55 hover:bg-white/15 hover:text-white"
+                  }`}
+                  aria-label="Close live activity alert"
+                >
+                  <X size={14} />
+                </span>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="absolute inset-x-0 top-2 z-20 px-3 sm:left-3 sm:right-3 sm:px-0">
         <div className={`rounded-2xl border p-2 sm:p-3 shadow-2xl backdrop-blur-2xl ${
