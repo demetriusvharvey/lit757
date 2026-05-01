@@ -174,10 +174,10 @@ function updateMarkerElement(el: HTMLElement, venue: VenueWithEvent, zoom: numbe
   const trending = (venue.trendingScore || 0);
   const hasRecentVotes = (venue.lastUpdated && Date.now() - new Date(venue.lastUpdated).getTime() <= 30 * 60 * 1000);
   const active = signals > 0 || trending > 2 || venue.status === "lit";
-
+  
   let shouldShow = true;
   let displaySize = 0;
-
+  
   if (zoom < 10) {
     shouldShow = active;
     displaySize = active ? Math.max(10, Math.round(16 * 0.65)) : 4;
@@ -190,11 +190,11 @@ function updateMarkerElement(el: HTMLElement, venue: VenueWithEvent, zoom: numbe
       ? signals === 0 ? 16 : signals <= 2 ? 24 : signals <= 5 ? 32 : 40
       : 12;
   }
-
+  
   el.style.display = shouldShow ? "block" : "none";
   el.style.width = `${displaySize}px`;
   el.style.height = `${displaySize}px`;
-
+  
   const isVeryZoomedOut = zoom <= 9;
   el.style.opacity = active
     ? "1"
@@ -212,7 +212,7 @@ function updateMarkerElement(el: HTMLElement, venue: VenueWithEvent, zoom: numbe
   core.style.border = active ? "2px solid white" : zoom < 12 ? "none" : "1px solid rgba(255,255,255,0.2)";
   core.style.transform = active && zoom >= 12 && venue.energyLevel === "high" ? "scale(1.08)" : "scale(1)";
   core.style.filter = active ? "none" : "brightness(0.75)";
-
+  
   const glow = active
     ? zoom <= 10
       ? "0 0 12px rgba(239,146,60,0.15)"
@@ -221,7 +221,7 @@ function updateMarkerElement(el: HTMLElement, venue: VenueWithEvent, zoom: numbe
       ? "none"
       : "0 0 8px rgba(148,163,184,0.1)";
   core.style.boxShadow = glow;
-
+  
   core.style.animation =
     active && venue.energyLevel === "high" && zoom >= 12
       ? "litPulse 1.6s ease-in-out infinite"
@@ -345,6 +345,9 @@ export default function Home() {
   const [recommendationLoading, setRecommendationLoading] = useState(false);
   const [recommendationQuestion, setRecommendationQuestion] = useState("");
   const [recognitionActive, setRecognitionActive] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState<"idle" | "listening" | "thinking" | "speaking">("idle");
+  const [voiceBubbleOpen, setVoiceBubbleOpen] = useState(false);
+  const [voiceTranscript, setVoiceTranscript] = useState("");
   const [askModalOpen, setAskModalOpen] = useState(false);
   const [askText, setAskText] = useState("");
   const [recognitionError, setRecognitionError] = useState<string | null>(null);
@@ -429,11 +432,19 @@ export default function Home() {
   }
 
   function speakRecommendation(text: string) {
-    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    if (typeof window === "undefined" || !window.speechSynthesis || !text) {
+      setVoiceStatus("idle");
+      return;
+    }
+
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = "en-US";
     utterance.rate = 1;
     utterance.pitch = 1;
+    utterance.onstart = () => setVoiceStatus("speaking");
+    utterance.onend = () => setVoiceStatus("idle");
+    utterance.onerror = () => setVoiceStatus("idle");
+
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utterance);
   }
@@ -441,12 +452,15 @@ export default function Home() {
   async function handleAskVoice() {
     setRecognitionError(null);
     setAskText("");
+    setVoiceTranscript("");
+    setVoiceBubbleOpen(true);
 
     const SpeechRecognition =
       (window as any).SpeechRecognition ||
       (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
+      setVoiceStatus("idle");
       setAskModalOpen(true);
       return;
     }
@@ -459,6 +473,7 @@ export default function Home() {
 
     recognition.onstart = () => {
       setRecognitionActive(true);
+      setVoiceStatus("listening");
       setRecommendation("Listening for your question...");
       setRecommendationVenue("");
     };
@@ -468,13 +483,19 @@ export default function Home() {
       if (!transcript) {
         setRecognitionError("Could not hear that clearly. Try typing instead.");
         setRecognitionActive(false);
+        setVoiceStatus("idle");
         return;
       }
+
+      setVoiceTranscript(transcript);
+      setVoiceStatus("thinking");
 
       try {
         const responseText = await fetchRecommendation(transcript);
         if (responseText) {
           speakRecommendation(responseText);
+        } else {
+          setVoiceStatus("idle");
         }
       } finally {
         setRecognitionActive(false);
@@ -485,22 +506,32 @@ export default function Home() {
       console.error("Speech recognition error:", event.error);
       setRecognitionError("Speech recognition failed. Try typing your question.");
       setRecognitionActive(false);
+      setVoiceStatus("idle");
       setAskModalOpen(true);
     };
 
     recognition.onend = () => {
       setRecognitionActive(false);
+      setVoiceStatus((current) => (current === "listening" ? "idle" : current));
     };
 
     recognition.start();
   }
 
   async function handleAskTextSubmit() {
-    if (!askText.trim()) return;
+    const question = askText.trim();
+    if (!question) return;
+
     setAskModalOpen(false);
-    const responseText = await fetchRecommendation(askText.trim());
+    setVoiceBubbleOpen(true);
+    setVoiceTranscript(question);
+    setVoiceStatus("thinking");
+
+    const responseText = await fetchRecommendation(question);
     if (responseText) {
       speakRecommendation(responseText);
+    } else {
+      setVoiceStatus("idle");
     }
   }
 
@@ -635,12 +666,12 @@ export default function Home() {
         const momentumLabel = recentPositiveVote || recentPositiveUpdate
           ? "📈 gaining fast"
           : score >= 6
-            ? "🔥 heating up"
-            : hasLineUpdate
-              ? "🚶 line building"
-              : !hasSignals
-                ? "😴 quiet night"
-                : "🔥 heating up";
+          ? "🔥 heating up"
+          : hasLineUpdate
+          ? "🚶 line building"
+          : !hasSignals
+          ? "😴 quiet night"
+          : "🔥 heating up";
 
         const tonightEvent =
           eventsData?.find((event) => event.venue_id === venue.id) || null;
@@ -669,8 +700,8 @@ export default function Home() {
             voteCount + updateCount >= 5
               ? "high"
               : voteCount + updateCount >= 2
-                ? "medium"
-                : "low",
+              ? "medium"
+              : "low",
           status,
           energyLevel,
           lastUpdated:
@@ -731,7 +762,7 @@ export default function Home() {
       container: mapContainerRef.current,
       style: "mapbox://styles/mapbox/dark-v11",
       center: [-76.2859, 36.8508],
-      zoom: 10,
+      zoom: 10.8,
     });
 
     newMap.on("load", () => {
@@ -860,13 +891,13 @@ export default function Home() {
               ["linear"],
               ["zoom"],
               8,
-              ["case", activeExpression, 10, 0],
+              ["case", activeExpression, 10, 3],
               10,
-              ["case", activeExpression, 15, 0],
+              ["case", activeExpression, 15, 5],
               12,
-              ["case", activeExpression, 22, 5],
+              ["case", activeExpression, 22, 7],
               15,
-              ["case", activeExpression, 32, 8],
+              ["case", activeExpression, 32, 10],
             ],
             "circle-color": [
               "match",
@@ -885,13 +916,13 @@ export default function Home() {
               ["linear"],
               ["zoom"],
               8,
-              ["case", activeExpression, 0.28, 0],
+              ["case", activeExpression, 0.28, 0.05],
               10,
-              ["case", activeExpression, 0.38, 0],
+              ["case", activeExpression, 0.38, 0.1],
               12,
-              ["case", activeExpression, 0.48, 0.08],
+              ["case", activeExpression, 0.48, 0.14],
               15,
-              ["case", activeExpression, 0.58, 0.14],
+              ["case", activeExpression, 0.58, 0.18],
             ],
           },
         });
@@ -908,11 +939,11 @@ export default function Home() {
               ["linear"],
               ["zoom"],
               8,
-              ["case", activeExpression, 4, 0],
+              ["case", activeExpression, 4, 2.2],
               10,
-              ["case", activeExpression, 6, 0],
+              ["case", activeExpression, 6, 3.2],
               12,
-              ["case", activeExpression, 8, 2.5],
+              ["case", activeExpression, 8, 4.2],
               15,
               [
                 "case",
@@ -937,13 +968,13 @@ export default function Home() {
               ["linear"],
               ["zoom"],
               8,
-              ["case", activeExpression, 1, 0],
+              ["case", activeExpression, 1, 0.25],
               10,
-              ["case", activeExpression, 1, 0.06],
+              ["case", activeExpression, 1, 0.42],
               12,
-              ["case", activeExpression, 1, 0.35],
+              ["case", activeExpression, 1, 0.55],
               15,
-              ["case", activeExpression, 1, 0.68],
+              ["case", activeExpression, 1, 0.72],
             ],
             "circle-stroke-color": "#ffffff",
             "circle-stroke-width": [
@@ -951,11 +982,11 @@ export default function Home() {
               ["linear"],
               ["zoom"],
               8,
-              ["case", activeExpression, 1, 0],
+              ["case", activeExpression, 1, 0.35],
               12,
-              ["case", activeExpression, 2, 0.5],
+              ["case", activeExpression, 2, 0.6],
               15,
-              ["case", activeExpression, 2.5, 0.75],
+              ["case", activeExpression, 2.5, 0.85],
             ],
             "circle-stroke-opacity": ["case", activeExpression, 0.9, 0.25],
           },
@@ -986,6 +1017,12 @@ export default function Home() {
       newMap.on("mouseleave", "venue-pins-core", () => {
         newMap.getCanvas().style.cursor = "";
       });
+
+      const pointSource = newMap.getSource("venue-points") as mapboxgl.GeoJSONSource | null;
+      pointSource?.setData(buildVenuePointsGeoJSON(filteredVenuesRef.current));
+
+      const heatSource = newMap.getSource("venue-heat") as mapboxgl.GeoJSONSource | null;
+      heatSource?.setData(buildVenueHeatmapGeoJSON(filteredVenuesRef.current) as GeoJSON.FeatureCollection);
 
       const layerExists = !!newMap.getLayer("venue-heat-layer");
       console.log("heatmap load: layer exists", layerExists, "firstSymbol", firstSymbol);
@@ -1230,10 +1267,10 @@ export default function Home() {
     setSelected((prev) =>
       prev
         ? {
-          ...prev,
-          lastUpdated: new Date().toISOString(),
-          voteCount: (prev.voteCount || 0) + 1,
-        }
+            ...prev,
+            lastUpdated: new Date().toISOString(),
+            voteCount: (prev.voteCount || 0) + 1,
+          }
         : prev
     );
 
@@ -1305,9 +1342,9 @@ export default function Home() {
       setSelected((prev) =>
         prev
           ? {
-            ...prev,
-            updateCount: (prev.updateCount || 0) + 1,
-          }
+              ...prev,
+              updateCount: (prev.updateCount || 0) + 1,
+            }
           : prev
       );
 
@@ -1417,8 +1454,8 @@ export default function Home() {
   const vibeGlowClass = selected?.status === "lit"
     ? "border-red-400/20 bg-red-500/10 shadow-[0_0_30px_rgba(239,68,68,0.22)]"
     : selected?.status === "decent"
-      ? "border-yellow-300/20 bg-yellow-400/10 shadow-[0_0_30px_rgba(245,179,1,0.22)]"
-      : "border-slate-400/20 bg-slate-500/10 shadow-[0_0_30px_rgba(148,163,184,0.22)]";
+    ? "border-yellow-300/20 bg-yellow-400/10 shadow-[0_0_30px_rgba(245,179,1,0.22)]"
+    : "border-slate-400/20 bg-slate-500/10 shadow-[0_0_30px_rgba(148,163,184,0.22)]";
   const selectedEnergyGlowClass = energyGlow(selected?.energyLevel);
 
   return (
@@ -1599,10 +1636,11 @@ export default function Home() {
                   <button
                     key={pref}
                     onClick={() => setSelectedPreference(selectedPreference === pref ? null : pref)}
-                    className={`px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.18em] rounded-full transition ${selectedPreference === pref
+                    className={`px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.18em] rounded-full transition ${
+                      selectedPreference === pref
                         ? "bg-emerald-500/20 text-emerald-100 border border-emerald-400/30"
                         : "bg-white/5 text-white/60 border border-white/10 hover:bg-white/10"
-                      }`}
+                    }`}
                   >
                     {pref}
                   </button>
@@ -1644,16 +1682,16 @@ export default function Home() {
                 {recommendationLoading
                   ? "Crunching the latest signals for your best spot."
                   : recommendationVenue ? (
-                    <>
-                      <span className="font-semibold text-white">
-                        {recommendationVenue}
-                      </span>
-                      {" — "}
-                      {recommendation}
-                    </>
-                  ) : (
-                    recommendation
-                  )}
+                      <>
+                        <span className="font-semibold text-white">
+                          {recommendationVenue}
+                        </span>
+                        {" — "}
+                        {recommendation}
+                      </>
+                    ) : (
+                      recommendation
+                    )}
               </p>
             </div>
           )}
@@ -1682,10 +1720,11 @@ export default function Home() {
                   setSheetExpanded(true);
                   if (chip === "Events") setViewMode("events");
                 }}
-                className={`shrink-0 whitespace-nowrap rounded-full px-2 py-1 text-xs font-bold transition ${activeChip === chip
+                className={`shrink-0 whitespace-nowrap rounded-full px-2 py-1 text-xs font-bold transition ${
+                  activeChip === chip
                     ? "bg-white text-black"
                     : "bg-white/10 text-white/75"
-                  }`}
+                }`}
               >
                 {chip}
               </button>
@@ -1698,8 +1737,9 @@ export default function Home() {
                 setViewMode("map");
                 setSelected(null);
               }}
-              className={`rounded-lg py-1.5 text-xs font-black ${viewMode === "map" ? "bg-white text-black" : "text-white/60"
-                }`}
+              className={`rounded-lg py-1.5 text-xs font-black ${
+                viewMode === "map" ? "bg-white text-black" : "text-white/60"
+              }`}
             >
               Map
             </button>
@@ -1710,8 +1750,9 @@ export default function Home() {
                 setSelected(null);
                 setSheetExpanded(true);
               }}
-              className={`rounded-lg py-1.5 text-xs font-black ${viewMode === "events" ? "bg-white text-black" : "text-white/60"
-                }`}
+              className={`rounded-lg py-1.5 text-xs font-black ${
+                viewMode === "events" ? "bg-white text-black" : "text-white/60"
+              }`}
             >
               Events
             </button>
@@ -1723,6 +1764,13 @@ export default function Home() {
         <button
           onClick={() => {
             if (!map) return;
+
+            if (userLocationMarkerRef.current) {
+              userLocationMarkerRef.current.remove();
+              userLocationMarkerRef.current = null;
+              return;
+            }
+
             if (!navigator.geolocation) {
               console.error("Geolocation unavailable");
               map.flyTo({ center: [-76.2859, 36.8508], zoom: 10 });
@@ -1738,6 +1786,9 @@ export default function Home() {
 
                 const markerEl = document.createElement("div");
                 markerEl.className = "user-location-marker";
+                markerEl.style.pointerEvents = "none";
+                markerEl.style.width = "42px";
+                markerEl.style.height = "42px";
 
                 const label = document.createElement("div");
                 label.className = "user-location-label";
@@ -1789,10 +1840,11 @@ export default function Home() {
               );
             }
           }}
-          className={`flex min-w-[88px] items-center justify-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold transition ${heatmapEnabled
+          className={`flex min-w-[88px] items-center justify-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold transition ${
+            heatmapEnabled
               ? "border-orange-400 bg-orange-500/15 text-orange-100"
               : "border-white/10 bg-white/5 text-white/65"
-            }`}
+          }`}
           aria-pressed={heatmapEnabled}
         >
           <span>Heat</span>
@@ -1803,11 +1855,70 @@ export default function Home() {
 
         <button
           onClick={handleAskVoice}
-          className="flex h-11 min-w-[88px] items-center justify-center rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/10"
+          className={`flex h-11 min-w-[88px] items-center justify-center rounded-full border px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/10 ${
+            voiceStatus !== "idle"
+              ? "border-emerald-300/40 bg-emerald-500/15 shadow-[0_0_24px_rgba(16,185,129,0.18)]"
+              : "border-white/10 bg-white/5"
+          }`}
           aria-label="Ask voice concierge"
         >
-          🎙️ Ask
+          {voiceStatus === "listening"
+            ? "🎙️ Listening"
+            : voiceStatus === "thinking"
+            ? "✨ Thinking"
+            : voiceStatus === "speaking"
+            ? "🔊 Speaking"
+            : "🎙️ Ask"}
         </button>
+
+        {voiceBubbleOpen && (
+          <div className="w-64 rounded-3xl border border-white/10 bg-black/80 p-3 text-left shadow-2xl backdrop-blur-2xl">
+            <div className="mb-2 flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[9px] font-bold uppercase tracking-[0.24em] text-emerald-300/80">
+                  Lit757 Concierge
+                </p>
+                <p className="mt-1 text-xs font-black text-white">
+                  {voiceStatus === "listening"
+                    ? "Listening..."
+                    : voiceStatus === "thinking"
+                    ? "Finding your best move..."
+                    : voiceStatus === "speaking"
+                    ? "Speaking..."
+                    : "Ready"}
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setVoiceBubbleOpen(false);
+                  setVoiceStatus("idle");
+                  if (typeof window !== "undefined") window.speechSynthesis?.cancel();
+                }}
+                className="rounded-full bg-white/10 p-1.5 text-white/70 transition hover:bg-white/15"
+                aria-label="Close voice concierge"
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            {voiceTranscript && (
+              <div className="mb-2 rounded-2xl bg-white/5 p-2">
+                <p className="text-[9px] uppercase tracking-[0.2em] text-white/35">You asked</p>
+                <p className="mt-1 text-xs text-white/80">{voiceTranscript}</p>
+              </div>
+            )}
+
+            {recommendation && (
+              <div className="rounded-2xl bg-emerald-500/10 p-2 ring-1 ring-emerald-300/10">
+                <p className="text-[9px] uppercase tracking-[0.2em] text-emerald-200/60">AI says</p>
+                <p className="mt-1 text-xs leading-4 text-white/85">
+                  {recommendationVenue ? `${recommendationVenue} — ` : ""}
+                  {recommendation}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {!selected && trending.length > 0 && viewMode === "map" && (
@@ -1864,14 +1975,15 @@ export default function Home() {
         onTouchEnd={handleTouchEnd}
       >
         <div
-          className={`overflow-y-auto rounded-t-[2rem] border border-white/10 bg-zinc-950/95 p-3 shadow-[0_-18px_80px_rgba(0,0,0,0.55)] backdrop-blur-3xl transition-all duration-300 select-none ${selected
+          className={`overflow-y-auto rounded-t-[2rem] border border-white/10 bg-zinc-950/95 p-3 shadow-[0_-18px_80px_rgba(0,0,0,0.55)] backdrop-blur-3xl transition-all duration-300 select-none ${
+            selected
               ? sheetExpanded
                 ? "max-h-[70vh] sm:max-h-[64vh]"
                 : "max-h-[24vh] sm:max-h-[22vh]"
               : sheetExpanded
-                ? "max-h-[45vh] sm:max-h-[48vh]"
-                : "max-h-[12vh] sm:max-h-[14vh]"
-            }`}
+              ? "max-h-[45vh] sm:max-h-[48vh]"
+              : "max-h-[12vh] sm:max-h-[14vh]"
+          }`}
         >
           <button
             onClick={() => setSheetExpanded((prev) => !prev)}
@@ -1888,8 +2000,8 @@ export default function Home() {
                     {viewMode === "events"
                       ? "Events Tonight"
                       : query || activeChip !== "All"
-                        ? "Matching Spots"
-                        : "Top Spots Tonight"}
+                      ? "Matching Spots"
+                      : "Top Spots Tonight"}
                   </h2>
                   <p className="text-xs text-white/45">
                     {viewMode === "events"
@@ -1989,10 +2101,12 @@ export default function Home() {
                         <p className="text-sm font-bold">{venue.name}</p>
                         <p className="text-xs text-white/40">
                           {venue.tonightEvent
-                            ? `${venue.tonightEvent.title} • ${venue.tonightEvent.genre || "Mixed"
-                            }`
-                            : `${venue.music_genre || "Mixed"} • ${venue.age_limit || "21+"
-                            }`}
+                            ? `${venue.tonightEvent.title} • ${
+                                venue.tonightEvent.genre || "Mixed"
+                              }`
+                            : `${venue.music_genre || "Mixed"} • ${
+                                venue.age_limit || "21+"
+                              }`}
                         </p>
                         <p className="mt-1 text-[10px] text-white/50">
                           {venue.momentumLabel}
@@ -2105,10 +2219,11 @@ export default function Home() {
 
               {suggestionStatus && suggestionFeedback && (
                 <div
-                  className={`mb-3 rounded-3xl border px-3 py-2 text-sm ${suggestionStatus === "success"
+                  className={`mb-3 rounded-3xl border px-3 py-2 text-sm ${
+                    suggestionStatus === "success"
                       ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-100"
                       : "border-rose-400/20 bg-rose-500/10 text-rose-100"
-                    }`}
+                  }`}
                 >
                   {suggestionFeedback}
                 </div>
@@ -2116,10 +2231,11 @@ export default function Home() {
 
               {eventStatus && eventFeedback && (
                 <div
-                  className={`mb-3 rounded-3xl border px-3 py-2 text-sm ${eventStatus === "success"
+                  className={`mb-3 rounded-3xl border px-3 py-2 text-sm ${
+                    eventStatus === "success"
                       ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-100"
                       : "border-rose-400/20 bg-rose-500/10 text-rose-100"
-                    }`}
+                  }`}
                 >
                   {eventFeedback}
                 </div>
@@ -2249,19 +2365,19 @@ export default function Home() {
                         </div>
 
                         {update.media_url && (
-                          <div className="mt-3">
+                          <div className="mt-3 max-h-[220px] overflow-hidden rounded-2xl border border-white/10 bg-black/40">
                             {update.media_type === "video" ? (
                               <video
                                 src={update.media_url}
                                 controls
                                 playsInline
-                                className="h-44 w-32 rounded-2xl border border-white/10 bg-black object-cover"
+                                className="h-full max-h-[220px] w-full object-cover"
                               />
                             ) : (
                               <img
                                 src={update.media_url}
                                 alt="User submitted nightlife update"
-                                className="h-44 w-32 rounded-2xl border border-white/10 object-cover"
+                                className="h-full max-h-[220px] w-full object-cover"
                               />
                             )}
                           </div>
