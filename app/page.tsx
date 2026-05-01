@@ -303,6 +303,28 @@ function buildVenueHeatmapGeoJSON(
   };
 }
 
+function getVibeIntensity(venue: VenueWithEvent | null) {
+  if (!venue) return 12;
+
+  const signalCount = (venue.voteCount || 0) + (venue.updateCount || 0);
+  const score = Math.max(0, venue.score || 0);
+  const trending = Math.max(0, venue.trendingScore || 0);
+  const raw = signalCount * 12 + score * 6 + trending * 5;
+
+  if (venue.energyLevel === "high") return Math.min(100, Math.max(72, raw));
+  if (venue.energyLevel === "medium") return Math.min(78, Math.max(44, raw));
+  if (venue.energyLevel === "negative") return Math.min(40, Math.max(18, raw));
+  return Math.min(34, Math.max(12, raw));
+}
+
+function vibeMeterLabel(venue: VenueWithEvent | null) {
+  if (!venue) return "Warming up";
+  if (venue.energyLevel === "high") return "City is moving here";
+  if (venue.energyLevel === "medium") return "Momentum building";
+  if (venue.energyLevel === "negative") return "Cold right now";
+  return "Needs more signals";
+}
+
 function buildVenuePointsGeoJSON(
   venues: VenueWithEvent[]
 ): GeoJSON.FeatureCollection<GeoJSON.Point, GeoJSON.GeoJsonProperties> {
@@ -1961,6 +1983,8 @@ export default function Home() {
     ? "border-yellow-300/20 bg-yellow-400/10 shadow-[0_0_30px_rgba(245,179,1,0.22)]"
     : "border-slate-400/20 bg-slate-500/10 shadow-[0_0_30px_rgba(148,163,184,0.22)]";
   const selectedEnergyGlowClass = energyGlow(selected?.energyLevel);
+  const selectedVibeIntensity = getVibeIntensity(selected);
+  const selectedVibeMeterLabel = vibeMeterLabel(selected);
   const isDay = mapMode === "day";
 
   return (
@@ -2848,6 +2872,62 @@ export default function Home() {
                 </div>
               )}
 
+              <div className="mb-4 overflow-hidden rounded-[2rem] border border-orange-300/20 bg-gradient-to-br from-orange-500/15 via-red-500/10 to-fuchsia-500/10 p-4 shadow-2xl shadow-orange-500/10 backdrop-blur-2xl">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.28em] text-orange-300">
+                      Tonight&apos;s Move
+                    </p>
+                    <h3 className="mt-2 text-lg font-black text-white">
+                      {selected.status === "lit"
+                        ? "Pull up now"
+                        : selected.status === "decent"
+                        ? "Worth watching"
+                        : "Check before you go"}
+                    </h3>
+                    <p className="mt-1 text-xs leading-5 text-white/65">
+                      {selected.status === "lit"
+                        ? `${selected.name} is showing the strongest live energy right now. The map signals say this is one of the better moves tonight.`
+                        : selected.status === "decent"
+                        ? `${selected.name} has some momentum, but it is not fully on fire yet. Watch the updates or ask AI before you commit.`
+                        : `${selected.name} is quiet based on the latest signals. A fresh vote or update could change this fast.`}
+                    </p>
+                  </div>
+                  <div className="shrink-0 rounded-3xl border border-white/10 bg-black/35 px-3 py-2 text-center shadow-inner shadow-white/5">
+                    <p className="text-2xl font-black text-white">{Math.round(selectedVibeIntensity)}</p>
+                    <p className="text-[9px] font-bold uppercase tracking-[0.22em] text-white/40">Vibe</p>
+                  </div>
+                </div>
+
+                <div className="mt-4">
+                  <div className="mb-2 flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.22em] text-white/45">
+                    <span>{selectedVibeMeterLabel}</span>
+                    <span>{statusLabel(selected.status)}</span>
+                  </div>
+                  <div className="h-3 overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-orange-300 via-red-400 to-fuchsia-500 shadow-[0_0_22px_rgba(249,115,22,0.45)] transition-all duration-700"
+                      style={{ width: `${selectedVibeIntensity}%` }}
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3">
+                    <p className="text-base font-black text-white">{selected.voteCount || 0}</p>
+                    <p className="mt-1 text-[9px] font-bold uppercase tracking-[0.18em] text-white/40">Votes</p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3">
+                    <p className="text-base font-black text-white">{selected.updateCount || 0}</p>
+                    <p className="mt-1 text-[9px] font-bold uppercase tracking-[0.18em] text-white/40">Updates</p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3">
+                    <p className="text-base font-black text-white">{selected.trendingScore || 0}</p>
+                    <p className="mt-1 text-[9px] font-bold uppercase tracking-[0.18em] text-white/40">Heat</p>
+                  </div>
+                </div>
+              </div>
+
               {selected.tonightEvent && (
                 <div className="mb-4 rounded-3xl border border-white/10 bg-white/5 p-4">
                   <div className="mb-2 flex items-center gap-2">
@@ -2925,19 +3005,38 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="mb-3 grid grid-cols-2 gap-2">
-                <div className={`select-none rounded-3xl border p-3 ${vibeGlowClass} ${selectedEnergyGlowClass}`}>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/45">
-                    Current Vibe
-                  </p>
-                  <p className="mt-3 text-lg font-extrabold text-white sm:text-xl">
-                    {statusLabel(selected.status)}
-                  </p>
-                  <p className="mt-2 text-[11px] text-white/50">
+              <div className="mb-3 grid gap-2 sm:grid-cols-2">
+                <div className={`select-none rounded-[2rem] border p-4 ${vibeGlowClass} ${selectedEnergyGlowClass}`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/45">
+                        Current Vibe
+                      </p>
+                      <p className="mt-3 text-2xl font-extrabold text-white sm:text-3xl">
+                        {statusLabel(selected.status)}
+                      </p>
+                    </div>
+                    <div className="flex h-16 w-16 items-center justify-center rounded-full border border-white/10 bg-black/30 text-xl shadow-inner shadow-white/5">
+                      {selected.energyLevel === "high" ? "🔥" : selected.energyLevel === "medium" ? "📈" : selected.energyLevel === "negative" ? "🧊" : "🌙"}
+                    </div>
+                  </div>
+                  <p className="mt-3 text-[11px] font-semibold text-white/65">
                     {selected.momentumLabel}
                   </p>
                   <p className="mt-1 text-[10px] uppercase tracking-[0.18em] text-white/40">
                     {energyLabel(selected.energyLevel)}
+                  </p>
+                </div>
+
+                <div className="select-none rounded-[2rem] border border-white/10 bg-white/[0.06] p-4 shadow-inner shadow-white/5">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/45">
+                    Crowd Confidence
+                  </p>
+                  <p className="mt-3 text-2xl font-extrabold text-white sm:text-3xl">
+                    {confidenceLabel(selected.confidence)}
+                  </p>
+                  <p className="mt-3 text-[11px] leading-5 text-white/50">
+                    Based on recent votes, suggested updates, event info, and last activity. More live check-ins make this smarter.
                   </p>
                 </div>
               </div>
