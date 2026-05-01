@@ -1418,6 +1418,23 @@ export default function Home() {
     touchStartY.current = null;
   }
 
+  function smoothZoom(direction: "in" | "out") {
+    if (!map) return;
+
+    const current = map.getZoom();
+    const target = direction === "in"
+      ? Math.min(16, current + 1)
+      : Math.max(8, current - 1);
+
+    map.easeTo({
+      zoom: target,
+      duration: 450,
+      easing: (t) => t * (2 - t),
+    });
+
+    setCurrentZoom(Math.round(target * 10) / 10);
+  }
+
   const topSpots = [...filteredVenues].sort(
     (a, b) => (b.score || 0) - (a.score || 0)
   );
@@ -1823,6 +1840,26 @@ export default function Home() {
         >
           <Navigation size={18} />
         </button>
+
+        <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/70 shadow-xl backdrop-blur-xl">
+          <button
+            onClick={() => smoothZoom("in")}
+            className="flex h-10 w-11 items-center justify-center border-b border-white/10 text-lg font-black text-white transition hover:bg-white/10 active:scale-95"
+            aria-label="Zoom in"
+          >
+            +
+          </button>
+          <div className="flex h-6 w-11 items-center justify-center border-b border-white/10 bg-white/5 text-[9px] font-bold text-white/50">
+            {currentZoom.toFixed(1)}
+          </div>
+          <button
+            onClick={() => smoothZoom("out")}
+            className="flex h-10 w-11 items-center justify-center text-xl font-black text-white transition hover:bg-white/10 active:scale-95"
+            aria-label="Zoom out"
+          >
+            −
+          </button>
+        </div>
 
         <button
           onClick={() => {
