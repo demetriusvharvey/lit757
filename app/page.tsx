@@ -6,7 +6,6 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import { supabase } from "../src/lib/supabase";
 import { Event, Venue, Vibe } from "../src/types";
 import {
-  MapPin,
   Navigation,
   Share2,
   X,
@@ -29,6 +28,19 @@ type VenueWithEvent = Venue & {
 };
 
 type MapMode = "day" | "night";
+
+type NavigationStep = {
+  instruction: string;
+  distance: number;
+  duration: number;
+};
+
+type ActiveNavigation = {
+  venueName: string;
+  distanceMiles: number;
+  durationMinutes: number;
+  steps: NavigationStep[];
+};
 
 const MAPBOX_STYLES: Record<MapMode, string> = {
   day: "mapbox://styles/mapbox/outdoors-v12",
@@ -351,6 +363,9 @@ export default function Home() {
   const [heatmapEnabled, setHeatmapEnabled] = useState(true);
   const [mapMode, setMapMode] = useState<MapMode>(() => getInitialMapMode());
   const [currentZoom, setCurrentZoom] = useState(10);
+  const [navigationActive, setNavigationActive] = useState<ActiveNavigation | null>(null);
+  const [navigationLoading, setNavigationLoading] = useState(false);
+  const [navigationError, setNavigationError] = useState<string | null>(null);
   const [sheetExpanded, setSheetExpanded] = useState(false);
   const [summary, setSummary] = useState("");
   const [summaryLoading, setSummaryLoading] = useState(true);
@@ -1704,6 +1719,192 @@ export default function Home() {
     window.setTimeout(restoreCustomLayers, 250);
   }
 
+  function clearInAppNavigation() {
+    if (!map) return;
+
+    if (map.getLayer("active-route-line")) map.removeLayer("active-route-line");
+    if (map.getLayer("active-route-glow")) map.removeLayer("active-route-glow");
+    if (map.getSource("active-route")) map.removeSource("active-route");
+
+    setNavigationActive(null);
+    setNavigationError(null);
+  }
+
+  function drawRouteOnMap(
+    routeGeometry: GeoJSON.LineString,
+    userLng: number,
+    userLat: number,
+    venue: VenueWithEvent
+  ) {
+    if (!map) return;
+
+    const routeData: GeoJSON.FeatureCollection<GeoJSON.LineString> = {
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          geometry: routeGeometry,
+          properties: {},
+        },
+      ],
+    };
+
+    if (map.getSource("active-route")) {
+      const source = map.getSource("active-route") as mapboxgl.GeoJSONSource;
+      source.setData(routeData);
+    } else {
+      map.addSource("active-route", {
+        type: "geojson",
+        data: routeData,
+      });
+    }
+
+    if (!map.getLayer("active-route-glow")) {
+      map.addLayer({
+        id: "active-route-glow",
+        type: "line",
+        source: "active-route",
+        layout: {
+          "line-cap": "round",
+          "line-join": "round",
+        },
+        paint: {
+          "line-color": "#fb923c",
+          "line-width": 12,
+          "line-opacity": 0.24,
+          "line-blur": 4,
+        },
+      });
+    }
+
+    if (!map.getLayer("active-route-line")) {
+      map.addLayer({
+        id: "active-route-line",
+        type: "line",
+        source: "active-route",
+        layout: {
+          "line-cap": "round",
+          "line-join": "round",
+        },
+        paint: {
+          "line-color": "#f97316",
+          "line-width": 5,
+          "line-opacity": 0.95,
+        },
+      });
+    }
+
+    userLocationMarkerRef.current?.remove();
+
+    const markerEl = document.createElement("div");
+    markerEl.className = "user-location-marker";
+    markerEl.style.pointerEvents = "none";
+    markerEl.style.width = "42px";
+    markerEl.style.height = "42px";
+
+    const label = document.createElement("div");
+    label.className = "user-location-label";
+    label.textContent = "Start";
+
+    const pulse = document.createElement("div");
+    pulse.className = "user-location-pulse";
+
+    const dot = document.createElement("div");
+    dot.className = "user-location-dot";
+
+    markerEl.appendChild(label);
+    markerEl.appendChild(pulse);
+    markerEl.appendChild(dot);
+
+    userLocationMarkerRef.current = new mapboxgl.Marker({
+      element: markerEl,
+      anchor: "center",
+    })
+      .setLngLat([userLng, userLat])
+      .addTo(map);
+
+    const bounds = new mapboxgl.LngLatBounds();
+    bounds.extend([userLng, userLat]);
+    bounds.extend([venue.lng, venue.lat]);
+
+    routeGeometry.coordinates.forEach((coord) => {
+      bounds.extend(coord as [number, number]);
+    });
+
+    map.fitBounds(bounds, {
+      padding: { top: 190, bottom: 260, left: 40, right: 80 },
+      duration: 900,
+      maxZoom: 15,
+    });
+  }
+
+  async function startInAppNavigation() {
+    if (!selected || !map) return;
+
+    setNavigationLoading(true);
+    setNavigationError(null);
+
+    try {
+      const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+      if (!token) throw new Error("Missing Mapbox token.");
+
+      if (!navigator.geolocation) {
+        throw new Error("Your browser does not support location services.");
+      }
+
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 12000,
+          maximumAge: 0,
+        });
+      });
+
+      const userLng = position.coords.longitude;
+      const userLat = position.coords.latitude;
+
+      const directionsUrl =
+        `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/` +
+        `${userLng},${userLat};${selected.lng},${selected.lat}` +
+        `?geometries=geojson&overview=full&steps=true&alternatives=false&access_token=${token}`;
+
+      const response = await fetch(directionsUrl);
+      if (!response.ok) throw new Error("Could not get directions right now.");
+
+      const data = await response.json();
+      const route = data.routes?.[0];
+      if (!route?.geometry) throw new Error("No route found for this venue.");
+
+      const steps: NavigationStep[] =
+        route.legs?.[0]?.steps?.map((step: any) => ({
+          instruction: step.maneuver?.instruction || "Continue",
+          distance: step.distance || 0,
+          duration: step.duration || 0,
+        })) || [];
+
+      drawRouteOnMap(route.geometry, userLng, userLat, selected);
+
+      setNavigationActive({
+        venueName: selected.name,
+        distanceMiles: route.distance / 1609.344,
+        durationMinutes: Math.max(1, Math.round(route.duration / 60)),
+        steps,
+      });
+
+      setSheetExpanded(false);
+      setViewMode("map");
+    } catch (error) {
+      console.error("In-app navigation error:", error);
+      setNavigationError(
+        error instanceof Error
+          ? error.message
+          : "Could not start in-app navigation. Make sure location permission is allowed."
+      );
+    } finally {
+      setNavigationLoading(false);
+    }
+  }
+
   function smoothZoom(direction: "in" | "out") {
     if (!map) return;
 
@@ -2282,6 +2483,51 @@ export default function Home() {
         )}
       </div>
 
+      {navigationActive && viewMode === "map" && (
+        <div className="absolute bottom-20 left-3 right-3 z-30 sm:bottom-24 sm:left-3 sm:right-auto sm:max-w-md">
+          <div className="overflow-hidden rounded-[2rem] border border-orange-300/20 bg-black/85 shadow-2xl shadow-orange-500/20 backdrop-blur-3xl">
+            <div className="border-b border-white/10 bg-gradient-to-r from-orange-500/20 via-red-500/10 to-fuchsia-500/10 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.28em] text-orange-300">
+                    Live route
+                  </p>
+                  <h3 className="mt-1 text-lg font-black text-white">
+                    {navigationActive.venueName}
+                  </h3>
+                  <p className="mt-1 text-xs font-semibold text-white/65">
+                    {navigationActive.distanceMiles.toFixed(1)} mi • about {navigationActive.durationMinutes} min
+                  </p>
+                </div>
+                <button
+                  onClick={clearInAppNavigation}
+                  className="rounded-full border border-white/10 bg-white/10 p-2 text-white/70 transition hover:bg-white/15"
+                  aria-label="End navigation"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+
+            <div className="max-h-44 overflow-y-auto p-3">
+              {navigationActive.steps.slice(0, 4).map((step, index) => (
+                <div
+                  key={`${step.instruction}-${index}`}
+                  className="mb-2 rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-2 last:mb-0"
+                >
+                  <p className="text-xs font-bold leading-4 text-white">
+                    {index + 1}. {step.instruction}
+                  </p>
+                  <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-white/40">
+                    {(step.distance / 1609.344).toFixed(1)} mi
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {!selected && trending.length > 0 && viewMode === "map" && (
         <div className="absolute bottom-20 left-3 right-3 z-30 sm:bottom-24 sm:left-3 sm:right-auto sm:max-w-sm">
           <div className="w-full rounded-2xl border border-red-500/20 bg-black/80 p-2 shadow-xl shadow-red-500/15 backdrop-blur-2xl">
@@ -2804,14 +3050,21 @@ export default function Home() {
                 </button>
               </div>
 
-              <a
-                href={`https://www.google.com/maps/dir/?api=1&destination=${selected.lat},${selected.lng}`}
-                target="_blank"
-                className="select-none sticky bottom-0 z-10 block w-full rounded-3xl border border-white/10 bg-white py-3 text-center text-sm font-black text-black shadow-xl shadow-black/20"
+              <button
+                type="button"
+                onClick={startInAppNavigation}
+                disabled={navigationLoading}
+                className="select-none sticky bottom-0 z-10 flex w-full items-center justify-center gap-2 rounded-3xl border border-orange-300/30 bg-gradient-to-r from-orange-400 via-red-500 to-fuchsia-600 py-3 text-center text-sm font-black text-white shadow-xl shadow-orange-500/25 transition hover:-translate-y-0.5 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70"
               >
-                <MapPin size={17} />
-                Get Directions
-              </a>
+                <Navigation size={17} />
+                {navigationLoading ? "Starting route..." : "Start In-App Navigation"}
+              </button>
+
+              {navigationError && (
+                <p className="mt-2 rounded-2xl border border-red-400/20 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-100">
+                  {navigationError}
+                </p>
+              )}
             </>
           )}
         </div>
