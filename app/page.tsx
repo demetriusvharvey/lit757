@@ -174,10 +174,10 @@ function updateMarkerElement(el: HTMLElement, venue: VenueWithEvent, zoom: numbe
   const trending = (venue.trendingScore || 0);
   const hasRecentVotes = (venue.lastUpdated && Date.now() - new Date(venue.lastUpdated).getTime() <= 30 * 60 * 1000);
   const active = signals > 0 || trending > 2 || venue.status === "lit";
-  
+
   let shouldShow = true;
   let displaySize = 0;
-  
+
   if (zoom < 10) {
     shouldShow = active;
     displaySize = active ? Math.max(10, Math.round(16 * 0.65)) : 4;
@@ -190,11 +190,11 @@ function updateMarkerElement(el: HTMLElement, venue: VenueWithEvent, zoom: numbe
       ? signals === 0 ? 16 : signals <= 2 ? 24 : signals <= 5 ? 32 : 40
       : 12;
   }
-  
+
   el.style.display = shouldShow ? "block" : "none";
   el.style.width = `${displaySize}px`;
   el.style.height = `${displaySize}px`;
-  
+
   const isVeryZoomedOut = zoom <= 9;
   el.style.opacity = active
     ? "1"
@@ -212,7 +212,7 @@ function updateMarkerElement(el: HTMLElement, venue: VenueWithEvent, zoom: numbe
   core.style.border = active ? "2px solid white" : zoom < 12 ? "none" : "1px solid rgba(255,255,255,0.2)";
   core.style.transform = active && zoom >= 12 && venue.energyLevel === "high" ? "scale(1.08)" : "scale(1)";
   core.style.filter = active ? "none" : "brightness(0.75)";
-  
+
   const glow = active
     ? zoom <= 10
       ? "0 0 12px rgba(239,146,60,0.15)"
@@ -221,7 +221,7 @@ function updateMarkerElement(el: HTMLElement, venue: VenueWithEvent, zoom: numbe
       ? "none"
       : "0 0 8px rgba(148,163,184,0.1)";
   core.style.boxShadow = glow;
-  
+
   core.style.animation =
     active && venue.energyLevel === "high" && zoom >= 12
       ? "litPulse 1.6s ease-in-out infinite"
@@ -278,9 +278,51 @@ function buildVenueHeatmapGeoJSON(
   };
 }
 
+function buildVenuePointsGeoJSON(
+  venues: VenueWithEvent[]
+): GeoJSON.FeatureCollection<GeoJSON.Point, GeoJSON.GeoJsonProperties> {
+  const features = venues.flatMap((venue) => {
+    if (!venue.lng || !venue.lat) return [];
+
+    const signalCount = (venue.voteCount || 0) + (venue.updateCount || 0);
+    const activeScore =
+      signalCount > 0 || (venue.trendingScore || 0) >= 4 || venue.status === "lit"
+        ? Math.max(1, signalCount + Math.max(0, venue.trendingScore || 0))
+        : 0;
+
+    return [
+      {
+        type: "Feature" as const,
+        id: venue.id,
+        geometry: {
+          type: "Point" as const,
+          coordinates: [venue.lng, venue.lat],
+        },
+        properties: {
+          id: venue.id,
+          name: venue.name,
+          status: venue.status || "dead",
+          energyLevel: venue.energyLevel || "low",
+          voteCount: venue.voteCount || 0,
+          updateCount: venue.updateCount || 0,
+          score: venue.score || 0,
+          trendingScore: venue.trendingScore || 0,
+          signalCount,
+          activeScore,
+        },
+      },
+    ];
+  });
+
+  return {
+    type: "FeatureCollection",
+    features,
+  };
+}
+
 export default function Home() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
-  const markersRef = useRef<mapboxgl.Marker[]>([]);
+  const filteredVenuesRef = useRef<VenueWithEvent[]>([]);
   const touchStartY = useRef<number | null>(null);
 
   const [venues, setVenues] = useState<VenueWithEvent[]>([]);
@@ -310,6 +352,7 @@ export default function Home() {
   const [suggestionOpen, setSuggestionOpen] = useState(false);
   const [suggestionType, setSuggestionType] = useState("Event info");
   const [suggestionMessage, setSuggestionMessage] = useState("");
+  const [suggestionMediaFile, setSuggestionMediaFile] = useState<File | null>(null);
   const [suggestionLoading, setSuggestionLoading] = useState(false);
   const [suggestionFeedback, setSuggestionFeedback] = useState("");
   const [suggestionStatus, setSuggestionStatus] = useState<"success" | "error" | null>(null);
@@ -329,6 +372,8 @@ export default function Home() {
     id: string;
     update_type: string | null;
     message: string | null;
+    media_url?: string | null;
+    media_type?: string | null;
     created_at: string | null;
   }>>([]);
 
@@ -590,12 +635,12 @@ export default function Home() {
         const momentumLabel = recentPositiveVote || recentPositiveUpdate
           ? "📈 gaining fast"
           : score >= 6
-          ? "🔥 heating up"
-          : hasLineUpdate
-          ? "🚶 line building"
-          : !hasSignals
-          ? "😴 quiet night"
-          : "🔥 heating up";
+            ? "🔥 heating up"
+            : hasLineUpdate
+              ? "🚶 line building"
+              : !hasSignals
+                ? "😴 quiet night"
+                : "🔥 heating up";
 
         const tonightEvent =
           eventsData?.find((event) => event.venue_id === venue.id) || null;
@@ -624,8 +669,8 @@ export default function Home() {
             voteCount + updateCount >= 5
               ? "high"
               : voteCount + updateCount >= 2
-              ? "medium"
-              : "low",
+                ? "medium"
+                : "low",
           status,
           energyLevel,
           lastUpdated:
@@ -792,10 +837,160 @@ export default function Home() {
         );
       }
 
+      if (!newMap.getSource("venue-points")) {
+        newMap.addSource("venue-points", {
+          type: "geojson",
+          data: {
+            type: "FeatureCollection",
+            features: [],
+          },
+        });
+      }
+
+      const activeExpression: any = [">", ["get", "activeScore"], 0];
+
+      if (!newMap.getLayer("venue-pins-glow")) {
+        newMap.addLayer({
+          id: "venue-pins-glow",
+          type: "circle",
+          source: "venue-points",
+          paint: {
+            "circle-radius": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              8,
+              ["case", activeExpression, 10, 0],
+              10,
+              ["case", activeExpression, 15, 0],
+              12,
+              ["case", activeExpression, 22, 5],
+              15,
+              ["case", activeExpression, 32, 8],
+            ],
+            "circle-color": [
+              "match",
+              ["get", "energyLevel"],
+              "high",
+              "#fb923c",
+              "medium",
+              "#facc15",
+              "negative",
+              "#60a5fa",
+              "#64748b",
+            ],
+            "circle-blur": ["case", activeExpression, 0.75, 0.95],
+            "circle-opacity": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              8,
+              ["case", activeExpression, 0.28, 0],
+              10,
+              ["case", activeExpression, 0.38, 0],
+              12,
+              ["case", activeExpression, 0.48, 0.08],
+              15,
+              ["case", activeExpression, 0.58, 0.14],
+            ],
+          },
+        });
+      }
+
+      if (!newMap.getLayer("venue-pins-core")) {
+        newMap.addLayer({
+          id: "venue-pins-core",
+          type: "circle",
+          source: "venue-points",
+          paint: {
+            "circle-radius": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              8,
+              ["case", activeExpression, 4, 0],
+              10,
+              ["case", activeExpression, 6, 0],
+              12,
+              ["case", activeExpression, 8, 2.5],
+              15,
+              [
+                "case",
+                activeExpression,
+                ["case", [">=", ["get", "activeScore"], 8], 12, 10],
+                4.5,
+              ],
+            ],
+            "circle-color": [
+              "match",
+              ["get", "energyLevel"],
+              "high",
+              "#fb923c",
+              "medium",
+              "#facc15",
+              "negative",
+              "#60a5fa",
+              "#64748b",
+            ],
+            "circle-opacity": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              8,
+              ["case", activeExpression, 1, 0],
+              10,
+              ["case", activeExpression, 1, 0.06],
+              12,
+              ["case", activeExpression, 1, 0.35],
+              15,
+              ["case", activeExpression, 1, 0.68],
+            ],
+            "circle-stroke-color": "#ffffff",
+            "circle-stroke-width": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              8,
+              ["case", activeExpression, 1, 0],
+              12,
+              ["case", activeExpression, 2, 0.5],
+              15,
+              ["case", activeExpression, 2.5, 0.75],
+            ],
+            "circle-stroke-opacity": ["case", activeExpression, 0.9, 0.25],
+          },
+        });
+      }
+
+      newMap.on("click", "venue-pins-core", (event) => {
+        const feature = event.features?.[0];
+        const venueId = feature?.properties?.id;
+        const venue = filteredVenuesRef.current.find((item) => item.id === venueId);
+
+        if (!venue) return;
+
+        setSelected(venue);
+        setSheetExpanded(true);
+        setViewMode("map");
+
+        newMap.flyTo({
+          center: [venue.lng, venue.lat],
+          zoom: Math.max(newMap.getZoom(), 14),
+        });
+      });
+
+      newMap.on("mouseenter", "venue-pins-core", () => {
+        newMap.getCanvas().style.cursor = "pointer";
+      });
+
+      newMap.on("mouseleave", "venue-pins-core", () => {
+        newMap.getCanvas().style.cursor = "";
+      });
+
       const layerExists = !!newMap.getLayer("venue-heat-layer");
       console.log("heatmap load: layer exists", layerExists, "firstSymbol", firstSymbol);
 
-    newMap.setLayoutProperty(
+      newMap.setLayoutProperty(
         "venue-heat-layer",
         "visibility",
         heatmapEnabled ? "visible" : "none"
@@ -935,82 +1130,20 @@ export default function Home() {
   }, [venues, city, activeChip, query]);
 
   useEffect(() => {
-    if (!map) return;
-
-    markersRef.current.forEach((m) => m.remove());
-    markersRef.current = [];
-    const markerData: Map<string, { marker: mapboxgl.Marker; venue: VenueWithEvent; el: HTMLElement }> = new Map();
-
-    filteredVenues.forEach((venue) => {
-      const el = document.createElement("button");
-
-      el.type = "button";
-      el.setAttribute("aria-label", venue.name);
-      el.className = "lit-marker";
-      el.style.border = "0";
-      el.style.padding = "0";
-      el.style.background = "transparent";
-      el.style.cursor = "pointer";
-      el.style.position = "relative";
-      el.style.transition = "opacity 0.2s ease, width 0.2s ease, height 0.2s ease";
-
-      const core = document.createElement("div");
-      core.className = "lit-marker-core";
-      core.style.width = "100%";
-      core.style.height = "100%";
-      core.style.borderRadius = "9999px";
-      core.style.transition = "all 0.2s ease";
-
-      const shine = document.createElement("div");
-      shine.style.width = "100%";
-      shine.style.height = "100%";
-      shine.style.borderRadius = "9999px";
-      shine.style.background =
-        "radial-gradient(circle at 35% 30%, rgba(255,255,255,.95), transparent 28%)";
-
-      core.appendChild(shine);
-      el.appendChild(core);
-
-      const marker = new mapboxgl.Marker({ element: el, anchor: "center" })
-        .setLngLat([venue.lng, venue.lat])
-        .addTo(map);
-
-      markerData.set(venue.id, { marker, venue, el });
-      markersRef.current.push(marker);
-
-      updateMarkerElement(el, venue, currentZoom);
-
-      el.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-
-        setSelected(venue);
-        setSheetExpanded(true);
-        setViewMode("map");
-
-        map.flyTo({
-          center: [venue.lng, venue.lat],
-          zoom: 14,
-        });
-      });
-    });
-
-    return () => {
-      markersRef.current.forEach((m) => m.remove());
-      markersRef.current = [];
-    };
-  }, [map, filteredVenues]);
+    filteredVenuesRef.current = filteredVenues;
+  }, [filteredVenues]);
 
   useEffect(() => {
     if (!map) return;
 
-    markersRef.current.forEach((marker, index) => {
-      const venue = filteredVenues[index];
-      if (!venue) return;
-      const el = marker.getElement() as HTMLElement;
-      updateMarkerElement(el, venue, currentZoom);
-    });
-  }, [currentZoom]);
+    const source = map.getSource("venue-points") as mapboxgl.GeoJSONSource | null;
+    if (!source) {
+      console.log("venue points update: source missing");
+      return;
+    }
+
+    source.setData(buildVenuePointsGeoJSON(filteredVenues));
+  }, [map, filteredVenues]);
 
   useEffect(() => {
     if (!map) return;
@@ -1097,14 +1230,53 @@ export default function Home() {
     setSelected((prev) =>
       prev
         ? {
-            ...prev,
-            lastUpdated: new Date().toISOString(),
-            voteCount: (prev.voteCount || 0) + 1,
-          }
+          ...prev,
+          lastUpdated: new Date().toISOString(),
+          voteCount: (prev.voteCount || 0) + 1,
+        }
         : prev
     );
 
     if ("vibrate" in navigator) navigator.vibrate(40);
+  }
+
+  async function uploadSuggestionMedia() {
+    if (!suggestionMediaFile || !selected) {
+      return { mediaUrl: null as string | null, mediaType: null as string | null };
+    }
+
+    const isVideo = suggestionMediaFile.type.startsWith("video/");
+    const isImage = suggestionMediaFile.type.startsWith("image/");
+
+    if (!isVideo && !isImage) {
+      throw new Error("Only images and videos are supported.");
+    }
+
+    const maxSize = isVideo ? 25 * 1024 * 1024 : 8 * 1024 * 1024;
+    if (suggestionMediaFile.size > maxSize) {
+      throw new Error(isVideo ? "Video must be under 25MB." : "Image must be under 8MB.");
+    }
+
+    const extension = suggestionMediaFile.name.split(".").pop() || (isVideo ? "mp4" : "jpg");
+    const safeVenueName = selected.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+    const path = `${selected.id}/${Date.now()}-${safeVenueName}.${extension}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("update-media")
+      .upload(path, suggestionMediaFile, {
+        cacheControl: "3600",
+        upsert: false,
+        contentType: suggestionMediaFile.type,
+      });
+
+    if (uploadError) throw uploadError;
+
+    const { data } = supabase.storage.from("update-media").getPublicUrl(path);
+
+    return {
+      mediaUrl: data.publicUrl,
+      mediaType: isVideo ? "video" : "image",
+    };
   }
 
   async function submitSuggestion() {
@@ -1115,11 +1287,15 @@ export default function Home() {
     setSuggestionFeedback("");
 
     try {
+      const { mediaUrl, mediaType } = await uploadSuggestionMedia();
+
       const { error } = await supabase.from("suggested_updates").insert({
         venue_id: selected.id || null,
         venue_name: selected.name,
         update_type: suggestionType,
         message: suggestionMessage.trim(),
+        media_url: mediaUrl,
+        media_type: mediaType,
       });
 
       if (error) throw error;
@@ -1129,21 +1305,22 @@ export default function Home() {
       setSelected((prev) =>
         prev
           ? {
-              ...prev,
-              updateCount: (prev.updateCount || 0) + 1,
-            }
+            ...prev,
+            updateCount: (prev.updateCount || 0) + 1,
+          }
           : prev
       );
 
       setSuggestionStatus("success");
       setSuggestionFeedback("Update sent — thanks for helping the city.");
       setSuggestionMessage("");
+      setSuggestionMediaFile(null);
       setSuggestionType("Event info");
       setSuggestionOpen(false);
     } catch (error) {
       console.error("Suggestion error:", error);
       setSuggestionStatus("error");
-      setSuggestionFeedback("Could not send update. Please try again.");
+      setSuggestionFeedback(error instanceof Error ? error.message : "Could not send update. Please try again.");
     } finally {
       setSuggestionLoading(false);
     }
@@ -1240,8 +1417,8 @@ export default function Home() {
   const vibeGlowClass = selected?.status === "lit"
     ? "border-red-400/20 bg-red-500/10 shadow-[0_0_30px_rgba(239,68,68,0.22)]"
     : selected?.status === "decent"
-    ? "border-yellow-300/20 bg-yellow-400/10 shadow-[0_0_30px_rgba(245,179,1,0.22)]"
-    : "border-slate-400/20 bg-slate-500/10 shadow-[0_0_30px_rgba(148,163,184,0.22)]";
+      ? "border-yellow-300/20 bg-yellow-400/10 shadow-[0_0_30px_rgba(245,179,1,0.22)]"
+      : "border-slate-400/20 bg-slate-500/10 shadow-[0_0_30px_rgba(148,163,184,0.22)]";
   const selectedEnergyGlowClass = energyGlow(selected?.energyLevel);
 
   return (
@@ -1301,13 +1478,52 @@ export default function Home() {
           animation: cardGlow 3s ease-in-out infinite;
         }
 
+        .user-location-marker {
+          position: relative;
+          width: 72px;
+          height: 72px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          pointer-events: none;
+        }
+
         .user-location-pulse {
-          width: 20px;
-          height: 20px;
+          position: absolute;
+          width: 54px;
+          height: 54px;
           border-radius: 50%;
-          background: radial-gradient(circle, rgba(59, 130, 246, 0.8) 0%, rgba(59, 130, 246, 0.4) 50%, transparent 70%);
-          border: 2px solid #3b82f6;
+          background: radial-gradient(circle, rgba(59, 130, 246, 0.32) 0%, rgba(59, 130, 246, 0.16) 45%, transparent 72%);
+          border: 1px solid rgba(96, 165, 250, 0.45);
           animation: locationPulse 2s ease-in-out infinite;
+        }
+
+        .user-location-dot {
+          position: relative;
+          width: 18px;
+          height: 18px;
+          border-radius: 9999px;
+          background: #3b82f6;
+          border: 3px solid white;
+          box-shadow: 0 0 22px rgba(59, 130, 246, 0.9);
+        }
+
+        .user-location-label {
+          position: absolute;
+          top: -8px;
+          left: 50%;
+          transform: translateX(-50%);
+          white-space: nowrap;
+          border-radius: 9999px;
+          background: rgba(0, 0, 0, 0.78);
+          border: 1px solid rgba(255, 255, 255, 0.16);
+          color: white;
+          font-size: 10px;
+          font-weight: 800;
+          letter-spacing: 0.14em;
+          text-transform: uppercase;
+          padding: 3px 8px;
+          backdrop-filter: blur(12px);
         }
 
         @keyframes locationPulse {
@@ -1383,11 +1599,10 @@ export default function Home() {
                   <button
                     key={pref}
                     onClick={() => setSelectedPreference(selectedPreference === pref ? null : pref)}
-                    className={`px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.18em] rounded-full transition ${
-                      selectedPreference === pref
+                    className={`px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.18em] rounded-full transition ${selectedPreference === pref
                         ? "bg-emerald-500/20 text-emerald-100 border border-emerald-400/30"
                         : "bg-white/5 text-white/60 border border-white/10 hover:bg-white/10"
-                    }`}
+                      }`}
                   >
                     {pref}
                   </button>
@@ -1429,16 +1644,16 @@ export default function Home() {
                 {recommendationLoading
                   ? "Crunching the latest signals for your best spot."
                   : recommendationVenue ? (
-                      <>
-                        <span className="font-semibold text-white">
-                          {recommendationVenue}
-                        </span>
-                        {" — "}
-                        {recommendation}
-                      </>
-                    ) : (
-                      recommendation
-                    )}
+                    <>
+                      <span className="font-semibold text-white">
+                        {recommendationVenue}
+                      </span>
+                      {" — "}
+                      {recommendation}
+                    </>
+                  ) : (
+                    recommendation
+                  )}
               </p>
             </div>
           )}
@@ -1467,11 +1682,10 @@ export default function Home() {
                   setSheetExpanded(true);
                   if (chip === "Events") setViewMode("events");
                 }}
-                className={`shrink-0 whitespace-nowrap rounded-full px-2 py-1 text-xs font-bold transition ${
-                  activeChip === chip
+                className={`shrink-0 whitespace-nowrap rounded-full px-2 py-1 text-xs font-bold transition ${activeChip === chip
                     ? "bg-white text-black"
                     : "bg-white/10 text-white/75"
-                }`}
+                  }`}
               >
                 {chip}
               </button>
@@ -1484,9 +1698,8 @@ export default function Home() {
                 setViewMode("map");
                 setSelected(null);
               }}
-              className={`rounded-lg py-1.5 text-xs font-black ${
-                viewMode === "map" ? "bg-white text-black" : "text-white/60"
-              }`}
+              className={`rounded-lg py-1.5 text-xs font-black ${viewMode === "map" ? "bg-white text-black" : "text-white/60"
+                }`}
             >
               Map
             </button>
@@ -1497,9 +1710,8 @@ export default function Home() {
                 setSelected(null);
                 setSheetExpanded(true);
               }}
-              className={`rounded-lg py-1.5 text-xs font-black ${
-                viewMode === "events" ? "bg-white text-black" : "text-white/60"
-              }`}
+              className={`rounded-lg py-1.5 text-xs font-black ${viewMode === "events" ? "bg-white text-black" : "text-white/60"
+                }`}
             >
               Events
             </button>
@@ -1521,14 +1733,28 @@ export default function Home() {
               (position) => {
                 const { longitude, latitude } = position.coords;
                 if (!map) return;
-                map.flyTo({ center: [longitude, latitude], zoom: 14 });
+                map.flyTo({ center: [longitude, latitude], zoom: 15 });
                 userLocationMarkerRef.current?.remove();
+
+                const markerEl = document.createElement("div");
+                markerEl.className = "user-location-marker";
+
+                const label = document.createElement("div");
+                label.className = "user-location-label";
+                label.textContent = "You";
 
                 const pulse = document.createElement("div");
                 pulse.className = "user-location-pulse";
 
+                const dot = document.createElement("div");
+                dot.className = "user-location-dot";
+
+                markerEl.appendChild(label);
+                markerEl.appendChild(pulse);
+                markerEl.appendChild(dot);
+
                 userLocationMarkerRef.current = new mapboxgl.Marker({
-                  element: pulse,
+                  element: markerEl,
                   anchor: "center",
                 })
                   .setLngLat([longitude, latitude])
@@ -1563,11 +1789,10 @@ export default function Home() {
               );
             }
           }}
-          className={`flex min-w-[88px] items-center justify-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold transition ${
-            heatmapEnabled
+          className={`flex min-w-[88px] items-center justify-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold transition ${heatmapEnabled
               ? "border-orange-400 bg-orange-500/15 text-orange-100"
               : "border-white/10 bg-white/5 text-white/65"
-          }`}
+            }`}
           aria-pressed={heatmapEnabled}
         >
           <span>Heat</span>
@@ -1639,13 +1864,14 @@ export default function Home() {
         onTouchEnd={handleTouchEnd}
       >
         <div
-          className={`overflow-y-auto rounded-t-[2rem] border border-white/10 bg-zinc-950/95 p-3 shadow-[0_-18px_80px_rgba(0,0,0,0.55)] backdrop-blur-3xl transition-all duration-300 select-none ${
-            selected
-              ? "max-h-[70vh] sm:max-h-[64vh]"
+          className={`overflow-y-auto rounded-t-[2rem] border border-white/10 bg-zinc-950/95 p-3 shadow-[0_-18px_80px_rgba(0,0,0,0.55)] backdrop-blur-3xl transition-all duration-300 select-none ${selected
+              ? sheetExpanded
+                ? "max-h-[70vh] sm:max-h-[64vh]"
+                : "max-h-[24vh] sm:max-h-[22vh]"
               : sheetExpanded
-              ? "max-h-[45vh] sm:max-h-[48vh]"
-              : "max-h-[12vh] sm:max-h-[14vh]"
-          }`}
+                ? "max-h-[45vh] sm:max-h-[48vh]"
+                : "max-h-[12vh] sm:max-h-[14vh]"
+            }`}
         >
           <button
             onClick={() => setSheetExpanded((prev) => !prev)}
@@ -1662,8 +1888,8 @@ export default function Home() {
                     {viewMode === "events"
                       ? "Events Tonight"
                       : query || activeChip !== "All"
-                      ? "Matching Spots"
-                      : "Top Spots Tonight"}
+                        ? "Matching Spots"
+                        : "Top Spots Tonight"}
                   </h2>
                   <p className="text-xs text-white/45">
                     {viewMode === "events"
@@ -1763,12 +1989,10 @@ export default function Home() {
                         <p className="text-sm font-bold">{venue.name}</p>
                         <p className="text-xs text-white/40">
                           {venue.tonightEvent
-                            ? `${venue.tonightEvent.title} • ${
-                                venue.tonightEvent.genre || "Mixed"
-                              }`
-                            : `${venue.music_genre || "Mixed"} • ${
-                                venue.age_limit || "21+"
-                              }`}
+                            ? `${venue.tonightEvent.title} • ${venue.tonightEvent.genre || "Mixed"
+                            }`
+                            : `${venue.music_genre || "Mixed"} • ${venue.age_limit || "21+"
+                            }`}
                         </p>
                         <p className="mt-1 text-[10px] text-white/50">
                           {venue.momentumLabel}
@@ -1881,11 +2105,10 @@ export default function Home() {
 
               {suggestionStatus && suggestionFeedback && (
                 <div
-                  className={`mb-3 rounded-3xl border px-3 py-2 text-sm ${
-                    suggestionStatus === "success"
+                  className={`mb-3 rounded-3xl border px-3 py-2 text-sm ${suggestionStatus === "success"
                       ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-100"
                       : "border-rose-400/20 bg-rose-500/10 text-rose-100"
-                  }`}
+                    }`}
                 >
                   {suggestionFeedback}
                 </div>
@@ -1893,11 +2116,10 @@ export default function Home() {
 
               {eventStatus && eventFeedback && (
                 <div
-                  className={`mb-3 rounded-3xl border px-3 py-2 text-sm ${
-                    eventStatus === "success"
+                  className={`mb-3 rounded-3xl border px-3 py-2 text-sm ${eventStatus === "success"
                       ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-100"
                       : "border-rose-400/20 bg-rose-500/10 text-rose-100"
-                  }`}
+                    }`}
                 >
                   {eventFeedback}
                 </div>
@@ -2025,6 +2247,25 @@ export default function Home() {
                             </p>
                           </div>
                         </div>
+
+                        {update.media_url && (
+                          <div className="mt-3">
+                            {update.media_type === "video" ? (
+                              <video
+                                src={update.media_url}
+                                controls
+                                playsInline
+                                className="h-44 w-32 rounded-2xl border border-white/10 bg-black object-cover"
+                              />
+                            ) : (
+                              <img
+                                src={update.media_url}
+                                alt="User submitted nightlife update"
+                                className="h-44 w-32 rounded-2xl border border-white/10 object-cover"
+                              />
+                            )}
+                          </div>
+                        )}
                       </div>
                     ))
                   )}
@@ -2206,6 +2447,33 @@ export default function Home() {
                   placeholder="Share what’s happening now…"
                   className="mt-2 w-full rounded-3xl border border-white/10 bg-black/80 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35"
                 />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/45">
+                  Photo / video optional
+                </label>
+                <input
+                  type="file"
+                  accept="image/*,video/*"
+                  onChange={(e) => setSuggestionMediaFile(e.target.files?.[0] || null)}
+                  className="mt-2 w-full rounded-3xl border border-white/10 bg-black/80 px-4 py-3 text-sm text-white file:mr-3 file:rounded-full file:border-0 file:bg-white file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-black"
+                />
+                {suggestionMediaFile && (
+                  <div className="mt-2 flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/60">
+                    <span className="truncate">{suggestionMediaFile.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => setSuggestionMediaFile(null)}
+                      className="ml-3 rounded-full bg-white/10 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-white"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                )}
+                <p className="mt-2 text-[11px] text-white/40">
+                  MVP limit: images under 8MB, videos under 25MB. Posts show in Recent Updates after submit.
+                </p>
               </div>
 
               <div className="rounded-3xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-white/55">
