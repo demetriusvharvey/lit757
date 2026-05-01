@@ -498,7 +498,8 @@ function vibeMeterLabel(venue: VenueWithEvent | null) {
 }
 
 function buildVenuePointsGeoJSON(
-  venues: VenueWithEvent[]
+  venues: VenueWithEvent[],
+  spotlightVenueId?: string | null
 ): GeoJSON.FeatureCollection<GeoJSON.Point, GeoJSON.GeoJsonProperties> {
   const features = venues.flatMap((venue) => {
     if (!venue.lng || !venue.lat) return [];
@@ -513,6 +514,7 @@ function buildVenuePointsGeoJSON(
     const isSurging = realSignals && (venue.vibeTrend === "surging" || vibeScore >= 78 || trending >= 90);
     const isHeating = realSignals && (venue.vibeTrend === "heating" || venue.energyLevel === "medium");
     const isCooling = realSignals && (venue.vibeTrend === "cooling" || venue.energyLevel === "negative");
+    const isSpotlight = !!spotlightVenueId && venue.id === spotlightVenueId;
 
     return [
       {
@@ -538,6 +540,7 @@ function buildVenuePointsGeoJSON(
           isSurging,
           isHeating,
           isCooling,
+          isSpotlight,
         },
       },
     ];
@@ -556,6 +559,7 @@ export default function Home() {
   const activeStripRef = useRef<HTMLDivElement | null>(null);
 
   const [venues, setVenues] = useState<VenueWithEvent[]>([]);
+  const [venuesLoading, setVenuesLoading] = useState(true);
   const [selected, setSelected] = useState<VenueWithEvent | null>(null);
   const selectedRef = useRef<VenueWithEvent | null>(null);
   const refreshIntervalRef = useRef<number | null>(null);
@@ -594,6 +598,7 @@ export default function Home() {
   const [suggestionLoading, setSuggestionLoading] = useState(false);
   const [suggestionFeedback, setSuggestionFeedback] = useState("");
   const [suggestionStatus, setSuggestionStatus] = useState<"success" | "error" | null>(null);
+  const [shareFeedback, setShareFeedback] = useState("");
   const [eventOpen, setEventOpen] = useState(false);
   const [eventTitle, setEventTitle] = useState("");
   const [eventDate, setEventDate] = useState("");
@@ -617,6 +622,8 @@ export default function Home() {
   const [cityFeed, setCityFeed] = useState<CityPulseItem[]>([]);
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
   const [activityToasts, setActivityToasts] = useState<ActivityToast[]>([]);
+  const [activePulseVenueId, setActivePulseVenueId] = useState<string | null>(null);
+  const activePulseTimeoutRef = useRef<number | null>(null);
   const activityFeedPrimedRef = useRef(false);
   const seenActivityIdsRef = useRef<Set<string>>(new Set());
   const toastTimeoutRef = useRef<number | null>(null);
@@ -784,6 +791,41 @@ export default function Home() {
     setRecommendationQuestion("");
   }
 
+  async function shareSelectedVenue() {
+    if (!selected || typeof window === "undefined") return;
+
+    const shareUrl = new URL(window.location.href);
+    shareUrl.searchParams.set("venue", selected.id);
+
+    const shareTitle = `${selected.name} on Lit757`;
+    const shareText = `${selected.name} is ${statusLabel(selected.status)} right now on Lit757. Vibe score: ${selected.vibeScore || selected.score || 0}/100.`;
+
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: shareTitle,
+          text: shareText,
+          url: shareUrl.toString(),
+        });
+        setShareFeedback("Shared venue link.");
+      } else {
+        await navigator.clipboard.writeText(shareUrl.toString());
+        setShareFeedback("Venue link copied.");
+      }
+    } catch (error) {
+      console.error("Share error:", error);
+
+      try {
+        await navigator.clipboard.writeText(shareUrl.toString());
+        setShareFeedback("Venue link copied.");
+      } catch {
+        setShareFeedback("Could not share this venue right now.");
+      }
+    }
+
+    window.setTimeout(() => setShareFeedback(""), 2200);
+  }
+
   function handleRecommendationButtonClick() {
     if (recommendation || recommendationLoading) {
       closeRecommendationPanel();
@@ -898,12 +940,15 @@ export default function Home() {
   }
 
   async function loadVenues() {
+    setVenuesLoading(true);
+
     const { data: venuesData, error: venuesError } = await supabase
       .from("venues")
       .select("*");
 
     if (venuesError) {
       console.error("Venues error:", venuesError);
+      setVenuesLoading(false);
       return;
     }
 
@@ -1015,6 +1060,8 @@ export default function Home() {
         setSelected(refreshedSelected);
       }
     }
+
+    setVenuesLoading(false);
   }
 
   useEffect(() => {
@@ -1024,6 +1071,29 @@ export default function Home() {
   useEffect(() => {
     selectedRef.current = selected;
   }, [selected]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (selected || venues.length === 0) return;
+
+    const venueId = new URLSearchParams(window.location.search).get("venue");
+    if (!venueId) return;
+
+    const sharedVenue = venues.find((venue) => venue.id === venueId);
+    if (!sharedVenue) return;
+
+    setSelected(sharedVenue);
+    setSheetExpanded(true);
+    setViewMode("map");
+
+    if (map && sharedVenue.lng && sharedVenue.lat) {
+      map.flyTo({
+        center: [sharedVenue.lng, sharedVenue.lat],
+        zoom: Math.max(map.getZoom(), 14),
+        duration: 850,
+      });
+    }
+  }, [venues, map, selected]);
 
   useEffect(() => {
     if (refreshIntervalRef.current) {
@@ -1187,6 +1257,58 @@ export default function Home() {
         "#60a5fa",
         ["match", ["get", "energyLevel"], "high", "#fb923c", "medium", "#facc15", "negative", "#60a5fa", "#64748b"],
       ];
+
+
+      const spotlightExpression: any = ["==", ["get", "isSpotlight"], true];
+
+      if (!newMap.getLayer("venue-pins-activity-spotlight")) {
+        newMap.addLayer({
+          id: "venue-pins-activity-spotlight",
+          type: "circle",
+          source: "venue-points",
+          paint: {
+            "circle-radius": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              8,
+              ["case", spotlightExpression, 34, 0],
+              11,
+              ["case", spotlightExpression, 52, 0],
+              14,
+              ["case", spotlightExpression, 82, 0]
+            ],
+            "circle-color": "#fb923c",
+            "circle-blur": 0.74,
+            "circle-opacity": ["case", spotlightExpression, 0.68, 0]
+          }
+        });
+      }
+
+      if (!newMap.getLayer("venue-pins-activity-ring")) {
+        newMap.addLayer({
+          id: "venue-pins-activity-ring",
+          type: "circle",
+          source: "venue-points",
+          paint: {
+            "circle-radius": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              8,
+              ["case", spotlightExpression, 14, 0],
+              11,
+              ["case", spotlightExpression, 24, 0],
+              14,
+              ["case", spotlightExpression, 38, 0]
+            ],
+            "circle-color": "rgba(0,0,0,0)",
+            "circle-stroke-color": "#fff7ed",
+            "circle-stroke-width": ["case", spotlightExpression, 3.5, 0],
+            "circle-stroke-opacity": ["case", spotlightExpression, 0.95, 0]
+          }
+        });
+      }
 
       if (!newMap.getLayer("venue-pins-mega-halo")) {
         newMap.addLayer({
@@ -1361,7 +1483,7 @@ export default function Home() {
       });
 
       const pointSource = newMap.getSource("venue-points") as mapboxgl.GeoJSONSource | null;
-      pointSource?.setData(buildVenuePointsGeoJSON(filteredVenuesRef.current));
+      pointSource?.setData(buildVenuePointsGeoJSON(filteredVenuesRef.current, activePulseVenueId));
 
       const heatSource = newMap.getSource("venue-heat") as mapboxgl.GeoJSONSource | null;
       heatSource?.setData(buildVenueHeatmapGeoJSON(filteredVenuesRef.current) as GeoJSON.FeatureCollection);
@@ -1448,6 +1570,21 @@ export default function Home() {
     setRecentUpdates(data || []);
   }
 
+  function spotlightActivityVenue(venueId?: string | null) {
+    if (!venueId) return;
+
+    setActivePulseVenueId(venueId);
+
+    if (activePulseTimeoutRef.current) {
+      window.clearTimeout(activePulseTimeoutRef.current);
+    }
+
+    activePulseTimeoutRef.current = window.setTimeout(() => {
+      setActivePulseVenueId(null);
+      activePulseTimeoutRef.current = null;
+    }, 7000);
+  }
+
   function dismissActivityToast(toastId: string) {
     setActivityToasts((current) => current.filter((toast) => toast.id !== toastId));
   }
@@ -1478,6 +1615,8 @@ export default function Home() {
       createdAt: "createdAt" in item ? item.createdAt : item.created_at,
     };
 
+    spotlightActivityVenue(nextToast.venueId);
+
     setActivityToasts((current) => {
       const withoutDuplicate = current.filter((toast) => toast.id !== nextToast.id);
       return [nextToast, ...withoutDuplicate].slice(0, 3);
@@ -1495,6 +1634,7 @@ export default function Home() {
       setSelected(venue);
       setSheetExpanded(true);
       setViewMode("map");
+      spotlightActivityVenue(venue.id);
 
       if (map && venue.lng && venue.lat) {
         map.flyTo({
@@ -1552,6 +1692,9 @@ export default function Home() {
     return () => {
       if (toastTimeoutRef.current) {
         window.clearTimeout(toastTimeoutRef.current);
+      }
+      if (activePulseTimeoutRef.current) {
+        window.clearTimeout(activePulseTimeoutRef.current);
       }
     };
   }, []);
@@ -1629,8 +1772,8 @@ export default function Home() {
       return;
     }
 
-    source.setData(buildVenuePointsGeoJSON(filteredVenues));
-  }, [map, filteredVenues]);
+    source.setData(buildVenuePointsGeoJSON(filteredVenues, activePulseVenueId));
+  }, [map, filteredVenues, activePulseVenueId]);
 
   useEffect(() => {
     if (!map) return;
@@ -1644,7 +1787,7 @@ export default function Home() {
     const data = buildVenueHeatmapGeoJSON(filteredVenues);
     console.log("heatmap update: updating source", data.features.length);
     source.setData(data as GeoJSON.FeatureCollection);
-  }, [map, filteredVenues]);
+  }, [map, filteredVenues, activePulseVenueId]);
 
   useEffect(() => {
     if (!map) return;
@@ -2018,6 +2161,58 @@ export default function Home() {
       ["match", ["get", "energyLevel"], "high", "#fb923c", "medium", "#facc15", "negative", "#60a5fa", effectiveMode === "day" ? "#334155" : "#64748b"],
     ];
 
+
+      const spotlightExpression: any = ["==", ["get", "isSpotlight"], true];
+
+      if (!targetMap.getLayer("venue-pins-activity-spotlight")) {
+        targetMap.addLayer({
+          id: "venue-pins-activity-spotlight",
+          type: "circle",
+          source: "venue-points",
+          paint: {
+            "circle-radius": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              8,
+              ["case", spotlightExpression, 34, 0],
+              11,
+              ["case", spotlightExpression, 52, 0],
+              14,
+              ["case", spotlightExpression, 82, 0]
+            ],
+            "circle-color": "#fb923c",
+            "circle-blur": 0.74,
+            "circle-opacity": ["case", spotlightExpression, 0.68, 0]
+          }
+        });
+      }
+
+      if (!targetMap.getLayer("venue-pins-activity-ring")) {
+        targetMap.addLayer({
+          id: "venue-pins-activity-ring",
+          type: "circle",
+          source: "venue-points",
+          paint: {
+            "circle-radius": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              8,
+              ["case", spotlightExpression, 14, 0],
+              11,
+              ["case", spotlightExpression, 24, 0],
+              14,
+              ["case", spotlightExpression, 38, 0]
+            ],
+            "circle-color": "rgba(0,0,0,0)",
+            "circle-stroke-color": "#fff7ed",
+            "circle-stroke-width": ["case", spotlightExpression, 3.5, 0],
+            "circle-stroke-opacity": ["case", spotlightExpression, 0.95, 0]
+          }
+        });
+      }
+
     if (!targetMap.getLayer("venue-pins-mega-halo")) {
       targetMap.addLayer({
         id: "venue-pins-mega-halo",
@@ -2166,7 +2361,7 @@ export default function Home() {
     }
 
     const pointSource = targetMap.getSource("venue-points") as mapboxgl.GeoJSONSource | null;
-    pointSource?.setData(buildVenuePointsGeoJSON(filteredVenuesRef.current));
+    pointSource?.setData(buildVenuePointsGeoJSON(filteredVenuesRef.current, activePulseVenueId));
 
     const heatSource = targetMap.getSource("venue-heat") as mapboxgl.GeoJSONSource | null;
     heatSource?.setData(buildVenueHeatmapGeoJSON(filteredVenuesRef.current) as GeoJSON.FeatureCollection);
@@ -2183,7 +2378,7 @@ export default function Home() {
     // switches never leave the map without pins while the new style settles.
     window.setTimeout(() => {
       const refreshedPointSource = targetMap.getSource("venue-points") as mapboxgl.GeoJSONSource | null;
-      refreshedPointSource?.setData(buildVenuePointsGeoJSON(filteredVenuesRef.current));
+      refreshedPointSource?.setData(buildVenuePointsGeoJSON(filteredVenuesRef.current, activePulseVenueId));
 
       const refreshedHeatSource = targetMap.getSource("venue-heat") as mapboxgl.GeoJSONSource | null;
       refreshedHeatSource?.setData(buildVenueHeatmapGeoJSON(filteredVenuesRef.current) as GeoJSON.FeatureCollection);
@@ -2410,9 +2605,21 @@ export default function Home() {
     setCurrentZoom(Math.round(target * 10) / 10);
   }
 
-  const topSpots = [...filteredVenues].sort(
-    (a, b) => (b.vibeScore || b.score || 0) - (a.vibeScore || a.score || 0)
-  );
+  const topSpots = [...filteredVenues].sort((a, b) => {
+    const rankVenue = (venue: VenueWithEvent) => {
+      const signals = (venue.voteCount || 0) + (venue.updateCount || 0);
+      const score = venue.vibeScore || venue.score || 0;
+      const trend = venue.trendingScore || 0;
+      const realSignalBoost = hasRealVenueSignals(venue) ? 75 : 0;
+      const eventBoost = venue.tonightEvent ? 28 : 0;
+      const photoBoost = (venue as any).photo_url ? 8 : 0;
+      const heatBoost = venue.vibeTrend === "surging" ? 28 : venue.vibeTrend === "heating" ? 16 : 0;
+
+      return realSignalBoost + score + trend * 0.45 + signals * 11 + eventBoost + photoBoost + heatBoost;
+    };
+
+    return rankVenue(b) - rankVenue(a);
+  });
 
   const eventSpots = filteredVenues.filter((venue) => venue.tonightEvent);
   const visibleTopSpots = sheetExpanded ? topSpots : topSpots.slice(0, 3);
@@ -2580,6 +2787,20 @@ export default function Home() {
           }
         }
 
+        @keyframes skeletonShimmer {
+          0% { transform: translateX(-120%); }
+          100% { transform: translateX(120%); }
+        }
+
+        .skeleton-shimmer::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          transform: translateX(-120%);
+          background: linear-gradient(90deg, transparent, rgba(255,255,255,0.12), transparent);
+          animation: skeletonShimmer 1.6s ease-in-out infinite;
+        }
+
         @media (prefers-reduced-motion: reduce) {
           .live-pulse,
           .card-glow {
@@ -2716,6 +2937,20 @@ export default function Home() {
       `}</style>
 
       <div ref={mapContainerRef} className="absolute inset-0 h-full w-full" />
+
+      {venuesLoading && venues.length === 0 && (
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/20 backdrop-blur-[1px]">
+          <div className="overflow-hidden rounded-[2rem] border border-white/10 bg-black/75 p-4 shadow-2xl backdrop-blur-2xl">
+            <div className="flex items-center gap-3">
+              <div className="relative h-12 w-12 overflow-hidden rounded-2xl bg-white/10 skeleton-shimmer" />
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.28em] text-orange-300">Loading Lit757</p>
+                <p className="mt-1 text-sm font-semibold text-white/75">Pulling live venue signals...</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {activityToasts.length > 0 && (
         <div className="pointer-events-none fixed right-3 top-[188px] z-[60] flex w-[calc(100vw-1.5rem)] max-w-sm flex-col gap-2 sm:right-5 sm:top-[196px]">
@@ -3504,7 +3739,9 @@ export default function Home() {
                       : "Top Spots Tonight"}
                   </h2>
                   <p className="text-xs text-white/45">
-                    {viewMode === "events"
+                    {venuesLoading
+                      ? "Loading live spots..."
+                      : viewMode === "events"
                       ? `${eventSpots.length} events found`
                       : `${filteredVenues.length} spots found`}
                   </p>
@@ -3518,7 +3755,29 @@ export default function Home() {
                 </button>
               </div>
 
-              {viewMode === "events" ? (
+              {venuesLoading && venues.length === 0 ? (
+                <div className="space-y-3">
+                  {[0, 1, 2].map((item) => (
+                    <div
+                      key={`spot-skeleton-${item}`}
+                      className="relative overflow-hidden rounded-[1.75rem] border border-white/10 bg-white/[0.055] p-3 skeleton-shimmer"
+                    >
+                      <div className="flex gap-3">
+                        <div className="h-24 w-24 shrink-0 rounded-[1.35rem] bg-white/10 sm:h-28 sm:w-32" />
+                        <div className="min-w-0 flex-1 py-1">
+                          <div className="h-4 w-2/3 rounded-full bg-white/10" />
+                          <div className="mt-2 h-3 w-1/2 rounded-full bg-white/10" />
+                          <div className="mt-4 h-2 w-full rounded-full bg-white/10" />
+                          <div className="mt-4 flex gap-2">
+                            <div className="h-6 w-20 rounded-full bg-white/10" />
+                            <div className="h-6 w-24 rounded-full bg-white/10" />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : viewMode === "events" ? (
                 <div className="space-y-2">
                   {eventSpots.map((venue) => (
                     <button
@@ -3579,54 +3838,110 @@ export default function Home() {
                   )}
                 </div>
               ) : (
-                <div className="space-y-2">
-                  {visibleTopSpots.map((venue) => (
-                    <button
-                      key={venue.id}
-                      onClick={() => {
-                        setSelected(venue);
-                        setSheetExpanded(true);
-                        map?.flyTo({
-                          center: [venue.lng, venue.lat],
-                          zoom: 14,
-                        });
-                      }}
-                      className="flex w-full items-center justify-between rounded-2xl border bg-white/[0.055] px-4 py-3 text-left shadow-sm active:scale-[0.99]"
-                      style={{
-                        borderColor: energyColor(venue.energyLevel),
-                        boxShadow: `0 10px 24px ${energyColor(venue.energyLevel)}18`,
-                      }}
-                    >
-                      <div>
-                        <p className="text-sm font-bold">{venue.name}</p>
-                        <p className="text-xs text-white/40">
-                          {venue.tonightEvent
-                            ? `${venue.tonightEvent.title} • ${
-                                venue.tonightEvent.genre || "Mixed"
-                              }`
-                            : `${venue.music_genre || "Mixed"} • ${
-                                venue.age_limit || "21+"
-                              }`}
-                        </p>
-                        <p className="mt-1 text-[10px] text-white/50">
-                          {venue.momentumLabel}
-                        </p>
-                        <p className="mt-1 text-[10px] uppercase tracking-[0.12em] text-white/40">
-                          {energyLabel(venue.energyLevel)}
-                        </p>
-                      </div>
+                <div className="space-y-3">
+                  {visibleTopSpots.map((venue, index) => {
+                    const photoUrl = (venue as any).photo_url as string | undefined;
+                    const signalCount = (venue.voteCount || 0) + (venue.updateCount || 0);
+                    const vibeIntensity = getVibeIntensity(venue);
+                    const cardReason = venue.vibeReason || venue.momentumLabel || energyLabel(venue.energyLevel);
+                    const eventLine = venue.tonightEvent
+                      ? `${venue.tonightEvent.title}${venue.tonightEvent.dj ? ` • ${venue.tonightEvent.dj}` : ""}`
+                      : `${venue.music_genre || "Mixed music"} • ${venue.age_limit || "21+"}`;
 
-                      <div className="text-right">
-                        <p className="text-sm font-black">
-                          {statusLabel(venue.status)}
-                        </p>
-                        <p className="text-[11px] text-white/40">
-                          {venue.voteCount || 0} active •{" "}
-                          {minutesAgo(venue.lastUpdated)}
-                        </p>
-                      </div>
-                    </button>
-                  ))}
+                    return (
+                      <button
+                        key={venue.id}
+                        onClick={() => {
+                          setSelected(venue);
+                          setSheetExpanded(true);
+                          spotlightActivityVenue(venue.id);
+                          map?.flyTo({
+                            center: [venue.lng, venue.lat],
+                            zoom: 14,
+                          });
+                        }}
+                        className="group relative w-full overflow-hidden rounded-[1.75rem] border border-white/10 bg-white/[0.055] text-left shadow-2xl shadow-black/30 transition duration-300 hover:-translate-y-0.5 hover:border-orange-300/40 hover:bg-white/[0.075] active:scale-[0.99]"
+                      >
+                        <div
+                          className="absolute inset-0 opacity-80"
+                          style={{
+                            background: `radial-gradient(circle at 18% 0%, ${energyColor(venue.energyLevel)}2f, transparent 32%), linear-gradient(135deg, rgba(255,255,255,0.09), rgba(255,255,255,0.015))`,
+                          }}
+                        />
+
+                        <div className="relative flex gap-3 p-3">
+                          <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-[1.35rem] bg-white/10 sm:h-28 sm:w-32">
+                            {photoUrl ? (
+                              <img
+                                src={photoUrl}
+                                alt={venue.name}
+                                className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+                              />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-zinc-800 via-zinc-900 to-black text-2xl">
+                                🌃
+                              </div>
+                            )}
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
+                            <div className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-black text-white backdrop-blur-xl">
+                              #{index + 1}
+                            </div>
+                          </div>
+
+                          <div className="min-w-0 flex-1 py-0.5">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="truncate text-base font-black leading-tight text-white sm:text-lg">
+                                  {venue.name}
+                                </p>
+                                <p className="mt-1 truncate text-[11px] font-medium text-white/55">
+                                  {eventLine}
+                                </p>
+                              </div>
+
+                              <div className="shrink-0 text-right">
+                                <p className="text-lg font-black leading-none text-white">
+                                  {vibeIntensity}
+                                </p>
+                                <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-white/40">
+                                  vibe
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="mt-3 h-2 overflow-hidden rounded-full bg-black/35 ring-1 ring-white/10">
+                              <div
+                                className="h-full rounded-full bg-gradient-to-r from-orange-500 via-amber-300 to-red-500 shadow-[0_0_18px_rgba(251,146,60,0.45)] transition-all"
+                                style={{ width: `${vibeIntensity}%` }}
+                              />
+                            </div>
+
+                            <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                              <span
+                                className="rounded-full border px-2 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-white"
+                                style={{
+                                  backgroundColor: `${energyColor(venue.energyLevel)}20`,
+                                  borderColor: `${energyColor(venue.energyLevel)}80`,
+                                }}
+                              >
+                                {statusLabel(venue.status)}
+                              </span>
+                              <span className="rounded-full bg-white/10 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.14em] text-white/70">
+                                {signalCount} signal{signalCount === 1 ? "" : "s"}
+                              </span>
+                              <span className="rounded-full bg-white/10 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.14em] text-white/70">
+                                {confidenceLabel(venue.confidence)}
+                              </span>
+                            </div>
+
+                            <p className="mt-2 line-clamp-2 text-[11px] leading-4 text-white/50">
+                              {cardReason}
+                            </p>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
 
                   {visibleTopSpots.length === 0 && (
                     <div className="rounded-2xl bg-white/[0.07] p-4 text-sm text-white/50">
@@ -3690,16 +4005,9 @@ export default function Home() {
                     </button>
 
                     <button
-                      onClick={() => {
-                        navigator.share?.({
-                          title: selected.name,
-                          text: `${selected.name} is ${statusLabel(
-                            selected.status
-                          )} right now on Lit757. Check before you pull up.`,
-                          url: window.location.href,
-                        });
-                      }}
+                      onClick={shareSelectedVenue}
                       className="select-none flex h-10 w-10 items-center justify-center rounded-3xl bg-white/10 text-white transition hover:bg-white/15 focus:outline-none"
+                      aria-label="Share this venue"
                     >
                       <Share2 size={18} />
                     </button>
@@ -3738,6 +4046,12 @@ export default function Home() {
                   }`}
                 >
                   {eventFeedback}
+                </div>
+              )}
+
+              {shareFeedback && (
+                <div className="mb-3 rounded-3xl border border-sky-300/20 bg-sky-500/10 px-3 py-2 text-sm font-semibold text-sky-100">
+                  {shareFeedback}
                 </div>
               )}
 
@@ -3784,18 +4098,62 @@ export default function Home() {
                   </p>
                 </div>
 
-                <div className="mt-4 grid grid-cols-3 gap-2 text-center">
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3">
-                    <p className="text-base font-black text-white">{selected.voteCount || 0}</p>
-                    <p className="mt-1 text-[9px] font-bold uppercase tracking-[0.18em] text-white/40">Votes</p>
+                <div className="mt-4 grid grid-cols-2 gap-2 text-center sm:grid-cols-3">
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3 shadow-inner shadow-white/5">
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35">🔥 Vibe</p>
+                    <p className="mt-1 text-base font-black text-white">{selected.vibeScore || 0}/100</p>
                   </div>
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3">
-                    <p className="text-base font-black text-white">{selected.updateCount || 0}</p>
-                    <p className="mt-1 text-[9px] font-bold uppercase tracking-[0.18em] text-white/40">Updates</p>
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3 shadow-inner shadow-white/5">
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35">📈 Trend</p>
+                    <p className="mt-1 text-xs font-black text-white">{vibeTrendLabel(selected.vibeTrend)}</p>
                   </div>
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3">
-                    <p className="text-base font-black text-white">{selected.vibeScore || 0}</p>
-                    <p className="mt-1 text-[9px] font-bold uppercase tracking-[0.18em] text-white/40">Score</p>
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3 shadow-inner shadow-white/5">
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35">👥 Signals</p>
+                    <p className="mt-1 text-base font-black text-white">{(selected.voteCount || 0) + (selected.updateCount || 0)}</p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3 shadow-inner shadow-white/5">
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35">✅ Trust</p>
+                    <p className="mt-1 text-xs font-black text-white">{confidenceLabel(selected.confidence)}</p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3 shadow-inner shadow-white/5">
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35">🕒 Updated</p>
+                    <p className="mt-1 text-xs font-black text-white">{minutesAgo(selected.lastUpdated)}</p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3 shadow-inner shadow-white/5">
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35">🎟 Tonight</p>
+                    <p className="mt-1 text-xs font-black text-white">{selected.tonightEvent ? "Event" : "No event"}</p>
+                  </div>
+                </div>
+
+                <div className="mt-4 overflow-hidden rounded-3xl border border-white/10 bg-black/25 shadow-inner shadow-white/5">
+                  <div className="border-b border-white/10 px-4 py-3">
+                    <p className="text-[10px] font-black uppercase tracking-[0.28em] text-white/40">Why this score?</p>
+                    <p className="mt-1 text-xs leading-5 text-white/60">
+                      Lit757 weights fresh votes, live crowd updates, event context, and time decay. Older signals fade so the score stays focused on what is happening now.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 divide-y divide-white/10 text-xs text-white/65 sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+                    <div className="p-4">
+                      <p className="font-black uppercase tracking-[0.2em] text-white/35">Live proof</p>
+                      <p className="mt-2 leading-5">
+                        {(selected.voteCount || 0) + (selected.updateCount || 0) > 0
+                          ? `${selected.voteCount || 0} vote${(selected.voteCount || 0) === 1 ? "" : "s"} and ${selected.updateCount || 0} update${(selected.updateCount || 0) === 1 ? "" : "s"} are affecting this venue.`
+                          : selected.tonightEvent
+                          ? "No crowd votes yet, but tonight event context is keeping this venue on the board."
+                          : "No fresh crowd signals yet. This venue needs votes or updates before it can heat up."}
+                      </p>
+                    </div>
+                    <div className="p-4">
+                      <p className="font-black uppercase tracking-[0.2em] text-white/35">Recommendation</p>
+                      <p className="mt-2 leading-5">
+                        {selected.status === "lit"
+                          ? "Strong enough to consider now, especially if you want energy."
+                          : selected.status === "decent"
+                          ? "Worth watching, but check recent updates before committing."
+                          : "Treat this as quiet until more people check in."}
+                      </p>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -4114,6 +4472,36 @@ export default function Home() {
                     "Casual"}
                 </p>
               </div>
+
+              <div className="mb-4 rounded-[1.75rem] border border-yellow-300/20 bg-yellow-400/10 p-3 shadow-lg shadow-yellow-400/5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-yellow-100/60">
+                      Wrong vibe?
+                    </p>
+                    <p className="mt-1 text-sm font-bold text-white">
+                      Help fix the city signal
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-white/50">
+                      If this spot looks more lit, dead, packed, or empty than the app says, send a quick correction.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSuggestionType("Crowd/vibe");
+                      setSuggestionMessage("The vibe shown looks wrong. Needs a fresh crowd check.");
+                      setSuggestionOpen(true);
+                      setSheetExpanded(true);
+                    }}
+                    className="shrink-0 rounded-2xl border border-yellow-200/25 bg-yellow-300/15 px-3 py-2 text-xs font-black text-yellow-50 transition hover:bg-yellow-300/25 active:scale-[0.98]"
+                  >
+                    Report
+                  </button>
+                </div>
+              </div>
+
 
               <p className="mb-2 text-sm font-bold text-white/80 select-none">
                 How&apos;s the vibe?
