@@ -31,7 +31,7 @@ type VenueWithEvent = Venue & {
 type MapMode = "day" | "night";
 
 const MAPBOX_STYLES: Record<MapMode, string> = {
-  day: "mapbox://styles/mapbox/light-v11",
+  day: "mapbox://styles/mapbox/outdoors-v12",
   night: "mapbox://styles/mapbox/dark-v11",
 };
 
@@ -1432,8 +1432,13 @@ export default function Home() {
     touchStartY.current = null;
   }
 
-  function addVenueSourcesAndLayers(targetMap: mapboxgl.Map) {
-    if (!targetMap.isStyleLoaded()) return;
+  function addVenueSourcesAndLayers(targetMap: mapboxgl.Map, modeOverride?: MapMode) {
+    const effectiveMode = modeOverride || mapMode;
+
+    if (!targetMap.isStyleLoaded()) {
+      targetMap.once("style.load", () => addVenueSourcesAndLayers(targetMap, effectiveMode));
+      return;
+    }
 
     if (!targetMap.getSource("venue-heat")) {
       targetMap.addSource("venue-heat", {
@@ -1572,7 +1577,7 @@ export default function Home() {
             "#facc15",
             "negative",
             "#60a5fa",
-            "#64748b",
+            effectiveMode === "day" ? "#334155" : "#64748b",
           ],
           "circle-blur": ["case", activeExpression, 0.75, 0.95],
           "circle-opacity": [
@@ -1625,7 +1630,7 @@ export default function Home() {
             "#facc15",
             "negative",
             "#60a5fa",
-            "#64748b",
+            effectiveMode === "day" ? "#334155" : "#64748b",
           ],
           "circle-opacity": [
             "interpolate",
@@ -1640,7 +1645,7 @@ export default function Home() {
             15,
             ["case", activeExpression, 1, 0.72],
           ],
-          "circle-stroke-color": mapMode === "day" ? "#111827" : "#ffffff",
+          "circle-stroke-color": effectiveMode === "day" ? "#0f172a" : "#ffffff",
           "circle-stroke-width": [
             "interpolate",
             ["linear"],
@@ -1670,6 +1675,16 @@ export default function Home() {
         heatmapEnabled ? "visible" : "none"
       );
     }
+
+    // Mapbox setStyle clears custom sources/layers. Hydrate twice so day/night
+    // switches never leave the map without pins while the new style settles.
+    window.setTimeout(() => {
+      const refreshedPointSource = targetMap.getSource("venue-points") as mapboxgl.GeoJSONSource | null;
+      refreshedPointSource?.setData(buildVenuePointsGeoJSON(filteredVenuesRef.current));
+
+      const refreshedHeatSource = targetMap.getSource("venue-heat") as mapboxgl.GeoJSONSource | null;
+      refreshedHeatSource?.setData(buildVenueHeatmapGeoJSON(filteredVenuesRef.current) as GeoJSON.FeatureCollection);
+    }, 150);
   }
 
   function switchMapMode() {
@@ -1679,10 +1694,14 @@ export default function Home() {
     setMapMode(nextMode);
     map.setStyle(MAPBOX_STYLES[nextMode]);
 
-    map.once("style.load", () => {
-      addVenueSourcesAndLayers(map);
+    const restoreCustomLayers = () => {
+      addVenueSourcesAndLayers(map, nextMode);
       map.resize();
-    });
+    };
+
+    map.once("style.load", restoreCustomLayers);
+    map.once("idle", restoreCustomLayers);
+    window.setTimeout(restoreCustomLayers, 250);
   }
 
   function smoothZoom(direction: "in" | "out") {
@@ -1871,7 +1890,11 @@ export default function Home() {
       <div ref={mapContainerRef} className="absolute inset-0 h-full w-full" />
 
       <div className="absolute inset-x-0 top-2 z-20 px-3 sm:left-3 sm:right-3 sm:px-0">
-        <div className="rounded-2xl border border-white/10 bg-black/75 p-2 sm:p-3 shadow-2xl backdrop-blur-2xl">
+        <div className={`rounded-2xl border p-2 sm:p-3 shadow-2xl backdrop-blur-2xl ${
+          mapMode === "day"
+            ? "border-white/70 bg-white/85 text-slate-950 shadow-slate-900/10"
+            : "border-white/10 bg-black/75 text-white"
+        }`}>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between gap-3">
