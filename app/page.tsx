@@ -2231,6 +2231,9 @@ export default function Home() {
 
 
       const spotlightExpression: any = ["==", ["get", "isSpotlight"], true];
+      const topMoveExpression: any = ["==", ["get", "isTopMove"], true];
+      const topMoveOneExpression: any = ["==", ["get", "isTopMoveOne"], true];
+      const liveTargetExpression: any = ["any", spotlightExpression, topMoveOneExpression];
 
       if (!targetMap.getLayer("venue-pins-activity-spotlight")) {
         targetMap.addLayer({
