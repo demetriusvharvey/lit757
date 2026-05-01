@@ -1675,7 +1675,7 @@ export default function Home() {
 
     const nextToast: ActivityToast = {
       id: item.id,
-      venueId: "venueId" in item ? item.venueId : item.venue_id,
+      venueId: "venueId" in item ? item.venueId : (item as CityPulseItem).venue_id,
       venueName,
       title,
       message,
