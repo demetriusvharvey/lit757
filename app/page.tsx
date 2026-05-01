@@ -42,6 +42,17 @@ type ActiveNavigation = {
   steps: NavigationStep[];
 };
 
+type CityPulseItem = {
+  id: string;
+  venue_name: string | null;
+  venue_id?: string | null;
+  update_type: string | null;
+  message: string | null;
+  media_url?: string | null;
+  media_type?: string | null;
+  created_at: string | null;
+};
+
 const MAPBOX_STYLES: Record<MapMode, string> = {
   day: "mapbox://styles/mapbox/outdoors-v12",
   night: "mapbox://styles/mapbox/dark-v11",
@@ -371,6 +382,7 @@ export default function Home() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const filteredVenuesRef = useRef<VenueWithEvent[]>([]);
   const touchStartY = useRef<number | null>(null);
+  const activeStripRef = useRef<HTMLDivElement | null>(null);
 
   const [venues, setVenues] = useState<VenueWithEvent[]>([]);
   const [selected, setSelected] = useState<VenueWithEvent | null>(null);
@@ -430,6 +442,8 @@ export default function Home() {
     media_type?: string | null;
     created_at: string | null;
   }>>([]);
+  const [cityFeed, setCityFeed] = useState<CityPulseItem[]>([]);
+  const [activeSlideIndex, setActiveSlideIndex] = useState(0);
 
   useEffect(() => {
     async function fetchSummary() {
@@ -1156,6 +1170,31 @@ export default function Home() {
     console.log("Recent updates fetched:", data);
     setRecentUpdates(data || []);
   }
+
+  async function loadCityFeed() {
+    const { data, error } = await supabase
+      .from("suggested_updates")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(12);
+
+    if (error) {
+      console.error("City feed error:", error);
+      return;
+    }
+
+    setCityFeed(data || []);
+  }
+
+  useEffect(() => {
+    loadCityFeed();
+
+    const interval = window.setInterval(() => {
+      loadCityFeed();
+    }, 15000);
+
+    return () => window.clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     let ignore = false;
@@ -1963,6 +2002,41 @@ export default function Home() {
     0
   );
 
+  const cityPulseItems = cityFeed.slice(0, 3);
+  const fallbackPulseItems: CityPulseItem[] = trending.slice(0, 3).map((venue) => ({
+    id: `fallback-${venue.id}`,
+    venue_name: venue.name,
+    venue_id: venue.id,
+    update_type: venue.energyLevel === "high" ? "Crowd/vibe" : "Event info",
+    message:
+      venue.energyLevel === "high"
+        ? "is heating up right now"
+        : venue.tonightEvent
+        ? `has ${venue.tonightEvent.title} tonight`
+        : energyLabel(venue.energyLevel),
+    created_at: venue.lastUpdated || null,
+  }));
+  const visiblePulseItems = cityPulseItems.length > 0 ? cityPulseItems : fallbackPulseItems;
+
+  useEffect(() => {
+    if (selected || viewMode !== "map" || trending.length <= 1) return;
+
+    const interval = window.setInterval(() => {
+      setActiveSlideIndex((prev) => {
+        const next = (prev + 1) % Math.min(trending.length, 5);
+
+        activeStripRef.current?.scrollTo({
+          left: next * 184,
+          behavior: "smooth",
+        });
+
+        return next;
+      });
+    }, 3200);
+
+    return () => window.clearInterval(interval);
+  }, [selected, viewMode, trending.length]);
+
   const chips = [
     "All",
     "Nightlife",
@@ -2022,6 +2096,17 @@ export default function Home() {
           }
           50% {
             box-shadow: 0 10px 35px rgba(239, 68, 68, 0.28);
+          }
+        }
+
+        @keyframes fadeIn {
+          from {
+            opacity: 0;
+            transform: translateY(6px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
           }
         }
 
@@ -2313,6 +2398,83 @@ export default function Home() {
         </div>
       </div>
 
+      <div className="pointer-events-none absolute left-3 top-[260px] z-20 hidden w-[320px] lg:block">
+        <div className={`pointer-events-auto overflow-hidden rounded-2xl border p-3 shadow-2xl backdrop-blur-2xl ${
+          isDay
+            ? "border-white/70 bg-white/90 text-slate-950 shadow-slate-900/10"
+            : "border-white/10 bg-black/75 text-white shadow-black/30"
+        }`}>
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <div>
+              <p className={`text-[10px] font-black uppercase tracking-[0.24em] ${isDay ? "text-red-600" : "text-red-400"}`}>
+                City Pulse
+              </p>
+              <p className={`text-[10px] font-semibold ${isDay ? "text-slate-500" : "text-white/45"}`}>
+                Live updates from around the 757
+              </p>
+            </div>
+            <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-1 text-[9px] font-black uppercase tracking-[0.2em] ${
+              isDay
+                ? "border-red-500/30 bg-red-500/10 text-red-700"
+                : "border-red-500/20 bg-red-500/10 text-red-100"
+            }`}>
+              <span className="h-2 w-2 rounded-full bg-red-400 live-pulse" />
+              Live
+            </span>
+          </div>
+
+          <div className="space-y-2">
+            {visiblePulseItems.length === 0 ? (
+              <div className={`rounded-xl border px-3 py-2 text-xs ${isDay ? "border-slate-200 bg-slate-50 text-slate-600" : "border-white/10 bg-white/5 text-white/60"}`}>
+                Waiting for the city to check in. First vote starts the pulse.
+              </div>
+            ) : (
+              visiblePulseItems.map((item, index) => (
+                <button
+                  key={item.id || `${item.venue_name}-${index}`}
+                  onClick={() => {
+                    const venue = filteredVenues.find(
+                      (candidate) => candidate.id === item.venue_id || candidate.name === item.venue_name
+                    );
+                    if (!venue) return;
+                    setSelected(venue);
+                    setSheetExpanded(true);
+                    setViewMode("map");
+                    map?.flyTo({
+                      center: [venue.lng, venue.lat],
+                      zoom: Math.max(map.getZoom(), 14),
+                    });
+                  }}
+                  className={`flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left text-xs transition animate-[fadeIn_0.35s_ease] ${
+                    isDay
+                      ? "border-slate-200 bg-white/70 text-slate-700 hover:bg-slate-50"
+                      : "border-white/10 bg-white/[0.06] text-white/80 hover:bg-white/10"
+                  }`}
+                  style={{ animationDelay: `${index * 70}ms` }}
+                >
+                  <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
+                    isDay ? "bg-slate-950 text-white" : "bg-white/10 text-white"
+                  }`}>
+                    {updateTypeIcon(item.update_type || undefined)}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-semibold">
+                      {item.venue_name || "Someone"}
+                    </p>
+                    <p className={`truncate ${isDay ? "text-slate-500" : "text-white/50"}`}>
+                      {item.message || "updated the vibe"}
+                    </p>
+                  </div>
+                  <span className={`shrink-0 text-[10px] font-semibold ${isDay ? "text-slate-400" : "text-white/35"}`}>
+                    {minutesAgo(item.created_at)}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
       <div className="absolute right-4 top-1/2 -translate-y-1/2 z-20 flex flex-col items-end gap-3">
         <button
           onClick={() => {
@@ -2553,20 +2715,41 @@ export default function Home() {
       )}
 
       {!selected && trending.length > 0 && viewMode === "map" && (
-        <div className="absolute bottom-20 left-3 right-3 z-30 sm:bottom-24 sm:left-3 sm:right-auto sm:max-w-sm">
-          <div className="w-full rounded-2xl border border-red-500/20 bg-black/80 p-2 shadow-xl shadow-red-500/15 backdrop-blur-2xl">
-            <div className="mb-1 flex items-center justify-between gap-2">
-              <p className="text-[10px] font-black uppercase tracking-[0.28em] text-red-400">
-                {trendingLabelText}
-              </p>
-              <p className="text-[9px] text-white/45">Live signals</p>
+        <div className="absolute bottom-[9.75rem] left-3 right-3 z-20 sm:bottom-[10.25rem] sm:left-3 sm:right-auto sm:w-[390px]">
+          <div className="w-full overflow-hidden rounded-[1.6rem] border border-red-500/20 bg-black/78 p-2.5 shadow-2xl shadow-red-500/10 backdrop-blur-2xl">
+            <div className="mb-2 flex items-center justify-between gap-2 px-1">
+              <div className="flex items-center gap-2">
+                <span className="text-sm">🔥</span>
+                <p className="text-[10px] font-black uppercase tracking-[0.28em] text-red-400">
+                  {trendingLabelText}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <p className="hidden text-[9px] text-white/45 sm:block">Live signals</p>
+                <div className="flex gap-1">
+                  {trending.slice(0, Math.min(trending.length, 5)).map((v, index) => (
+                    <span
+                      key={`active-dot-${v.id}`}
+                      className={`h-1.5 rounded-full transition-all ${
+                        index === activeSlideIndex
+                          ? "w-4 bg-orange-400"
+                          : "w-1.5 bg-white/20"
+                      }`}
+                    />
+                  ))}
+                </div>
+              </div>
             </div>
 
-            <div className="flex gap-1 overflow-x-auto pb-0.5">
-              {trending.slice(0, 3).map((v) => (
+            <div
+              ref={activeStripRef}
+              className="flex snap-x snap-mandatory gap-2 overflow-x-auto scroll-smooth pb-1 pr-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            >
+              {trending.slice(0, 5).map((v, index) => (
                 <button
                   key={v.id}
                   onClick={() => {
+                    setActiveSlideIndex(index);
                     setSelected(v);
                     setSheetExpanded(true);
                     map?.flyTo({
@@ -2574,22 +2757,41 @@ export default function Home() {
                       zoom: 14,
                     });
                   }}
-                  className="min-w-[120px] rounded-2xl border bg-white/5 px-2 py-2 text-left transition hover:-translate-y-0.5 active:scale-[0.98] card-glow sm:min-w-[130px]"
-                  style={{
-                    borderColor: energyColor(v.energyLevel),
-                    boxShadow: `0 8px 20px ${energyColor(v.energyLevel)}22`,
-                  }}
+                  className="group min-w-[174px] snap-start rounded-[1.35rem] border border-white/10 bg-white/[0.065] p-3 text-left shadow-lg backdrop-blur-xl transition hover:-translate-y-0.5 hover:bg-white/[0.095] active:scale-[0.98]"
                 >
-                  <p className="text-xs font-bold text-white truncate">{v.name}</p>
-                  <p className="mt-0.5 text-[10px] text-white/45 truncate">
-                    {v.music_genre || "Mixed"}
-                  </p>
-                  <p className="mt-0.5 text-[10px] text-white/50 truncate">{v.momentumLabel}</p>
-                  <p className="mt-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-white/75">
-                    {statusLabel(v.status)}
-                  </p>
-                  <p className="mt-0.5 text-[9px] font-bold text-red-400">
-                    🔥 {v.voteCount || 0} active
+                  <div className="mb-2 flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-black leading-tight text-white">
+                        {v.name}
+                      </p>
+                      <p className="mt-0.5 truncate text-[10px] text-white/45">
+                        {v.music_genre || "Mixed"}
+                      </p>
+                    </div>
+                    <span
+                      className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full shadow-[0_0_14px_rgba(251,146,60,0.45)]"
+                      style={{ backgroundColor: energyColor(v.energyLevel) }}
+                    />
+                  </div>
+
+                  <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-white/10">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-orange-500 via-amber-300 to-red-500 transition-all"
+                      style={{ width: `${getVibeIntensity(v)}%` }}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="rounded-full bg-white/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-white/75">
+                      {statusLabel(v.status)}
+                    </span>
+                    <span className="text-[10px] font-bold text-orange-300">
+                      {v.voteCount || 0} active
+                    </span>
+                  </div>
+
+                  <p className="mt-2 truncate text-[10px] text-white/45">
+                    {v.momentumLabel || energyLabel(v.energyLevel)}
                   </p>
                 </button>
               ))}
