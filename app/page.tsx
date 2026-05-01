@@ -2652,6 +2652,12 @@ export default function Home() {
   }));
   const visiblePulseItems = cityPulseItems.length > 0 ? cityPulseItems : fallbackPulseItems;
 
+  const hotRightNowSpots = (topSpots.filter((venue) => hasRealVenueSignals(venue)).length > 0
+    ? topSpots.filter((venue) => hasRealVenueSignals(venue))
+    : topSpots
+  ).slice(0, 3);
+
+
   useEffect(() => {
     if (selected || viewMode !== "map" || trending.length <= 1) return;
 
@@ -3283,6 +3289,67 @@ export default function Home() {
           </div>
         </div>
       </div>
+
+      {hotRightNowSpots.length > 0 && !selected && viewMode === "map" && (
+        <div className="pointer-events-none absolute inset-x-0 top-[214px] z-30 flex justify-center px-3 sm:top-[218px] lg:left-[330px] lg:right-[260px]">
+          <div className={`pointer-events-auto flex max-w-full items-center gap-2 overflow-x-auto rounded-full border px-2 py-2 shadow-2xl backdrop-blur-2xl no-scrollbar ${isDay ? "border-white/70 bg-white/80 text-slate-950 shadow-slate-900/10" : "border-white/10 bg-black/55 text-white shadow-black/30"}`}>
+            <div className={`hidden shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.22em] sm:flex ${isDay ? "bg-orange-500/10 text-orange-700" : "bg-orange-500/10 text-orange-200"}`}>
+              <span className="h-2 w-2 rounded-full bg-orange-400 live-pulse" />
+              Top moves
+            </div>
+
+            {hotRightNowSpots.map((venue, index) => {
+              const signals = (venue.voteCount || 0) + (venue.updateCount || 0);
+              const vibeIntensity = getVibeIntensity(venue);
+              const label = venue.vibeTrend && venue.vibeTrend !== "quiet"
+                ? vibeTrendLabel(venue.vibeTrend).replace("⚡ ", "").replace("📈 ", "")
+                : venue.tonightEvent
+                ? "Event tonight"
+                : energyLabel(venue.energyLevel).replace("🔥 ", "").replace("📈 ", "").replace("😴 ", "").replace("🧊 ", "");
+              const leadIcon = index === 0 ? "🔥" : venue.vibeTrend === "heating" ? "📈" : venue.tonightEvent ? "🎧" : "✨";
+
+              return (
+                <button
+                  key={`top-move-pill-${venue.id}`}
+                  type="button"
+                  onClick={() => {
+                    setSelected(venue);
+                    setSheetExpanded(true);
+                    setViewMode("map");
+                    spotlightActivityVenue(venue.id);
+                    map?.flyTo({ center: [venue.lng, venue.lat], zoom: Math.max(map.getZoom(), 14), duration: 850 });
+                  }}
+                  className={`group flex shrink-0 items-center gap-2 rounded-full border px-3 py-2 text-left transition duration-300 hover:-translate-y-0.5 active:scale-[0.97] ${
+                    index === 0
+                      ? isDay
+                        ? "border-orange-400/40 bg-orange-500/15 shadow-[0_0_28px_rgba(251,146,60,0.18)]"
+                        : "border-orange-300/30 bg-orange-500/15 shadow-[0_0_34px_rgba(251,146,60,0.22)]"
+                      : isDay
+                      ? "border-slate-200/80 bg-white/70 hover:bg-white"
+                      : "border-white/10 bg-white/[0.07] hover:border-orange-300/30 hover:bg-white/[0.1]"
+                  }`}
+                >
+                  <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-black ${isDay ? "bg-slate-950 text-white" : "bg-white text-black"}`}>
+                    {leadIcon}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="flex items-center gap-1.5">
+                      <span className="max-w-[112px] truncate text-xs font-black sm:max-w-[150px]">{venue.name}</span>
+                      <span className={`text-[10px] font-black ${isDay ? "text-slate-500" : "text-white/45"}`}>· {vibeIntensity}</span>
+                    </span>
+                    <span className={`block max-w-[150px] truncate text-[10px] font-bold ${isDay ? "text-slate-500" : "text-white/50"}`}>
+                      {label} · {signals} signal{signals === 1 ? "" : "s"}
+                    </span>
+                  </span>
+                  <span className={`hidden text-[10px] font-black uppercase tracking-[0.18em] transition-transform duration-300 group-hover:translate-x-0.5 sm:inline ${isDay ? "text-slate-400" : "text-white/35"}`}>
+                    Open →
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div
         className={`pointer-events-none absolute left-3 z-20 hidden w-[320px] transition-all duration-300 lg:block ${
