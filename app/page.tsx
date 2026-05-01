@@ -28,6 +28,19 @@ type VenueWithEvent = Venue & {
   energyLevel?: "high" | "medium" | "low" | "negative";
 };
 
+type MapMode = "day" | "night";
+
+const MAPBOX_STYLES: Record<MapMode, string> = {
+  day: "mapbox://styles/mapbox/light-v11",
+  night: "mapbox://styles/mapbox/dark-v11",
+};
+
+function getInitialMapMode(): MapMode {
+  if (typeof window === "undefined") return "night";
+  const hour = new Date().getHours();
+  return hour >= 7 && hour < 19 ? "day" : "night";
+}
+
 const VIBE_SCORE: Record<Vibe, number> = {
   lit: 4,
   decent: 2,
@@ -336,6 +349,7 @@ export default function Home() {
   const [map, setMap] = useState<mapboxgl.Map | null>(null);
   const userLocationMarkerRef = useRef<mapboxgl.Marker | null>(null);
   const [heatmapEnabled, setHeatmapEnabled] = useState(true);
+  const [mapMode, setMapMode] = useState<MapMode>(() => getInitialMapMode());
   const [currentZoom, setCurrentZoom] = useState(10);
   const [sheetExpanded, setSheetExpanded] = useState(false);
   const [summary, setSummary] = useState("");
@@ -760,7 +774,7 @@ export default function Home() {
 
     const newMap = new mapboxgl.Map({
       container: mapContainerRef.current,
-      style: "mapbox://styles/mapbox/dark-v11",
+      style: MAPBOX_STYLES[mapMode],
       center: [-76.2859, 36.8508],
       zoom: 10.8,
     });
@@ -1418,6 +1432,259 @@ export default function Home() {
     touchStartY.current = null;
   }
 
+  function addVenueSourcesAndLayers(targetMap: mapboxgl.Map) {
+    if (!targetMap.isStyleLoaded()) return;
+
+    if (!targetMap.getSource("venue-heat")) {
+      targetMap.addSource("venue-heat", {
+        type: "geojson",
+        data: {
+          type: "FeatureCollection",
+          features: [],
+        },
+      });
+    }
+
+    const firstSymbol = targetMap
+      .getStyle()
+      .layers?.find((layer) => layer.type === "symbol")?.id;
+
+    if (!targetMap.getLayer("venue-heat-layer")) {
+      targetMap.addLayer(
+        {
+          id: "venue-heat-layer",
+          type: "heatmap",
+          source: "venue-heat",
+          maxzoom: 18,
+          paint: {
+            "heatmap-weight": [
+              "interpolate",
+              ["linear"],
+              ["get", "weight"],
+              1,
+              0.4,
+              2,
+              0.9,
+              4,
+              1.4,
+              8,
+              1.9,
+              16,
+              2.5,
+            ],
+            "heatmap-intensity": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              7,
+              1.4,
+              11,
+              2.1,
+              15,
+              2.8,
+            ],
+            "heatmap-color": [
+              "interpolate",
+              ["linear"],
+              ["heatmap-density"],
+              0,
+              "rgba(0,0,0,0)",
+              0.1,
+              "rgba(252,211,77,0.3)",
+              0.25,
+              "rgba(251,146,60,0.5)",
+              0.4,
+              "rgba(249,115,22,0.65)",
+              0.6,
+              "rgba(239,68,68,0.8)",
+              0.8,
+              "rgba(220,38,38,0.9)",
+              1,
+              "rgba(185,28,28,0.95)",
+            ],
+            "heatmap-radius": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              7,
+              20,
+              10,
+              35,
+              13,
+              50,
+              16,
+              65,
+            ],
+            "heatmap-opacity": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              7,
+              0.45,
+              11,
+              0.6,
+              15,
+              0.72,
+            ],
+          },
+        },
+        firstSymbol
+      );
+    }
+
+    if (!targetMap.getSource("venue-points")) {
+      targetMap.addSource("venue-points", {
+        type: "geojson",
+        data: {
+          type: "FeatureCollection",
+          features: [],
+        },
+      });
+    }
+
+    const activeExpression: any = [">", ["get", "activeScore"], 0];
+
+    if (!targetMap.getLayer("venue-pins-glow")) {
+      targetMap.addLayer({
+        id: "venue-pins-glow",
+        type: "circle",
+        source: "venue-points",
+        paint: {
+          "circle-radius": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            8,
+            ["case", activeExpression, 10, 3],
+            10,
+            ["case", activeExpression, 15, 5],
+            12,
+            ["case", activeExpression, 22, 7],
+            15,
+            ["case", activeExpression, 32, 10],
+          ],
+          "circle-color": [
+            "match",
+            ["get", "energyLevel"],
+            "high",
+            "#fb923c",
+            "medium",
+            "#facc15",
+            "negative",
+            "#60a5fa",
+            "#64748b",
+          ],
+          "circle-blur": ["case", activeExpression, 0.75, 0.95],
+          "circle-opacity": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            8,
+            ["case", activeExpression, 0.28, 0.05],
+            10,
+            ["case", activeExpression, 0.38, 0.1],
+            12,
+            ["case", activeExpression, 0.48, 0.14],
+            15,
+            ["case", activeExpression, 0.58, 0.18],
+          ],
+        },
+      });
+    }
+
+    if (!targetMap.getLayer("venue-pins-core")) {
+      targetMap.addLayer({
+        id: "venue-pins-core",
+        type: "circle",
+        source: "venue-points",
+        paint: {
+          "circle-radius": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            8,
+            ["case", activeExpression, 4, 2.2],
+            10,
+            ["case", activeExpression, 6, 3.2],
+            12,
+            ["case", activeExpression, 8, 4.2],
+            15,
+            [
+              "case",
+              activeExpression,
+              ["case", [">=", ["get", "activeScore"], 8], 12, 10],
+              4.5,
+            ],
+          ],
+          "circle-color": [
+            "match",
+            ["get", "energyLevel"],
+            "high",
+            "#fb923c",
+            "medium",
+            "#facc15",
+            "negative",
+            "#60a5fa",
+            "#64748b",
+          ],
+          "circle-opacity": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            8,
+            ["case", activeExpression, 1, 0.25],
+            10,
+            ["case", activeExpression, 1, 0.42],
+            12,
+            ["case", activeExpression, 1, 0.55],
+            15,
+            ["case", activeExpression, 1, 0.72],
+          ],
+          "circle-stroke-color": mapMode === "day" ? "#111827" : "#ffffff",
+          "circle-stroke-width": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            8,
+            ["case", activeExpression, 1, 0.35],
+            12,
+            ["case", activeExpression, 2, 0.6],
+            15,
+            ["case", activeExpression, 2.5, 0.85],
+          ],
+          "circle-stroke-opacity": ["case", activeExpression, 0.9, 0.35],
+        },
+      });
+    }
+
+    const pointSource = targetMap.getSource("venue-points") as mapboxgl.GeoJSONSource | null;
+    pointSource?.setData(buildVenuePointsGeoJSON(filteredVenuesRef.current));
+
+    const heatSource = targetMap.getSource("venue-heat") as mapboxgl.GeoJSONSource | null;
+    heatSource?.setData(buildVenueHeatmapGeoJSON(filteredVenuesRef.current) as GeoJSON.FeatureCollection);
+
+    if (targetMap.getLayer("venue-heat-layer")) {
+      targetMap.setLayoutProperty(
+        "venue-heat-layer",
+        "visibility",
+        heatmapEnabled ? "visible" : "none"
+      );
+    }
+  }
+
+  function switchMapMode() {
+    if (!map) return;
+
+    const nextMode: MapMode = mapMode === "day" ? "night" : "day";
+    setMapMode(nextMode);
+    map.setStyle(MAPBOX_STYLES[nextMode]);
+
+    map.once("style.load", () => {
+      addVenueSourcesAndLayers(map);
+      map.resize();
+    });
+  }
+
   function smoothZoom(direction: "in" | "out") {
     if (!map) return;
 
@@ -1476,7 +1743,7 @@ export default function Home() {
   const selectedEnergyGlowClass = energyGlow(selected?.energyLevel);
 
   return (
-    <main className="relative h-screen w-screen overflow-hidden bg-black text-white">
+    <main className={`relative h-screen w-screen overflow-hidden text-white ${mapMode === "day" ? "bg-slate-100" : "bg-black"}`}>
       <style jsx global>{`
         @keyframes litPulse {
           0% {
@@ -1860,6 +2127,19 @@ export default function Home() {
             −
           </button>
         </div>
+
+        <button
+          onClick={switchMapMode}
+          className={`flex min-w-[88px] items-center justify-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold shadow-xl backdrop-blur-xl transition ${
+            mapMode === "day"
+              ? "border-sky-300/40 bg-white/80 text-slate-950"
+              : "border-violet-300/20 bg-black/70 text-white"
+          }`}
+          aria-label="Toggle day night map mode"
+        >
+          <span>{mapMode === "day" ? "☀️" : "🌙"}</span>
+          <span>{mapMode === "day" ? "Day" : "Night"}</span>
+        </button>
 
         <button
           onClick={() => {
