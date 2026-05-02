@@ -2931,6 +2931,21 @@ export default function Home() {
           animation: skeletonShimmer 1.6s ease-in-out infinite;
         }
 
+        @keyframes liveRadarTicker {
+          0% { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
+        }
+
+        .lit-mobile-ticker-track,
+        .lit-desktop-ticker-track {
+          animation: liveRadarTicker 38s linear infinite;
+        }
+
+        .lit-mobile-ticker:hover .lit-mobile-ticker-track,
+        .lit-desktop-ticker:hover .lit-desktop-ticker-track {
+          animation-play-state: paused;
+        }
+
         @media (prefers-reduced-motion: reduce) {
           .live-pulse,
           .card-glow {
@@ -3048,28 +3063,6 @@ export default function Home() {
         .premium-toast-progress {
           transform-origin: left center;
           animation: premiumToastProgress 6.5s linear forwards;
-        }
-
-
-        @keyframes litTickerScroll {
-          0% { transform: translateX(0); }
-          100% { transform: translateX(-50%); }
-        }
-
-        .lit-ticker-track {
-          animation: litTickerScroll 26s linear infinite;
-          will-change: transform;
-        }
-
-        .lit-ticker:hover .lit-ticker-track,
-        .lit-ticker:active .lit-ticker-track {
-          animation-play-state: paused;
-        }
-
-        @media (prefers-reduced-motion: reduce) {
-          .lit-ticker-track {
-            animation: none !important;
-          }
         }
 
 
@@ -3437,28 +3430,29 @@ export default function Home() {
       </div>
 
       {hotRightNowSpots.length > 0 && !selected && viewMode === "map" && (
-        <>
-          <div className="pointer-events-none absolute inset-x-0 top-[286px] z-30 px-2 sm:hidden">
-            <div
-              className={`lit-ticker pointer-events-auto flex h-10 w-full items-center overflow-hidden rounded-full border shadow-2xl backdrop-blur-2xl ${
-                isDay
-                  ? "border-white/80 bg-white/90 text-slate-950 shadow-slate-900/10"
-                  : "border-orange-300/20 bg-black/78 text-white shadow-orange-500/10"
-              }`}
-            >
-              <div className={`z-10 flex h-full shrink-0 items-center gap-1.5 border-r px-3 ${isDay ? "border-slate-200 bg-white/95" : "border-orange-300/15 bg-black/90"}`}>
-                <span className="h-2 w-2 rounded-full bg-orange-400 live-pulse" />
-                <span className={`whitespace-nowrap text-[9px] font-black uppercase tracking-[0.22em] ${isDay ? "text-orange-700" : "text-orange-200"}`}>
+        <div className="pointer-events-none absolute inset-x-0 top-[286px] z-30 px-3 sm:top-[218px] sm:px-4 lg:left-[330px] lg:right-[260px]">
+          <div
+            className={`lit-desktop-ticker lit-mobile-ticker pointer-events-auto overflow-hidden rounded-full border shadow-2xl backdrop-blur-2xl ${
+              isDay
+                ? "border-white/75 bg-white/88 text-slate-950 shadow-slate-900/10"
+                : "border-orange-300/15 bg-black/72 text-white shadow-orange-500/10"
+            }`}
+          >
+            <div className="flex items-center overflow-hidden">
+              <div className={`z-10 flex shrink-0 items-center gap-2 self-stretch border-r px-3 py-2 ${isDay ? "border-slate-200/70 bg-white/90" : "border-white/10 bg-black/80"}`}>
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-orange-500 text-[11px] shadow-[0_0_18px_rgba(251,146,60,0.42)]">🔥</span>
+                <span className={`text-[9px] font-black uppercase tracking-[0.24em] ${isDay ? "text-orange-700" : "text-orange-200"}`}>
                   Live Radar
                 </span>
+                <span className="h-1.5 w-1.5 rounded-full bg-orange-400 live-pulse" />
               </div>
 
-              <div className="relative min-w-0 flex-1 overflow-hidden">
+              <div className="relative min-w-0 flex-1 overflow-hidden py-2">
                 <div className={`pointer-events-none absolute left-0 top-0 z-10 h-full w-8 bg-gradient-to-r ${isDay ? "from-white/95" : "from-black/90"} to-transparent`} />
                 <div className={`pointer-events-none absolute right-0 top-0 z-10 h-full w-8 bg-gradient-to-l ${isDay ? "from-white/95" : "from-black/90"} to-transparent`} />
 
-                <div className="lit-ticker-track flex w-max items-center gap-6 px-4">
-                  {[...hotRightNowSpots, ...hotRightNowSpots].map((venue, index) => {
+                <div className="lit-desktop-ticker-track lit-mobile-ticker-track flex w-max items-center gap-5 px-4">
+                  {[...hotRightNowSpots, ...hotRightNowSpots, ...hotRightNowSpots, ...hotRightNowSpots].map((venue, index) => {
                     const originalIndex = index % hotRightNowSpots.length;
                     const signals = (venue.voteCount || 0) + (venue.updateCount || 0);
                     const vibeIntensity = getVibeIntensity(venue);
@@ -3471,7 +3465,7 @@ export default function Home() {
 
                     return (
                       <button
-                        key={`mobile-ticker-${venue.id}-${index}`}
+                        key={`live-radar-ticker-${venue.id}-${index}`}
                         type="button"
                         onClick={() => {
                           setSelected(venue);
@@ -3480,22 +3474,25 @@ export default function Home() {
                           spotlightActivityVenue(venue.id);
                           map?.flyTo({ center: [venue.lng, venue.lat], zoom: Math.max(map.getZoom(), 14), duration: 850 });
                         }}
-                        className="flex shrink-0 items-center gap-2 whitespace-nowrap text-left active:scale-[0.98]"
+                        className="flex shrink-0 items-center gap-2 whitespace-nowrap text-left transition active:scale-[0.98]"
                       >
-                        <span className="text-sm">{leadIcon}</span>
-                        <span className="text-[12px] font-black leading-none">{venue.name}</span>
+                        <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-black ${
+                          originalIndex === 0
+                            ? "bg-orange-500 text-white shadow-[0_0_18px_rgba(251,146,60,0.38)]"
+                            : isDay
+                            ? "bg-slate-950 text-white"
+                            : "bg-white text-black"
+                        }`}>
+                          {leadIcon}
+                        </span>
+                        <span className="text-[12px] font-black sm:text-[13px]">{venue.name}</span>
                         <span className={`${isDay ? "text-slate-500" : "text-white/45"}`}>·</span>
-                        <span className={`text-[11px] font-bold leading-none ${originalIndex === 0 ? (isDay ? "text-orange-700" : "text-orange-200") : isDay ? "text-slate-600" : "text-white/65"}`}>
-                          {label}
-                        </span>
+                        <span className={`text-[11px] font-bold ${isDay ? "text-slate-600" : "text-white/60"}`}>{label}</span>
                         <span className={`${isDay ? "text-slate-500" : "text-white/45"}`}>·</span>
-                        <span className={`text-[11px] font-black leading-none ${isDay ? "text-slate-600" : "text-white/70"}`}>
-                          {vibeIntensity} vibe
-                        </span>
-                        <span className={`text-[11px] font-bold leading-none ${isDay ? "text-slate-500" : "text-white/45"}`}>
-                          {signals} signal{signals === 1 ? "" : "s"}
-                        </span>
-                        <span className={`${isDay ? "text-orange-600" : "text-orange-300"}`}>•</span>
+                        <span className="text-[11px] font-black text-orange-300">{vibeIntensity} vibe</span>
+                        <span className={`${isDay ? "text-slate-500" : "text-white/45"}`}>·</span>
+                        <span className={`text-[11px] font-bold ${isDay ? "text-slate-500" : "text-white/55"}`}>{signals} signal{signals === 1 ? "" : "s"}</span>
+                        <span className="text-orange-300/70">•</span>
                       </button>
                     );
                   })}
@@ -3503,159 +3500,13 @@ export default function Home() {
               </div>
             </div>
           </div>
-
-          <div className="pointer-events-none absolute inset-x-0 top-[218px] z-30 hidden justify-start px-4 sm:flex sm:justify-center sm:px-3 lg:left-[330px] lg:right-[260px]">
-            <div className={`pointer-events-auto flex max-w-full items-center gap-2 overflow-x-auto rounded-full border px-2 py-1.5 shadow-2xl backdrop-blur-2xl no-scrollbar sm:py-2 ${isDay ? "border-white/70 bg-white/80 text-slate-950 shadow-slate-900/10" : "border-white/10 bg-black/55 text-white shadow-black/30"}`}>
-              <div className={`hidden shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.22em] sm:flex ${isDay ? "bg-orange-500/10 text-orange-700" : "bg-orange-500/10 text-orange-200"}`}>
-                <span className="h-2 w-2 rounded-full bg-orange-400 live-pulse" />
-                Top moves
-              </div>
-
-              {hotRightNowSpots.map((venue, index) => {
-                const signals = (venue.voteCount || 0) + (venue.updateCount || 0);
-                const vibeIntensity = getVibeIntensity(venue);
-                const label = venue.vibeTrend && venue.vibeTrend !== "quiet"
-                  ? vibeTrendLabel(venue.vibeTrend).replace("⚡ ", "").replace("📈 ", "")
-                  : venue.tonightEvent
-                  ? "Event tonight"
-                  : energyLabel(venue.energyLevel).replace("🔥 ", "").replace("📈 ", "").replace("😴 ", "").replace("🧊 ", "");
-                const leadIcon = index === 0 ? "🔥" : venue.vibeTrend === "heating" ? "📈" : venue.tonightEvent ? "🎧" : "✨";
-
-                return (
-                  <button
-                    key={`top-move-pill-${venue.id}`}
-                    type="button"
-                    onClick={() => {
-                      setSelected(venue);
-                      setSheetExpanded(true);
-                      setViewMode("map");
-                      spotlightActivityVenue(venue.id);
-                      map?.flyTo({ center: [venue.lng, venue.lat], zoom: Math.max(map.getZoom(), 14), duration: 850 });
-                    }}
-                    className={`group flex shrink-0 items-center gap-2 rounded-full border px-2.5 py-1.5 text-left transition duration-300 hover:-translate-y-0.5 active:scale-[0.97] sm:px-3 sm:py-2 ${
-                      index === 0
-                        ? isDay
-                          ? "border-orange-400/40 bg-orange-500/15 shadow-[0_0_28px_rgba(251,146,60,0.18)]"
-                          : "border-orange-300/30 bg-orange-500/15 shadow-[0_0_34px_rgba(251,146,60,0.22)]"
-                        : isDay
-                        ? "border-slate-200/80 bg-white/70 hover:bg-white"
-                        : "border-white/10 bg-white/[0.07] hover:border-orange-300/30 hover:bg-white/[0.1]"
-                    }`}
-                  >
-                    <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-black sm:h-7 sm:w-7 ${isDay ? "bg-slate-950 text-white" : "bg-white text-black"}`}>
-                      {leadIcon}
-                    </span>
-                    <span className="min-w-0">
-                      <span className="flex items-center gap-1.5">
-                        <span className="max-w-[88px] truncate text-xs font-black sm:max-w-[150px]">{venue.name}</span>
-                        <span className={`text-[10px] font-black ${isDay ? "text-slate-500" : "text-white/45"}`}>· {vibeIntensity}</span>
-                      </span>
-                      <span className={`block max-w-[120px] truncate text-[10px] font-bold sm:max-w-[150px] ${isDay ? "text-slate-500" : "text-white/50"}`}>
-                        {label} · {signals} signal{signals === 1 ? "" : "s"}
-                      </span>
-                    </span>
-                    <span className={`hidden text-[10px] font-black uppercase tracking-[0.18em] transition-transform duration-300 group-hover:translate-x-0.5 sm:inline ${isDay ? "text-slate-400" : "text-white/35"}`}>
-                      Open →
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </>
+        </div>
       )}
 
-      <div
-        className={`pointer-events-none absolute left-3 z-20 hidden w-[320px] transition-all duration-300 lg:block ${
-          recommendation || recommendationLoading ? "top-[410px]" : "top-[260px]"
-        }`}
-      >
-        <div className={`pointer-events-auto overflow-hidden rounded-2xl border p-3 shadow-2xl backdrop-blur-2xl ${
-          isDay
-            ? "border-white/70 bg-white/90 text-slate-950 shadow-slate-900/10"
-            : "border-white/10 bg-black/75 text-white shadow-black/30"
-        }`}>
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <div>
-              <p className={`text-[10px] font-black uppercase tracking-[0.24em] ${isDay ? "text-red-600" : "text-red-400"}`}>
-                City Pulse
-              </p>
-              <p className={`text-[10px] font-semibold ${isDay ? "text-slate-500" : "text-white/45"}`}>
-                Live updates from around the 757
-              </p>
-            </div>
-            <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-1 text-[9px] font-black uppercase tracking-[0.2em] ${
-              isDay
-                ? "border-red-500/30 bg-red-500/10 text-red-700"
-                : "border-red-500/20 bg-red-500/10 text-red-100"
-            }`}>
-              <span className="h-2 w-2 rounded-full bg-red-400 live-pulse" />
-              Live
-            </span>
-          </div>
-
-          <div className="space-y-2">
-            {visiblePulseItems.length === 0 ? (
-              <div className={`rounded-xl border px-3 py-2 text-xs ${isDay ? "border-slate-200 bg-slate-50 text-slate-600" : "border-white/10 bg-white/5 text-white/60"}`}>
-                Waiting for the city to check in. First vote starts the pulse.
-              </div>
-            ) : (
-              visiblePulseItems.map((item, index) => (
-                <button
-                  key={item.id || `${item.venue_name}-${index}`}
-                  onClick={() => {
-                    const venue = filteredVenues.find(
-                      (candidate) => candidate.id === item.venue_id || candidate.name === item.venue_name
-                    );
-                    if (!venue) return;
-                    setSelected(venue);
-                    setSheetExpanded(true);
-                    setViewMode("map");
-                    map?.flyTo({
-                      center: [venue.lng, venue.lat],
-                      zoom: Math.max(map.getZoom(), 14),
-                    });
-                  }}
-                  className={`flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left text-xs transition animate-[fadeIn_0.35s_ease] ${
-                    isDay
-                      ? "border-slate-200 bg-white/70 text-slate-700 hover:bg-slate-50"
-                      : "border-white/10 bg-white/[0.06] text-white/80 hover:bg-white/10"
-                  }`}
-                  style={{ animationDelay: `${index * 70}ms` }}
-                >
-                  <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-                    isDay ? "bg-slate-950 text-white" : "bg-white/10 text-white"
-                  }`}>
-                    {updateTypeIcon(item.update_type || undefined)}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-semibold">
-                      {item.venue_name || "Someone"}
-                    </p>
-                    <p className={`truncate ${isDay ? "text-slate-500" : "text-white/50"}`}>
-                      {item.message || "updated the vibe"}
-                    </p>
-                  </div>
-                  <span className={`shrink-0 text-[10px] font-semibold ${isDay ? "text-slate-400" : "text-white/35"}`}>
-                    {minutesAgo(item.created_at)}
-                  </span>
-                </button>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="absolute right-3 top-[45%] z-20 flex -translate-y-1/2 flex-col items-end gap-2 sm:right-4 sm:top-1/2 sm:gap-3">
+      <div className="absolute right-3 top-[365px] z-30 flex flex-col items-end gap-2 sm:right-4 sm:top-[330px] sm:gap-3 lg:top-[310px]">
         <button
           onClick={() => {
             if (!map) return;
-
-            if (userLocationMarkerRef.current) {
-              userLocationMarkerRef.current.remove();
-              userLocationMarkerRef.current = null;
-              return;
-            }
 
             if (!navigator.geolocation) {
               console.error("Geolocation unavailable");
@@ -3665,9 +3516,16 @@ export default function Home() {
 
             navigator.geolocation.getCurrentPosition(
               (position) => {
-                const { longitude, latitude } = position.coords;
+                const { longitude, latitude, accuracy } = position.coords;
                 if (!map) return;
-                map.flyTo({ center: [longitude, latitude], zoom: 15 });
+
+                map.flyTo({
+                  center: [longitude, latitude],
+                  zoom: 15,
+                  duration: 900,
+                  essential: true,
+                });
+
                 userLocationMarkerRef.current?.remove();
 
                 const markerEl = document.createElement("div");
@@ -3678,7 +3536,7 @@ export default function Home() {
 
                 const label = document.createElement("div");
                 label.className = "user-location-label";
-                label.textContent = "You";
+                label.textContent = accuracy && accuracy > 100 ? "Approx" : "You";
 
                 const pulse = document.createElement("div");
                 pulse.className = "user-location-pulse";
@@ -3701,10 +3559,10 @@ export default function Home() {
                 console.error("Geolocation error:", error);
                 map.flyTo({ center: [-76.2859, 36.8508], zoom: 10 });
               },
-              { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+              { enableHighAccuracy: true, timeout: 12000, maximumAge: 15000 }
             );
           }}
-          className="flex h-11 w-11 items-center justify-center rounded-full bg-black/70 shadow-xl backdrop-blur-xl"
+          className="flex h-11 w-11 items-center justify-center rounded-full bg-black/80 text-white shadow-xl ring-1 ring-white/10 backdrop-blur-xl transition active:scale-95"
           aria-label="Locate me"
         >
           <Navigation size={18} />
@@ -3897,94 +3755,8 @@ export default function Home() {
         </div>
       )}
 
-      {!selected && trending.length > 0 && viewMode === "map" && (
-        <div className="absolute bottom-[9.75rem] left-3 right-3 z-20 hidden sm:bottom-[10.25rem] sm:left-3 sm:right-auto sm:block sm:w-[390px]">
-          <div className="w-full overflow-hidden rounded-[1.6rem] border border-red-500/20 bg-black/78 p-2.5 shadow-2xl shadow-red-500/10 backdrop-blur-2xl">
-            <div className="mb-2 flex items-center justify-between gap-2 px-1">
-              <div className="flex items-center gap-2">
-                <span className="text-sm">🔥</span>
-                <p className="text-[10px] font-black uppercase tracking-[0.28em] text-red-400">
-                  {trendingLabelText}
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <p className="hidden text-[9px] text-white/45 sm:block">Live signals</p>
-                <div className="flex gap-1">
-                  {trending.slice(0, Math.min(trending.length, 5)).map((v, index) => (
-                    <span
-                      key={`active-dot-${v.id}`}
-                      className={`h-1.5 rounded-full transition-all ${
-                        index === activeSlideIndex
-                          ? "w-4 bg-orange-400"
-                          : "w-1.5 bg-white/20"
-                      }`}
-                    />
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div
-              ref={activeStripRef}
-              className="flex snap-x snap-mandatory gap-2 overflow-x-auto scroll-smooth pb-1 pr-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-            >
-              {trending.slice(0, 5).map((v, index) => (
-                <button
-                  key={v.id}
-                  onClick={() => {
-                    setActiveSlideIndex(index);
-                    setSelected(v);
-                    setSheetExpanded(true);
-                    map?.flyTo({
-                      center: [v.lng, v.lat],
-                      zoom: 14,
-                    });
-                  }}
-                  className="group min-w-[174px] snap-start rounded-[1.35rem] border border-white/10 bg-white/[0.065] p-3 text-left shadow-lg backdrop-blur-xl transition hover:-translate-y-0.5 hover:bg-white/[0.095] active:scale-[0.98]"
-                >
-                  <div className="mb-2 flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-black leading-tight text-white">
-                        {v.name}
-                      </p>
-                      <p className="mt-0.5 truncate text-[10px] text-white/45">
-                        {v.music_genre || "Mixed"}
-                      </p>
-                    </div>
-                    <span
-                      className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full shadow-[0_0_14px_rgba(251,146,60,0.45)]"
-                      style={{ backgroundColor: energyColor(v.energyLevel) }}
-                    />
-                  </div>
-
-                  <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-white/10">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-orange-500 via-amber-300 to-red-500 transition-all"
-                      style={{ width: `${getVibeIntensity(v)}%` }}
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="rounded-full bg-white/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-white/75">
-                      {statusLabel(v.status)}
-                    </span>
-                    <span className="text-[10px] font-bold text-orange-300">
-                      {v.voteCount || 0} active
-                    </span>
-                  </div>
-
-                  <p className="mt-2 truncate text-[10px] text-white/45">
-                    {v.momentumLabel || energyLabel(v.energyLevel)}
-                  </p>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
       <div
-        className="absolute inset-x-0 bottom-0 z-30 px-3 sm:left-3 sm:right-3 sm:px-0"
+        className={`absolute inset-x-0 bottom-0 z-30 px-3 sm:left-3 sm:right-3 sm:px-0 ${!selected && viewMode === "map" && activeChip === "All" && !query.trim() ? "hidden" : ""}`}
         onTouchStart={(e) => {
           touchStartY.current = e.touches[0].clientY;
         }}
@@ -4017,7 +3789,7 @@ export default function Home() {
                       ? "Events Tonight"
                       : query || activeChip !== "All"
                       ? "Matching Spots"
-                      : "Top Spots Tonight"}
+                      : "Live Spots"}
                   </h2>
                   <p className="text-xs text-white/45">
                     {venuesLoading
