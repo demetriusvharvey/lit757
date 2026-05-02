@@ -2859,7 +2859,7 @@ export default function Home() {
   const isDay = mapMode === "day";
 
   return (
-    <main className={`relative h-screen w-screen overflow-hidden ${isDay ? "bg-slate-100 text-slate-950" : "bg-black text-white"}`}>
+    <main className={`relative h-screen w-full max-w-full overflow-hidden ${isDay ? "bg-slate-100 text-slate-950" : "bg-black text-white"}`}>
       <style jsx global>{`
         @keyframes litPulse {
           0% {
@@ -3051,6 +3051,28 @@ export default function Home() {
         }
 
 
+        @keyframes litTickerScroll {
+          0% { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
+        }
+
+        .lit-ticker-track {
+          animation: litTickerScroll 26s linear infinite;
+          will-change: transform;
+        }
+
+        .lit-ticker:hover .lit-ticker-track,
+        .lit-ticker:active .lit-ticker-track {
+          animation-play-state: paused;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .lit-ticker-track {
+            animation: none !important;
+          }
+        }
+
+
         .no-scrollbar::-webkit-scrollbar {
           display: none;
         }
@@ -3188,7 +3210,7 @@ export default function Home() {
       )}
 
       <div className="absolute inset-x-0 top-2 z-20 px-3 sm:left-3 sm:right-3 sm:px-0">
-        <div className={`rounded-2xl border p-2 sm:p-3 shadow-2xl backdrop-blur-2xl ${
+        <div className={`rounded-[1.35rem] border p-3 sm:rounded-2xl sm:p-3 shadow-2xl backdrop-blur-2xl ${
           isDay
             ? "border-white/70 bg-white/90 text-slate-950 shadow-slate-900/10"
             : "border-white/10 bg-black/75 text-white"
@@ -3200,7 +3222,7 @@ export default function Home() {
                   <p className={`text-[10px] font-bold uppercase tracking-wide ${isDay ? "text-red-600" : "text-red-400"}`}>
                     Live in the 757
                   </p>
-                  <h1 className={`text-lg font-black leading-tight tracking-tight sm:text-xl truncate ${isDay ? "text-slate-950" : "text-white"}`}>
+                  <h1 className={`text-[22px] font-black leading-tight tracking-tight sm:text-xl truncate ${isDay ? "text-slate-950" : "text-white"}`}>
                     {activeCount > 0
                       ? `🔥 ${activeCount} active right now`
                       : "What’s lit tonight? 🔥"}
@@ -3236,12 +3258,12 @@ export default function Home() {
             </div>
 
             <div className="flex flex-col gap-2 sm:items-end">
-              <div className="flex flex-wrap gap-1">
+              <div className="flex gap-1 overflow-x-auto pb-0.5 pr-1 no-scrollbar sm:flex-wrap sm:justify-end sm:overflow-visible sm:pb-0 sm:pr-0">
                 {["Turn up", "Chill", "Hip-Hop", "Cheap cover", "21+"].map((pref) => (
                   <button
                     key={pref}
                     onClick={() => setSelectedPreference(selectedPreference === pref ? null : pref)}
-                    className={`px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.18em] rounded-full border transition ${
+                    className={`shrink-0 whitespace-nowrap px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] rounded-full border transition sm:px-1.5 sm:py-0.5 sm:text-[9px] ${
                       selectedPreference === pref
                         ? isDay
                           ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-800"
@@ -3258,7 +3280,7 @@ export default function Home() {
               <button
                 onClick={handleRecommendationButtonClick}
                 disabled={false}
-                className={`inline-flex items-center justify-center gap-1 rounded-full border px-3 py-1.5 text-xs font-semibold shadow-lg transition disabled:cursor-not-allowed disabled:opacity-60 ${isDay ? "border-slate-300/70 bg-slate-950 text-white shadow-slate-900/10 hover:bg-slate-800" : "border-white/10 bg-gradient-to-r from-white/10 to-white/5 text-white shadow-black/20 hover:from-white/20 hover:to-white/10"}`}
+                className={`inline-flex w-full items-center justify-center gap-1 rounded-full border px-3 py-2 text-sm font-semibold shadow-lg transition disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto sm:py-1.5 sm:text-xs ${isDay ? "border-slate-300/70 bg-slate-950 text-white shadow-slate-900/10 hover:bg-slate-800" : "border-white/10 bg-gradient-to-r from-white/10 to-white/5 text-white shadow-black/20 hover:from-white/20 hover:to-white/10"}`}
               >
                 {recommendationLoading ? (
                   <>
@@ -3348,7 +3370,7 @@ export default function Home() {
             />
           </div>
 
-          <div className="mt-2 flex gap-1 overflow-x-auto pb-0.5">
+          <div className="mt-2 flex gap-1 overflow-x-auto pb-1 pr-1 no-scrollbar">
             {chips.map((chip) => (
               <button
                 key={chip}
@@ -3358,7 +3380,7 @@ export default function Home() {
                   setSheetExpanded(true);
                   if (chip === "Events") setViewMode("events");
                 }}
-                className={`shrink-0 whitespace-nowrap rounded-full px-2 py-1 text-xs font-bold transition ${
+                className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-bold transition sm:px-2 sm:py-1 sm:text-xs ${
                   activeChip === chip
                     ? isDay
                       ? "bg-slate-950 text-white shadow-sm"
@@ -3415,64 +3437,132 @@ export default function Home() {
       </div>
 
       {hotRightNowSpots.length > 0 && !selected && viewMode === "map" && (
-        <div className="pointer-events-none absolute inset-x-0 top-[214px] z-30 flex justify-center px-3 sm:top-[218px] lg:left-[330px] lg:right-[260px]">
-          <div className={`pointer-events-auto flex max-w-full items-center gap-2 overflow-x-auto rounded-full border px-2 py-2 shadow-2xl backdrop-blur-2xl no-scrollbar ${isDay ? "border-white/70 bg-white/80 text-slate-950 shadow-slate-900/10" : "border-white/10 bg-black/55 text-white shadow-black/30"}`}>
-            <div className={`hidden shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.22em] sm:flex ${isDay ? "bg-orange-500/10 text-orange-700" : "bg-orange-500/10 text-orange-200"}`}>
-              <span className="h-2 w-2 rounded-full bg-orange-400 live-pulse" />
-              Top moves
+        <>
+          <div className="pointer-events-none absolute inset-x-0 top-[286px] z-30 px-2 sm:hidden">
+            <div
+              className={`lit-ticker pointer-events-auto flex h-10 w-full items-center overflow-hidden rounded-full border shadow-2xl backdrop-blur-2xl ${
+                isDay
+                  ? "border-white/80 bg-white/90 text-slate-950 shadow-slate-900/10"
+                  : "border-orange-300/20 bg-black/78 text-white shadow-orange-500/10"
+              }`}
+            >
+              <div className={`z-10 flex h-full shrink-0 items-center gap-1.5 border-r px-3 ${isDay ? "border-slate-200 bg-white/95" : "border-orange-300/15 bg-black/90"}`}>
+                <span className="h-2 w-2 rounded-full bg-orange-400 live-pulse" />
+                <span className={`whitespace-nowrap text-[9px] font-black uppercase tracking-[0.22em] ${isDay ? "text-orange-700" : "text-orange-200"}`}>
+                  Live Radar
+                </span>
+              </div>
+
+              <div className="relative min-w-0 flex-1 overflow-hidden">
+                <div className={`pointer-events-none absolute left-0 top-0 z-10 h-full w-8 bg-gradient-to-r ${isDay ? "from-white/95" : "from-black/90"} to-transparent`} />
+                <div className={`pointer-events-none absolute right-0 top-0 z-10 h-full w-8 bg-gradient-to-l ${isDay ? "from-white/95" : "from-black/90"} to-transparent`} />
+
+                <div className="lit-ticker-track flex w-max items-center gap-6 px-4">
+                  {[...hotRightNowSpots, ...hotRightNowSpots].map((venue, index) => {
+                    const originalIndex = index % hotRightNowSpots.length;
+                    const signals = (venue.voteCount || 0) + (venue.updateCount || 0);
+                    const vibeIntensity = getVibeIntensity(venue);
+                    const label = venue.vibeTrend && venue.vibeTrend !== "quiet"
+                      ? vibeTrendLabel(venue.vibeTrend).replace("⚡ ", "").replace("📈 ", "")
+                      : venue.tonightEvent
+                      ? "Event tonight"
+                      : energyLabel(venue.energyLevel).replace("🔥 ", "").replace("📈 ", "").replace("😴 ", "").replace("🧊 ", "");
+                    const leadIcon = originalIndex === 0 ? "🔥" : venue.vibeTrend === "heating" ? "📈" : venue.tonightEvent ? "🎧" : "✨";
+
+                    return (
+                      <button
+                        key={`mobile-ticker-${venue.id}-${index}`}
+                        type="button"
+                        onClick={() => {
+                          setSelected(venue);
+                          setSheetExpanded(true);
+                          setViewMode("map");
+                          spotlightActivityVenue(venue.id);
+                          map?.flyTo({ center: [venue.lng, venue.lat], zoom: Math.max(map.getZoom(), 14), duration: 850 });
+                        }}
+                        className="flex shrink-0 items-center gap-2 whitespace-nowrap text-left active:scale-[0.98]"
+                      >
+                        <span className="text-sm">{leadIcon}</span>
+                        <span className="text-[12px] font-black leading-none">{venue.name}</span>
+                        <span className={`${isDay ? "text-slate-500" : "text-white/45"}`}>·</span>
+                        <span className={`text-[11px] font-bold leading-none ${originalIndex === 0 ? (isDay ? "text-orange-700" : "text-orange-200") : isDay ? "text-slate-600" : "text-white/65"}`}>
+                          {label}
+                        </span>
+                        <span className={`${isDay ? "text-slate-500" : "text-white/45"}`}>·</span>
+                        <span className={`text-[11px] font-black leading-none ${isDay ? "text-slate-600" : "text-white/70"}`}>
+                          {vibeIntensity} vibe
+                        </span>
+                        <span className={`text-[11px] font-bold leading-none ${isDay ? "text-slate-500" : "text-white/45"}`}>
+                          {signals} signal{signals === 1 ? "" : "s"}
+                        </span>
+                        <span className={`${isDay ? "text-orange-600" : "text-orange-300"}`}>•</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
-
-            {hotRightNowSpots.map((venue, index) => {
-              const signals = (venue.voteCount || 0) + (venue.updateCount || 0);
-              const vibeIntensity = getVibeIntensity(venue);
-              const label = venue.vibeTrend && venue.vibeTrend !== "quiet"
-                ? vibeTrendLabel(venue.vibeTrend).replace("⚡ ", "").replace("📈 ", "")
-                : venue.tonightEvent
-                ? "Event tonight"
-                : energyLabel(venue.energyLevel).replace("🔥 ", "").replace("📈 ", "").replace("😴 ", "").replace("🧊 ", "");
-              const leadIcon = index === 0 ? "🔥" : venue.vibeTrend === "heating" ? "📈" : venue.tonightEvent ? "🎧" : "✨";
-
-              return (
-                <button
-                  key={`top-move-pill-${venue.id}`}
-                  type="button"
-                  onClick={() => {
-                    setSelected(venue);
-                    setSheetExpanded(true);
-                    setViewMode("map");
-                    spotlightActivityVenue(venue.id);
-                    map?.flyTo({ center: [venue.lng, venue.lat], zoom: Math.max(map.getZoom(), 14), duration: 850 });
-                  }}
-                  className={`group flex shrink-0 items-center gap-2 rounded-full border px-3 py-2 text-left transition duration-300 hover:-translate-y-0.5 active:scale-[0.97] ${
-                    index === 0
-                      ? isDay
-                        ? "border-orange-400/40 bg-orange-500/15 shadow-[0_0_28px_rgba(251,146,60,0.18)]"
-                        : "border-orange-300/30 bg-orange-500/15 shadow-[0_0_34px_rgba(251,146,60,0.22)]"
-                      : isDay
-                      ? "border-slate-200/80 bg-white/70 hover:bg-white"
-                      : "border-white/10 bg-white/[0.07] hover:border-orange-300/30 hover:bg-white/[0.1]"
-                  }`}
-                >
-                  <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-black ${isDay ? "bg-slate-950 text-white" : "bg-white text-black"}`}>
-                    {leadIcon}
-                  </span>
-                  <span className="min-w-0">
-                    <span className="flex items-center gap-1.5">
-                      <span className="max-w-[112px] truncate text-xs font-black sm:max-w-[150px]">{venue.name}</span>
-                      <span className={`text-[10px] font-black ${isDay ? "text-slate-500" : "text-white/45"}`}>· {vibeIntensity}</span>
-                    </span>
-                    <span className={`block max-w-[150px] truncate text-[10px] font-bold ${isDay ? "text-slate-500" : "text-white/50"}`}>
-                      {label} · {signals} signal{signals === 1 ? "" : "s"}
-                    </span>
-                  </span>
-                  <span className={`hidden text-[10px] font-black uppercase tracking-[0.18em] transition-transform duration-300 group-hover:translate-x-0.5 sm:inline ${isDay ? "text-slate-400" : "text-white/35"}`}>
-                    Open →
-                  </span>
-                </button>
-              );
-            })}
           </div>
-        </div>
+
+          <div className="pointer-events-none absolute inset-x-0 top-[218px] z-30 hidden justify-start px-4 sm:flex sm:justify-center sm:px-3 lg:left-[330px] lg:right-[260px]">
+            <div className={`pointer-events-auto flex max-w-full items-center gap-2 overflow-x-auto rounded-full border px-2 py-1.5 shadow-2xl backdrop-blur-2xl no-scrollbar sm:py-2 ${isDay ? "border-white/70 bg-white/80 text-slate-950 shadow-slate-900/10" : "border-white/10 bg-black/55 text-white shadow-black/30"}`}>
+              <div className={`hidden shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.22em] sm:flex ${isDay ? "bg-orange-500/10 text-orange-700" : "bg-orange-500/10 text-orange-200"}`}>
+                <span className="h-2 w-2 rounded-full bg-orange-400 live-pulse" />
+                Top moves
+              </div>
+
+              {hotRightNowSpots.map((venue, index) => {
+                const signals = (venue.voteCount || 0) + (venue.updateCount || 0);
+                const vibeIntensity = getVibeIntensity(venue);
+                const label = venue.vibeTrend && venue.vibeTrend !== "quiet"
+                  ? vibeTrendLabel(venue.vibeTrend).replace("⚡ ", "").replace("📈 ", "")
+                  : venue.tonightEvent
+                  ? "Event tonight"
+                  : energyLabel(venue.energyLevel).replace("🔥 ", "").replace("📈 ", "").replace("😴 ", "").replace("🧊 ", "");
+                const leadIcon = index === 0 ? "🔥" : venue.vibeTrend === "heating" ? "📈" : venue.tonightEvent ? "🎧" : "✨";
+
+                return (
+                  <button
+                    key={`top-move-pill-${venue.id}`}
+                    type="button"
+                    onClick={() => {
+                      setSelected(venue);
+                      setSheetExpanded(true);
+                      setViewMode("map");
+                      spotlightActivityVenue(venue.id);
+                      map?.flyTo({ center: [venue.lng, venue.lat], zoom: Math.max(map.getZoom(), 14), duration: 850 });
+                    }}
+                    className={`group flex shrink-0 items-center gap-2 rounded-full border px-2.5 py-1.5 text-left transition duration-300 hover:-translate-y-0.5 active:scale-[0.97] sm:px-3 sm:py-2 ${
+                      index === 0
+                        ? isDay
+                          ? "border-orange-400/40 bg-orange-500/15 shadow-[0_0_28px_rgba(251,146,60,0.18)]"
+                          : "border-orange-300/30 bg-orange-500/15 shadow-[0_0_34px_rgba(251,146,60,0.22)]"
+                        : isDay
+                        ? "border-slate-200/80 bg-white/70 hover:bg-white"
+                        : "border-white/10 bg-white/[0.07] hover:border-orange-300/30 hover:bg-white/[0.1]"
+                    }`}
+                  >
+                    <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-black sm:h-7 sm:w-7 ${isDay ? "bg-slate-950 text-white" : "bg-white text-black"}`}>
+                      {leadIcon}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="flex items-center gap-1.5">
+                        <span className="max-w-[88px] truncate text-xs font-black sm:max-w-[150px]">{venue.name}</span>
+                        <span className={`text-[10px] font-black ${isDay ? "text-slate-500" : "text-white/45"}`}>· {vibeIntensity}</span>
+                      </span>
+                      <span className={`block max-w-[120px] truncate text-[10px] font-bold sm:max-w-[150px] ${isDay ? "text-slate-500" : "text-white/50"}`}>
+                        {label} · {signals} signal{signals === 1 ? "" : "s"}
+                      </span>
+                    </span>
+                    <span className={`hidden text-[10px] font-black uppercase tracking-[0.18em] transition-transform duration-300 group-hover:translate-x-0.5 sm:inline ${isDay ? "text-slate-400" : "text-white/35"}`}>
+                      Open →
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </>
       )}
 
       <div
@@ -3556,7 +3646,7 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="absolute right-4 top-1/2 -translate-y-1/2 z-20 flex flex-col items-end gap-3">
+      <div className="absolute right-3 top-[45%] z-20 flex -translate-y-1/2 flex-col items-end gap-2 sm:right-4 sm:top-1/2 sm:gap-3">
         <button
           onClick={() => {
             if (!map) return;
@@ -3808,7 +3898,7 @@ export default function Home() {
       )}
 
       {!selected && trending.length > 0 && viewMode === "map" && (
-        <div className="absolute bottom-[9.75rem] left-3 right-3 z-20 sm:bottom-[10.25rem] sm:left-3 sm:right-auto sm:w-[390px]">
+        <div className="absolute bottom-[9.75rem] left-3 right-3 z-20 hidden sm:bottom-[10.25rem] sm:left-3 sm:right-auto sm:block sm:w-[390px]">
           <div className="w-full overflow-hidden rounded-[1.6rem] border border-red-500/20 bg-black/78 p-2.5 shadow-2xl shadow-red-500/10 backdrop-blur-2xl">
             <div className="mb-2 flex items-center justify-between gap-2 px-1">
               <div className="flex items-center gap-2">
@@ -3901,7 +3991,7 @@ export default function Home() {
         onTouchEnd={handleTouchEnd}
       >
         <div
-          className={`overflow-y-auto rounded-t-[2rem] border border-white/10 bg-zinc-950/95 p-3 shadow-[0_-18px_80px_rgba(0,0,0,0.55)] backdrop-blur-3xl transition-all duration-300 select-none ${
+          className={`overflow-y-auto rounded-t-[1.65rem] border border-white/10 bg-zinc-950/95 p-3 shadow-[0_-18px_80px_rgba(0,0,0,0.55)] backdrop-blur-3xl transition-all duration-300 select-none sm:rounded-t-[2rem] ${
             selected
               ? sheetExpanded
                 ? "max-h-[70vh] sm:max-h-[64vh]"
