@@ -94,6 +94,38 @@ const VIBE_ENGINE_CONFIG = {
   negativePenalty: 14,
 };
 
+const CHIP_CONFIGS = [
+  { label: "All", icon: "", preference: null, terms: [] },
+  { label: "Nightlife", icon: "", preference: "nightlife", terms: ["nightlife", "club", "bar", "lounge", "party"] },
+  { label: "Bars", icon: "", preference: "bars", terms: ["bar", "pub", "cocktail", "drinks"] },
+  { label: "Hookah", icon: "", preference: "hookah", terms: ["hookah", "lounge"] },
+  { label: "Clubs", icon: "", preference: "club", terms: ["club", "dance", "nightclub"] },
+  { label: "Lounges", icon: "", preference: "lounge", terms: ["lounge", "cocktail", "upscale"] },
+  { label: "Day Parties", icon: "", preference: "day party", terms: ["day party", "dayparty", "brunch", "patio"] },
+  { label: "Brunch", icon: "", preference: "brunch", terms: ["brunch", "mimosa", "day party"] },
+  { label: "Happy Hour", icon: "", preference: "happy hour", terms: ["happy hour", "specials", "drinks"] },
+  { label: "Latin", icon: "", preference: "latin", terms: ["latin", "salsa", "bachata", "reggaeton", "merengue"] },
+  { label: "Afrobeats", icon: "", preference: "afrobeats", terms: ["afrobeats", "afrobeat", "amapiano", "dancehall"] },
+  { label: "Hip-Hop", icon: "", preference: "hip-hop", terms: ["hip-hop", "hip hop", "rap", "trap"] },
+  { label: "R&B", icon: "", preference: "r&b", terms: ["r&b", "rnb", "r and b"] },
+  { label: "EDM", icon: "", preference: "edm", terms: ["edm", "house", "techno", "electronic"] },
+  { label: "Live Music", icon: "", preference: "live music", terms: ["live music", "band", "concert", "performance"] },
+  { label: "Concerts", icon: "", preference: "concerts", terms: ["concert", "show", "artist", "performance"] },
+  { label: "DJs", icon: "", preference: "dj", terms: ["dj", "deejay", "set"] },
+  { label: "Experiences", icon: "", preference: "experience", terms: ["experience", "activity", "immersive", "fun"] },
+  { label: "Rooftops", icon: "", preference: "rooftop", terms: ["rooftop", "skyline", "patio"] },
+  { label: "Waterfront", icon: "", preference: "waterfront", terms: ["waterfront", "waterside", "oceanfront", "beach"] },
+  { label: "Breweries", icon: "", preference: "brewery", terms: ["brewery", "breweries", "beer", "taproom"] },
+  { label: "Beaches", icon: "", preference: "beach", terms: ["beach", "oceanfront", "shore"] },
+  { label: "Museums", icon: "", preference: "museum", terms: ["museum", "gallery", "art"] },
+  { label: "Food", icon: "", preference: "food", terms: ["food", "restaurant", "kitchen", "dining"] },
+  { label: "Cheap Eats", icon: "", preference: "cheap", terms: ["cheap", "free", "low cover", "no cover", "$0"] },
+  { label: "21+", icon: "", preference: "21+", terms: ["21+", "21 and up"] },
+  { label: "18+", icon: "", preference: "18+", terms: ["18+", "18 and up"] },
+  { label: "Events", icon: "", preference: "events", terms: ["event", "events", "tonight"] },
+];
+
+
 function clampScore(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
@@ -124,11 +156,11 @@ function getVibeTrend(args: {
 }
 
 function vibeTrendLabel(trend?: string) {
-  if (trend === "surging") return "⚡ Surging";
-  if (trend === "heating") return "📈 Heating up";
-  if (trend === "steady") return "🌙 Steady";
-  if (trend === "cooling") return "🧊 Cooling off";
-  return "😴 Quiet";
+  if (trend === "surging") return "Surging";
+  if (trend === "heating") return "Heating up";
+  if (trend === "steady") return "Steady";
+  if (trend === "cooling") return "Cooling off";
+  return "Quiet";
 }
 
 function vibeReasonText(args: {
@@ -205,14 +237,14 @@ function calculateVenueVibe(args: {
   else if (tier === "decent" || trend === "heating") energyLevel = "medium";
 
   const momentumLabel = trend === "surging"
-    ? "⚡ surging now"
+    ? "surging now"
     : trend === "heating"
-    ? "📈 gaining fast"
+    ? "gaining fast"
     : trend === "cooling"
-    ? "🧊 cooling off"
+    ? "cooling off"
     : trend === "steady"
-    ? "🌙 steady signals"
-    : "😴 quiet night";
+    ? "steady signals"
+    : "quiet night";
 
   const trendingScore = hasRealSignals
     ? Math.round(score + recentSignalCount * 4 + (args.tonightEvent ? 8 : 0))
@@ -263,16 +295,16 @@ function pinColor(status?: string) {
 }
 
 function statusLabel(status?: string) {
-  if (status === "lit") return "🔥 Lit";
-  if (status === "decent") return "👍 Decent";
-  return "💤 Dead";
+  if (status === "lit") return "Lit";
+  if (status === "decent") return "Decent";
+  return "Dead";
 }
 
 function trendingLabel(score?: number) {
-  if (score === undefined || score === null) return "🔥 active";
-  if (score >= 8) return "🔥 exploding";
-  if (score >= 4) return "🔥 active";
-  return "😴 slow";
+  if (score === undefined || score === null) return "active";
+  if (score >= 8) return "exploding";
+  if (score >= 4) return "active";
+  return "slow";
 }
 
 function energyColor(level?: string) {
@@ -290,26 +322,26 @@ function energyGlow(level?: string) {
 }
 
 function energyLabel(level?: string) {
-  if (level === "high") return "🔥 heating up";
-  if (level === "medium") return "📈 gaining fast";
-  if (level === "negative") return "🧊 dead right now";
-  return "😴 quiet night";
+  if (level === "high") return "heating up";
+  if (level === "medium") return "gaining fast";
+  if (level === "negative") return "dead right now";
+  return "quiet night";
 }
 
 function updateTypeIcon(type?: string) {
   switch (type) {
     case "Crowd/vibe":
-      return "🔥";
+      return "";
     case "Line update":
-      return "🚶";
+      return "";
     case "Music/DJ":
-      return "🎧";
+      return "";
     case "Event info":
-      return "🎉";
+      return "";
     case "Cover charge":
-      return "💵";
+      return "";
     default:
-      return "📝";
+      return "";
   }
 }
 
@@ -588,6 +620,7 @@ export default function Home() {
   const [city, setCity] = useState("All 757");
   const [query, setQuery] = useState("");
   const [activeChip, setActiveChip] = useState("All");
+  const [chipsExpanded, setChipsExpanded] = useState(false);
   const [viewMode, setViewMode] = useState<"map" | "events">("map");
   const [map, setMap] = useState<mapboxgl.Map | null>(null);
   const userLocationMarkerRef = useRef<mapboxgl.Marker | null>(null);
@@ -671,7 +704,7 @@ export default function Home() {
     fetchSummary();
   }, []);
 
-  async function fetchRecommendation(question?: string) {
+  async function fetchRecommendation(question?: string, preferenceOverride?: string | null) {
     try {
       setRecommendationLoading(true);
       setRecommendation("");
@@ -682,7 +715,7 @@ export default function Home() {
       // Fast local recommendation engine. This uses the same live venue data
       // powering the map instead of waiting on the API, so the button feels instant.
       const userQuestion = (question || "").toLowerCase();
-      const preference = (selectedPreference || "").toLowerCase();
+      const preference = (preferenceOverride !== undefined ? preferenceOverride ?? "" : selectedPreference ?? "").toLowerCase();
       const pool = filteredVenues.length > 0 ? filteredVenues : venues;
       const withSignals = pool.filter((venue) => hasRealVenueSignals(venue));
       const candidates = withSignals.length > 0 ? withSignals : pool;
@@ -1667,7 +1700,7 @@ export default function Home() {
     const icon = "icon" in item ? item.icon : updateTypeIcon(updateType || undefined);
     const title = "title" in item
       ? item.title
-      : `${icon} New activity at ${venueName}`;
+      : `New activity at ${venueName}`;
     const message = rawMessage?.trim()
       ? rawMessage.trim()
       : updateType
@@ -1791,7 +1824,40 @@ export default function Home() {
     }
 
     if (activeChip !== "All" && activeChip !== "Events") {
-      results = results.filter((venue) => venue.category === activeChip);
+      const activeChipConfig = CHIP_CONFIGS.find((chip) => chip.label === activeChip);
+      const activeTerms = activeChipConfig?.terms || [activeChip];
+
+      results = results.filter((venue) => {
+        const searchable = [
+          venue.name,
+          venue.city,
+          venue.address,
+          venue.type,
+          venue.category,
+          venue.music_genre,
+          venue.age_limit,
+          venue.cover,
+          venue.parking,
+          venue.dress_code,
+          venue.status,
+          venue.tonightEvent?.title,
+          venue.tonightEvent?.genre,
+          venue.tonightEvent?.dj,
+          venue.tonightEvent?.cover_price,
+          venue.tonightEvent?.dress_code,
+          venue.tonightEvent?.description,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+
+        const categoryMatch = venue.category === activeChip || venue.type === activeChip;
+        const termMatch = activeTerms.some((term) => searchable.includes(term.toLowerCase()));
+        const cheapMatch = activeChip === "Cheap Eats" && /free|cheap|no cover|low cover|\$0/.test(searchable);
+        const ageMatch = (activeChip === "21+" || activeChip === "18+") && searchable.includes(activeChip.toLowerCase());
+
+        return categoryMatch || termMatch || cheapMatch || ageMatch;
+      });
     }
 
     if (query.trim()) {
@@ -1940,9 +2006,9 @@ export default function Home() {
       id: `vote-${selected.id}-${Date.now()}`,
       venueId: selected.id,
       venueName: selected.name,
-      title: vibe === "lit" ? `🔥 ${selected.name} just got a Lit vote` : vibe === "dead" ? `🧊 ${selected.name} got a Dead vote` : `👍 ${selected.name} got a vibe check`,
+      title: vibe === "lit" ? `${selected.name} just got a Lit vote` : vibe === "dead" ? `${selected.name} got a Dead vote` : `${selected.name} got a vibe check`,
       message: vibe === "lit" ? "Someone nearby says this spot is lit right now." : vibe === "dead" ? "Someone nearby says the energy is low right now." : "Someone nearby says this spot is decent right now.",
-      icon: vibe === "lit" ? "🔥" : vibe === "dead" ? "🧊" : "👍",
+      icon: "",
       createdAt: new Date().toISOString(),
     });
 
@@ -2792,19 +2858,9 @@ export default function Home() {
     return () => window.clearInterval(interval);
   }, [selected, viewMode, trending.length]);
 
-  const chips = [
-    "All",
-    "Nightlife",
-    "Bars",
-    "Hookah",
-    "Breweries",
-    "Concerts",
-    "Experiences",
-    "Beaches",
-    "Museums",
-    "Food",
-    "Events",
-  ];
+  const primaryChips = CHIP_CONFIGS.slice(0, 17);
+  const moreChips = CHIP_CONFIGS.slice(17);
+  const chips = CHIP_CONFIGS.map((chip) => chip.label);
 
   const vibeGlowClass = selected?.status === "lit"
     ? "border-red-400/20 bg-red-500/10 shadow-[0_0_30px_rgba(239,68,68,0.22)]"
@@ -3203,7 +3259,7 @@ export default function Home() {
         </div>
       )}
 
-      <div className="absolute inset-x-0 top-2 z-20 px-3 sm:left-3 sm:right-3 sm:px-0">
+      <div className="absolute inset-x-0 top-2 z-50 px-3 sm:left-3 sm:right-3 sm:px-0">
         <div className={`rounded-[1.35rem] border p-3 sm:rounded-2xl sm:p-3 shadow-2xl backdrop-blur-2xl ${
           isDay
             ? "border-white/70 bg-white/90 text-slate-950 shadow-slate-900/10"
@@ -3218,8 +3274,8 @@ export default function Home() {
                   </p>
                   <h1 className={`text-[22px] font-black leading-tight tracking-tight sm:text-xl truncate ${isDay ? "text-slate-950" : "text-white"}`}>
                     {activeCount > 0
-                      ? `🔥 ${activeCount} active right now`
-                      : "What’s lit tonight? 🔥"}
+                      ? ` ${activeCount} active right now`
+                      : "What’s lit tonight? "}
                   </h1>
                 </div>
                 <select
@@ -3364,38 +3420,108 @@ export default function Home() {
             />
           </div>
 
-          <div className="mt-2 flex gap-1 overflow-x-auto pb-1 pr-1 no-scrollbar">
-            {chips.map((chip) => (
-              <button
-                key={chip}
-                onClick={() => {
-                  setActiveChip(chip);
-                  setSelected(null);
-                  setSheetExpanded(true);
-                  if (chip === "Events") {
-                    setViewMode("events");
-                    setVenueDirectoryOpen(false);
-                  } else if (chip === "All") {
-                    setViewMode("map");
-                    setVenueDirectoryOpen(true);
-                  } else {
-                    setViewMode("map");
-                    setVenueDirectoryOpen(false);
-                  }
-                }}
-                className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-bold transition sm:px-2 sm:py-1 sm:text-xs ${
-                  activeChip === chip
-                    ? isDay
-                      ? "bg-slate-950 text-white shadow-sm"
-                      : "bg-white text-black"
-                    : isDay
-                      ? "bg-slate-900/5 text-slate-700 hover:bg-slate-900/10"
-                      : "bg-white/10 text-white/75"
-                }`}
-              >
-                {chip}
-              </button>
-            ))}
+          <div className="relative z-50 mt-2 space-y-2">
+            <div className="relative">
+              <div className={`pointer-events-none absolute left-0 top-0 z-10 h-full w-8 rounded-l-xl bg-gradient-to-r ${isDay ? "from-white/95 to-transparent" : "from-black/85 to-transparent"}`} />
+              <div className={`pointer-events-none absolute right-0 top-0 z-10 h-full w-10 rounded-r-xl bg-gradient-to-l ${isDay ? "from-white/95 to-transparent" : "from-black/85 to-transparent"}`} />
+
+              <div className="flex gap-1.5 overflow-x-auto scroll-smooth pb-1 pl-1 pr-10 no-scrollbar snap-x snap-mandatory">
+                {primaryChips.map((chip) => (
+                  <button
+                    key={chip.label}
+                    onClick={() => {
+                      const nextPreference = chip.preference;
+                      setActiveChip(chip.label);
+                      setSelectedPreference(nextPreference);
+                      setSelected(null);
+                      setSheetExpanded(true);
+
+                      if (chip.label === "Events") {
+                        setViewMode("events");
+                        setVenueDirectoryOpen(false);
+                      } else if (chip.label === "All") {
+                        setViewMode("map");
+                        setVenueDirectoryOpen(true);
+                      } else {
+                        setViewMode("map");
+                        setVenueDirectoryOpen(false);
+                      }
+
+                      if (recommendation || recommendationLoading) {
+                        fetchRecommendation(undefined, nextPreference);
+                      }
+                    }}
+                    className={`snap-start shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm font-black transition active:scale-95 sm:px-3 sm:py-1.5 sm:text-xs ${
+                      activeChip === chip.label
+                        ? isDay
+                          ? "border-slate-950 bg-slate-950 text-white shadow-sm"
+                          : "border-white bg-white text-black shadow-[0_0_18px_rgba(255,255,255,0.18)]"
+                        : isDay
+                          ? "border-slate-300/70 bg-slate-900/5 text-slate-700 hover:bg-slate-900/10"
+                          : "border-white/10 bg-white/10 text-white/75 hover:bg-white/15"
+                    }`}
+                  >
+                    {chip.label}
+                  </button>
+                ))}
+
+                <button
+                  onClick={() => setChipsExpanded((current) => !current)}
+                  className={`snap-start shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm font-black transition active:scale-95 sm:px-3 sm:py-1.5 sm:text-xs ${
+                    chipsExpanded
+                      ? isDay
+                        ? "border-orange-500/40 bg-orange-500/15 text-orange-700"
+                        : "border-orange-400/30 bg-orange-500/20 text-orange-100"
+                      : isDay
+                        ? "border-slate-300/70 bg-white/70 text-slate-700 hover:bg-slate-100"
+                        : "border-white/10 bg-white/10 text-white/75 hover:bg-white/15"
+                  }`}
+                >
+                  {chipsExpanded ? "Less" : "More"}
+                  <span className="ml-1">{chipsExpanded ? "−" : "+"}</span>
+                </button>
+              </div>
+            </div>
+
+            {chipsExpanded && (
+              <div className="relative z-50 grid grid-cols-2 gap-1.5 rounded-2xl pb-1 backdrop-blur-xl sm:grid-cols-4 lg:grid-cols-6">
+                {moreChips.map((chip) => (
+                  <button
+                    key={chip.label}
+                    onClick={() => {
+                      const nextPreference = chip.preference;
+                      setActiveChip(chip.label);
+                      setSelectedPreference(nextPreference);
+                      setSelected(null);
+                      setSheetExpanded(true);
+
+                      if (chip.label === "Events") {
+                        setViewMode("events");
+                        setVenueDirectoryOpen(false);
+                      } else {
+                        setViewMode("map");
+                        setVenueDirectoryOpen(false);
+                      }
+
+                      if (recommendation || recommendationLoading) {
+                        fetchRecommendation(undefined, nextPreference);
+                      }
+                    }}
+                    className={`whitespace-nowrap rounded-2xl border px-3 py-2 text-left text-xs font-black transition active:scale-[0.98] ${
+                      activeChip === chip.label
+                        ? isDay
+                          ? "border-slate-950 bg-slate-950 text-white"
+                          : "border-white bg-white text-black"
+                        : isDay
+                          ? "border-slate-300/70 bg-white/70 text-slate-700 hover:bg-slate-100"
+                          : "border-white/10 bg-white/10 text-white/75 hover:bg-white/15"
+                    }`}
+                  >
+                    {chip.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className={`mt-2 grid grid-cols-2 gap-1 rounded-xl p-0.5 ${isDay ? "bg-slate-200/80" : "bg-white/[0.08]"}`}>
@@ -3440,7 +3566,7 @@ export default function Home() {
       </div>
 
       {hotRightNowSpots.length > 0 && !selected && viewMode === "map" && (
-        <div className="pointer-events-none absolute inset-x-0 top-[286px] z-30 px-3 sm:top-[218px] sm:px-4 lg:left-[330px] lg:right-[260px]">
+        <div className="pointer-events-none absolute inset-x-0 top-[286px] z-20 px-3 sm:top-[218px] sm:px-4 lg:left-[330px] lg:right-[260px]">
           <div
             className={`lit-desktop-ticker lit-mobile-ticker pointer-events-auto overflow-hidden rounded-full border shadow-2xl backdrop-blur-2xl ${
               isDay
@@ -3450,7 +3576,7 @@ export default function Home() {
           >
             <div className="flex items-center overflow-hidden">
               <div className={`z-10 flex shrink-0 items-center gap-2 self-stretch border-r px-3 py-2 ${isDay ? "border-slate-200/70 bg-white/90" : "border-white/10 bg-black/80"}`}>
-                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-orange-500 text-[11px] shadow-[0_0_18px_rgba(251,146,60,0.42)]">🔥</span>
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-orange-500 text-[11px] shadow-[0_0_18px_rgba(251,146,60,0.42)]"></span>
                 <span className={`text-[9px] font-black uppercase tracking-[0.24em] ${isDay ? "text-orange-700" : "text-orange-200"}`}>
                   Live Radar
                 </span>
@@ -3467,11 +3593,11 @@ export default function Home() {
                     const signals = (venue.voteCount || 0) + (venue.updateCount || 0);
                     const vibeIntensity = getVibeIntensity(venue);
                     const label = venue.vibeTrend && venue.vibeTrend !== "quiet"
-                      ? vibeTrendLabel(venue.vibeTrend).replace("⚡ ", "").replace("📈 ", "")
+                      ? vibeTrendLabel(venue.vibeTrend).replace(" ", "").replace(" ", "")
                       : venue.tonightEvent
                       ? "Event tonight"
-                      : energyLabel(venue.energyLevel).replace("🔥 ", "").replace("📈 ", "").replace("😴 ", "").replace("🧊 ", "");
-                    const leadIcon = originalIndex === 0 ? "🔥" : venue.vibeTrend === "heating" ? "📈" : venue.tonightEvent ? "🎧" : "✨";
+                      : energyLabel(venue.energyLevel).replace(" ", "").replace(" ", "").replace(" ", "").replace(" ", "");
+                    const leadIcon = originalIndex === 0 ? "" : venue.vibeTrend === "heating" ? "" : venue.tonightEvent ? "" : "";
 
                     return (
                       <button
@@ -3607,7 +3733,7 @@ export default function Home() {
           }`}
           aria-label="Toggle day night map mode"
         >
-          <span>{mapMode === "day" ? "☀️" : "🌙"}</span>
+          <span>{mapMode === "day" ? "" : ""}</span>
           <span>{mapMode === "day" ? "Day" : "Night"}</span>
         </button>
 
@@ -3650,12 +3776,12 @@ export default function Home() {
           aria-label="Ask voice concierge"
         >
           {voiceStatus === "listening"
-            ? "🎙️ Listening"
+            ? " Listening"
             : voiceStatus === "thinking"
-            ? "✨ Thinking"
+            ? " Thinking"
             : voiceStatus === "speaking"
-            ? "🔊 Speaking"
-            : "🎙️ Ask"}
+            ? " Speaking"
+            : " Ask"}
         </button>
 
         {voiceBubbleOpen && (
@@ -3942,7 +4068,7 @@ export default function Home() {
                               />
                             ) : (
                               <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-zinc-800 via-zinc-900 to-black text-2xl">
-                                🌃
+                                
                               </div>
                             )}
                             <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
@@ -4036,7 +4162,7 @@ export default function Home() {
                           borderColor: energyColor(selected.energyLevel),
                         }}
                       >
-                        🔥 {selected.voteCount || 0} active • {selected.updateCount || 0} updates
+                         {selected.voteCount || 0} active • {selected.updateCount || 0} updates
                       </span>
                       <span className="select-none rounded-full bg-white/10 px-2.5 py-1 font-semibold uppercase tracking-[0.18em] text-white/70 ring-1 ring-white/10 backdrop-blur-xl">
                         {confidenceLabel(selected.confidence)}
@@ -4163,27 +4289,27 @@ export default function Home() {
 
                 <div className="mt-4 grid grid-cols-2 gap-2 text-center sm:grid-cols-3">
                   <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3 shadow-inner shadow-white/5">
-                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35">🔥 Vibe</p>
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35"> Vibe</p>
                     <p className="mt-1 text-base font-black text-white">{selected.vibeScore || 0}/100</p>
                   </div>
                   <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3 shadow-inner shadow-white/5">
-                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35">📈 Trend</p>
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35"> Trend</p>
                     <p className="mt-1 text-xs font-black text-white">{vibeTrendLabel(selected.vibeTrend)}</p>
                   </div>
                   <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3 shadow-inner shadow-white/5">
-                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35">👥 Signals</p>
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35"> Signals</p>
                     <p className="mt-1 text-base font-black text-white">{(selected.voteCount || 0) + (selected.updateCount || 0)}</p>
                   </div>
                   <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3 shadow-inner shadow-white/5">
-                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35">✅ Trust</p>
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35"> Trust</p>
                     <p className="mt-1 text-xs font-black text-white">{confidenceLabel(selected.confidence)}</p>
                   </div>
                   <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3 shadow-inner shadow-white/5">
-                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35">🕒 Updated</p>
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35"> Updated</p>
                     <p className="mt-1 text-xs font-black text-white">{minutesAgo(selected.lastUpdated)}</p>
                   </div>
                   <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3 shadow-inner shadow-white/5">
-                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35">🎟 Tonight</p>
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35"> Tonight</p>
                     <p className="mt-1 text-xs font-black text-white">{selected.tonightEvent ? "Event" : "No event"}</p>
                   </div>
                 </div>
@@ -4293,7 +4419,7 @@ export default function Home() {
                   <div className="p-4">
                     <div className="flex min-h-[190px] flex-col items-center justify-center rounded-[1.75rem] border border-dashed border-white/15 bg-gradient-to-br from-white/[0.08] to-white/[0.025] p-5 text-center">
                       <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10 text-2xl">
-                        🏢
+                        
                       </div>
                       <p className="text-base font-black text-white">
                         Add this venue’s building photo
@@ -4450,7 +4576,7 @@ export default function Home() {
                       </p>
                     </div>
                     <div className="flex h-16 w-16 items-center justify-center rounded-full border border-white/10 bg-black/30 text-xl shadow-inner shadow-white/5">
-                      {selected.energyLevel === "high" ? "🔥" : selected.energyLevel === "medium" ? "📈" : selected.energyLevel === "negative" ? "🧊" : "🌙"}
+                      {selected.energyLevel === "high" ? "" : selected.energyLevel === "medium" ? "" : selected.energyLevel === "negative" ? "" : ""}
                     </div>
                   </div>
                   <p className="mt-3 text-[11px] font-semibold text-white/65">
@@ -4575,7 +4701,7 @@ export default function Home() {
                   onClick={() => vote("lit")}
                   className="select-none rounded-[1.75rem] border border-red-300/20 bg-gradient-to-br from-red-500 via-red-500 to-red-700 px-3 py-3 text-sm font-black shadow-lg shadow-red-500/15 transition hover:-translate-y-0.5 active:scale-[0.98]"
                 >
-                  <span className="block text-xl">🔥</span>
+                  <span className="block text-xl"></span>
                   <span className="mt-1 block text-[10px] uppercase tracking-[0.24em]">
                     Lit
                   </span>
@@ -4585,7 +4711,7 @@ export default function Home() {
                   onClick={() => vote("decent")}
                   className="select-none rounded-[1.75rem] border border-yellow-200/30 bg-gradient-to-br from-yellow-400 to-yellow-600 px-3 py-3 text-sm font-black text-black shadow-lg shadow-yellow-400/15 transition hover:-translate-y-0.5 active:scale-[0.98]"
                 >
-                  <span className="block text-xl">👍</span>
+                  <span className="block text-xl"></span>
                   <span className="mt-1 block text-[10px] uppercase tracking-[0.24em]">
                     Decent
                   </span>
@@ -4595,7 +4721,7 @@ export default function Home() {
                   onClick={() => vote("dead")}
                   className="select-none rounded-[1.75rem] border border-slate-300/20 bg-gradient-to-br from-slate-600 via-slate-700 to-slate-900 px-3 py-3 text-sm font-black shadow-lg shadow-slate-800/25 transition hover:-translate-y-0.5 active:scale-[0.98]"
                 >
-                  <span className="block text-xl">💤</span>
+                  <span className="block text-xl"></span>
                   <span className="mt-1 block text-[10px] uppercase tracking-[0.24em]">
                     Dead
                   </span>
@@ -4605,7 +4731,7 @@ export default function Home() {
                   onClick={() => vote("line_crazy")}
                   className="select-none rounded-[1.75rem] border border-purple-300/20 bg-gradient-to-br from-purple-500 to-fuchsia-700 px-3 py-3 text-sm font-black shadow-lg shadow-purple-500/15 transition hover:-translate-y-0.5 active:scale-[0.98]"
                 >
-                  <span className="block text-xl">🚫</span>
+                  <span className="block text-xl"></span>
                   <span className="mt-1 block text-[10px] uppercase tracking-[0.24em]">
                     Line
                   </span>
@@ -4710,7 +4836,7 @@ export default function Home() {
                             />
                           ) : (
                             <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-zinc-800 via-zinc-900 to-black text-2xl">
-                              🌃
+                              
                             </div>
                           )}
                           <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
