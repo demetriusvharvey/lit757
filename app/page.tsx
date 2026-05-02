@@ -613,6 +613,7 @@ export default function Home() {
   const [askText, setAskText] = useState("");
   const [recognitionError, setRecognitionError] = useState<string | null>(null);
   const [selectedPreference, setSelectedPreference] = useState<string | null>(null);
+  const [venueDirectoryOpen, setVenueDirectoryOpen] = useState(false);
   const [suggestionOpen, setSuggestionOpen] = useState(false);
   const [suggestionType, setSuggestionType] = useState("Event info");
   const [suggestionMessage, setSuggestionMessage] = useState("");
@@ -3371,7 +3372,16 @@ export default function Home() {
                   setActiveChip(chip);
                   setSelected(null);
                   setSheetExpanded(true);
-                  if (chip === "Events") setViewMode("events");
+                  if (chip === "Events") {
+                    setViewMode("events");
+                    setVenueDirectoryOpen(false);
+                  } else if (chip === "All") {
+                    setViewMode("map");
+                    setVenueDirectoryOpen(true);
+                  } else {
+                    setViewMode("map");
+                    setVenueDirectoryOpen(false);
+                  }
                 }}
                 className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-bold transition sm:px-2 sm:py-1 sm:text-xs ${
                   activeChip === chip
@@ -4621,6 +4631,148 @@ export default function Home() {
           )}
         </div>
       </div>
+
+
+      {venueDirectoryOpen && (
+        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/55 px-3 py-4 backdrop-blur-sm sm:items-center sm:px-6">
+          <div className="w-full max-h-[82vh] max-w-3xl overflow-hidden rounded-[2rem] border border-white/15 bg-zinc-950/95 shadow-2xl shadow-black/60 backdrop-blur-3xl">
+            <div className="sticky top-0 z-10 border-b border-white/10 bg-zinc-950/90 px-4 py-4 backdrop-blur-2xl sm:px-5">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.28em] text-orange-300">
+                    All venues
+                  </p>
+                  <h3 className="mt-1 text-xl font-black text-white">
+                    Pick a spot
+                  </h3>
+                  <p className="mt-1 text-xs text-white/45">
+                    {filteredVenues.length} places showing from your current city/filter.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setVenueDirectoryOpen(false)}
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/10 text-white transition hover:bg-white/15"
+                  aria-label="Close venue list"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="mt-3 flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.07] px-3 py-2">
+                <Search size={15} className="text-white/45" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search all venues by name, genre, city..."
+                  className="w-full bg-transparent text-sm text-white outline-none placeholder:text-white/35"
+                />
+              </div>
+            </div>
+
+            <div className="max-h-[64vh] overflow-y-auto p-3 sm:p-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                {filteredVenues.map((venue) => {
+                  const photoUrl = String(
+                    (venue as any).photo_url ||
+                      (venue as any).venue_photo_url ||
+                      (venue as any).building_photo_url ||
+                      (venue as any).exterior_photo_url ||
+                      (venue as any).image_url ||
+                      (venue as any).cover_image_url ||
+                      ""
+                  );
+                  const signalCount = (venue.voteCount || 0) + (venue.updateCount || 0);
+
+                  return (
+                    <button
+                      key={venue.id}
+                      onClick={() => {
+                        setSelected(venue);
+                        setSheetExpanded(true);
+                        setViewMode("map");
+                        setVenueDirectoryOpen(false);
+                        spotlightActivityVenue(venue.id);
+                        map?.flyTo({
+                          center: [venue.lng, venue.lat],
+                          zoom: 14,
+                          duration: 850,
+                        });
+                      }}
+                      className="group overflow-hidden rounded-[1.65rem] border border-white/10 bg-white/[0.06] text-left shadow-xl shadow-black/25 transition hover:-translate-y-0.5 hover:border-orange-300/35 hover:bg-white/[0.09] active:scale-[0.99]"
+                    >
+                      <div className="flex gap-3 p-3">
+                        <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-[1.25rem] bg-white/10">
+                          {photoUrl ? (
+                            <img
+                              src={photoUrl}
+                              alt={venue.name}
+                              className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-zinc-800 via-zinc-900 to-black text-2xl">
+                              🌃
+                            </div>
+                          )}
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
+                          <span className="absolute bottom-2 left-2 rounded-full bg-black/75 px-2 py-0.5 text-[10px] font-black text-white backdrop-blur-xl">
+                            {statusLabel(venue.status)}
+                          </span>
+                        </div>
+
+                        <div className="min-w-0 flex-1 py-1">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="truncate text-base font-black text-white">
+                                {venue.name}
+                              </p>
+                              <p className="mt-1 truncate text-[11px] font-semibold text-white/45">
+                                {venue.city} • {venue.category || venueType(venue)}
+                              </p>
+                            </div>
+                            <span
+                              className="shrink-0 rounded-full border px-2 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-white"
+                              style={{
+                                backgroundColor: `${energyColor(venue.energyLevel)}22`,
+                                borderColor: `${energyColor(venue.energyLevel)}75`,
+                              }}
+                            >
+                              {getVibeIntensity(venue)}
+                            </span>
+                          </div>
+
+                          <p className="mt-2 line-clamp-1 text-xs font-semibold text-white/70">
+                            {venue.tonightEvent
+                              ? venue.tonightEvent.title
+                              : venue.music_genre || "Mixed music"}
+                          </p>
+
+                          <div className="mt-3 flex flex-wrap gap-1.5">
+                            <span className="rounded-full bg-white/10 px-2 py-1 text-[10px] font-bold text-white/70">
+                              {energyLabel(venue.energyLevel)}
+                            </span>
+                            <span className="rounded-full bg-white/10 px-2 py-1 text-[10px] font-bold text-white/70">
+                              {signalCount} signal{signalCount === 1 ? "" : "s"}
+                            </span>
+                            <span className="rounded-full bg-white/10 px-2 py-1 text-[10px] font-bold text-white/70">
+                              {venue.cover || venue.tonightEvent?.cover_price || "Cover varies"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {filteredVenues.length === 0 && (
+                <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5 text-center text-sm text-white/55">
+                  No venues match that search yet.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {askModalOpen && (
         <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/60 px-4 py-6 sm:items-center">
