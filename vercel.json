@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/fetch-events?secret=supersecret123",
-      "schedule": "*/30 * * * *"
+      "schedule": "0 10 * * *"
     }
   ]
 }
