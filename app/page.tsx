@@ -29,6 +29,16 @@ type VenueWithEvent = Venue & {
   vibeTier?: "lit" | "decent" | "dead";
   vibeTrend?: "surging" | "heating" | "steady" | "cooling" | "quiet";
   vibeReason?: string;
+  aiScore?: number;
+  aiStatus?: string | null;
+  aiConfidence?: string | null;
+  aiSummary?: string | null;
+  aiSignals?: Record<string, any> | null;
+  hasGhostData?: boolean;
+  liveReportCount?: number;
+  liveReportScore?: number;
+  reportSummary?: string | null;
+  behaviorCategory?: "nightlife" | "restaurant" | "event";
 };
 
 type MapMode = "day" | "night";
@@ -67,6 +77,136 @@ type ActivityToast = {
   createdAt?: string | null;
 };
 
+
+type SupabaseEventRow = {
+  id: string;
+  name?: string | null;
+  title?: string | null;
+  venue_name?: string | null;
+  venue_id?: string | null;
+  start_time?: string | null;
+  end_time?: string | null;
+  source?: string | null;
+  source_event_id?: string | null;
+  ticket_status?: string | null;
+  genre?: string | null;
+  dj?: string | null;
+  cover_price?: string | null;
+  age_limit?: string | null;
+  dress_code?: string | null;
+  description?: string | null;
+  created_at?: string | null;
+};
+
+function formatEventTimeLabel(startIso?: string | null) {
+  if (!startIso) return "Time TBA";
+
+  const date = new Date(startIso);
+  if (Number.isNaN(date.getTime())) return "Time TBA";
+
+  return date.toLocaleString("en-US", {
+    weekday: "short",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function normalizeText(value?: string | null) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\b(the|a|an|at|and|llc|inc|venue|center|centre|theater|theatre|club|nightclub|bar|lounge|restaurant|va|virginia)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getTicketDemandBoost(ticketStatus?: string | null) {
+  const status = String(ticketStatus || "").toLowerCase();
+
+  if (status.includes("sold out")) return 30;
+  if (status.includes("almost")) return 25;
+  if (status.includes("selling fast")) return 22;
+  if (status.includes("limited")) return 18;
+  if (status.includes("available")) return 10;
+  if (status.includes("free")) return 8;
+
+  return 0;
+}
+
+function getEventTimingBoost(event?: any | null) {
+  if (!event?.start_time) return 10;
+
+  const start = new Date(event.start_time).getTime();
+  if (Number.isNaN(start)) return 10;
+
+  const now = Date.now();
+  const hoursUntilStart = (start - now) / (1000 * 60 * 60);
+  const hoursSinceStart = (now - start) / (1000 * 60 * 60);
+
+  // Event started recently or is happening tonight.
+  if (hoursSinceStart >= 0 && hoursSinceStart <= 6) return 28;
+  if (hoursUntilStart > 0 && hoursUntilStart <= 4) return 24;
+  if (hoursUntilStart > 4 && hoursUntilStart <= 12) return 18;
+  if (hoursUntilStart > 12 && hoursUntilStart <= 48) return 12;
+
+  return 6;
+}
+
+function normalizeEventForUi(event: SupabaseEventRow | null): any | null {
+  if (!event) return null;
+
+  const startIso = event.start_time || null;
+  const eventDate = startIso ? startIso.split("T")[0] : null;
+  const title = event.title || event.name || "Tonight event";
+  const ticketStatus = event.ticket_status || null;
+  const ticketBoost = getTicketDemandBoost(ticketStatus);
+
+  return {
+    ...event,
+    title,
+    name: event.name || title,
+    event_title: title,
+    event_date: eventDate,
+    starts_at_label: formatEventTimeLabel(startIso),
+    venue_name: event.venue_name || null,
+    genre: event.genre || "Live Event",
+    dj: event.dj || null,
+    cover_price: event.cover_price || ticketStatus || "Varies",
+    age_limit: event.age_limit || "Varies",
+    dress_code: event.dress_code || "Casual",
+    ticket_status: ticketStatus,
+    ticketBoost,
+    description:
+      event.description ||
+      (ticketStatus ? `${ticketStatus} · ${formatEventTimeLabel(startIso)}` : event.source ? `Source: ${event.source}` : null),
+  };
+}
+
+function eventVenueMatchScore(event: SupabaseEventRow, venue: any) {
+  const eventVenueId = String(event.venue_id || "");
+  if (eventVenueId && eventVenueId === String(venue.id || "")) return 1;
+
+  const eventVenueName = normalizeText(event.venue_name);
+  const venueName = normalizeText(venue.name);
+
+  if (!eventVenueName || !venueName) return 0;
+  if (eventVenueName === venueName) return 1;
+  if (eventVenueName.includes(venueName) || venueName.includes(eventVenueName)) return 0.92;
+
+  const eventTokens = new Set(eventVenueName.split(" ").filter((token) => token.length >= 3));
+  const venueTokens = venueName.split(" ").filter((token) => token.length >= 3);
+
+  if (!eventTokens.size || !venueTokens.length) return 0;
+
+  const hits = venueTokens.filter((token) => eventTokens.has(token)).length;
+  return hits / Math.max(venueTokens.length, eventTokens.size);
+}
+
+function eventMatchesVenue(event: SupabaseEventRow, venue: any) {
+  return eventVenueMatchScore(event, venue) >= 0.55;
+}
+
 const MAPBOX_STYLES: Record<MapMode, string> = {
   day: "mapbox://styles/mapbox/outdoors-v12",
   night: "mapbox://styles/mapbox/dark-v11",
@@ -88,7 +228,7 @@ const VIBE_SCORE: Record<Vibe, number> = {
 const VIBE_ENGINE_CONFIG = {
   voteMultiplier: 9,
   updateMultiplier: 7,
-  eventBoost: 12,
+  eventBoost: 22,
   recentBoost: 10,
   lineBoost: 5,
   negativePenalty: 14,
@@ -182,7 +322,7 @@ function vibeReasonText(args: {
 function calculateVenueVibe(args: {
   venueVotes: any[];
   updateMatches: any[];
-  tonightEvent: Event | null;
+  tonightEvent: any | null;
 }) {
   const now = Date.now();
   const voteCount = args.venueVotes.length;
@@ -216,7 +356,11 @@ function calculateVenueVibe(args: {
   const hasRecentPositive = hasRecentPositiveVote || hasRecentPositiveUpdate;
   const hasLineUpdate = args.updateMatches.some((update) => update.update_type === "Line update");
 
-  const eventBoost = args.tonightEvent ? VIBE_ENGINE_CONFIG.eventBoost : 0;
+  const eventTimingBoost = args.tonightEvent ? getEventTimingBoost(args.tonightEvent) : 0;
+  const ticketDemandBoost = args.tonightEvent ? getTicketDemandBoost(args.tonightEvent.ticket_status || args.tonightEvent.cover_price) : 0;
+  const eventBoost = args.tonightEvent
+    ? VIBE_ENGINE_CONFIG.eventBoost + eventTimingBoost + ticketDemandBoost
+    : 0;
   const recentBoost = recentSignalCount > 0 ? Math.min(18, recentSignalCount * VIBE_ENGINE_CONFIG.recentBoost) : 0;
   const lineBoost = hasLineUpdate ? VIBE_ENGINE_CONFIG.lineBoost : 0;
   const penalty = negativeDominant ? VIBE_ENGINE_CONFIG.negativePenalty : 0;
@@ -300,6 +444,27 @@ function statusLabel(status?: string) {
   return "Dead";
 }
 
+function scoreToVenueStatus(score: number): "lit" | "decent" | "dead" {
+  if (score >= 68) return "lit";
+  if (score >= 36) return "decent";
+  return "dead";
+}
+
+function scoreToEnergyLevel(score: number): "high" | "medium" | "low" | "negative" {
+  if (score >= 75) return "high";
+  if (score >= 45) return "medium";
+  if (score <= 25) return "negative";
+  return "low";
+}
+
+function scoreToVibeTrend(score: number, hasLiveSignals: boolean): "surging" | "heating" | "steady" | "cooling" | "quiet" {
+  if (hasLiveSignals && score >= 75) return "surging";
+  if (score >= 65) return "heating";
+  if (score >= 40) return "steady";
+  if (score > 0) return "quiet";
+  return "quiet";
+}
+
 function trendingLabel(score?: number) {
   if (score === undefined || score === null) return "active";
   if (score >= 8) return "exploding";
@@ -363,6 +528,119 @@ function getUpdateScore(update: { update_type?: string | null; message?: string 
   return 0;
 }
 
+function getBehaviorCategory(venue: Partial<VenueWithEvent>): "nightlife" | "restaurant" | "event" {
+  const searchable = [
+    venue.name,
+    venue.type,
+    venue.category,
+    venue.music_genre,
+    venue.tonightEvent?.title,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (/concert|arena|theater|theatre|music hall|opera|event|performance|show|venue/.test(searchable)) {
+    return "event";
+  }
+
+  if (/restaurant|grill|diner|taco|taqueria|pizza|seafood|burger|kitchen|food|cafe|brunch|eat|deli|fish|oyster|chophouse/.test(searchable)) {
+    return "restaurant";
+  }
+
+  return "nightlife";
+}
+
+type LiveReportOption = {
+  label: string;
+  type: string;
+  value: string;
+  tone: "quiet" | "watch" | "active" | "hot";
+};
+
+function getLiveReportOptions(category: "nightlife" | "restaurant" | "event"): LiveReportOption[] {
+  if (category === "restaurant") {
+    return [
+      { label: "No Wait", type: "crowd", value: "no_wait", tone: "quiet" },
+      { label: "Busy", type: "crowd", value: "busy", tone: "watch" },
+      { label: "Packed", type: "crowd", value: "packed", tone: "hot" },
+      { label: "Long Wait", type: "wait", value: "long_wait", tone: "active" },
+    ];
+  }
+
+  if (category === "event") {
+    return [
+      { label: "Selling Fast", type: "tickets", value: "selling_fast", tone: "active" },
+      { label: "Great Crowd", type: "crowd", value: "great_crowd", tone: "hot" },
+      { label: "Packed", type: "crowd", value: "packed", tone: "hot" },
+      { label: "Dead", type: "crowd", value: "dead", tone: "quiet" },
+    ];
+  }
+
+  return [
+    { label: "Dead", type: "vibe", value: "dead", tone: "quiet" },
+    { label: "Decent", type: "vibe", value: "decent", tone: "watch" },
+    { label: "Lit", type: "vibe", value: "lit", tone: "hot" },
+    { label: "Line Crazy", type: "line", value: "line_crazy", tone: "active" },
+  ];
+}
+
+function liveReportValueScore(reportValue?: string | null) {
+  switch (reportValue) {
+    case "lit":
+      return 34;
+    case "great_crowd":
+      return 32;
+    case "packed":
+      return 36;
+    case "line_crazy":
+      return 24;
+    case "long_wait":
+      return 22;
+    case "selling_fast":
+      return 26;
+    case "busy":
+      return 20;
+    case "decent":
+      return 14;
+    case "no_wait":
+      return 6;
+    case "dead":
+      return -34;
+    default:
+      return 0;
+  }
+}
+
+function getLiveReportScore(reports: any[]) {
+  return reports.reduce((sum, report) => {
+    const minutes = getMinutesSince(report.created_at);
+    const recency = minutes === null ? 0.35 : minutes <= 20 ? 1 : minutes <= 45 ? 0.75 : minutes <= 90 ? 0.45 : 0.2;
+    return sum + liveReportValueScore(report.report_value) * recency;
+  }, 0);
+}
+
+function getDominantReportSummary(reports: any[]) {
+  if (!reports.length) return null;
+
+  const counts = reports.reduce<Record<string, number>>((acc, report) => {
+    const value = report.report_value || "unknown";
+    acc[value] = (acc[value] || 0) + 1;
+    return acc;
+  }, {});
+
+  const [value, count] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+  const label = value.replace(/_/g, " ");
+  return `${count} live report${count === 1 ? "" : "s"}: ${label}`;
+}
+
+function reportToneClasses(tone: LiveReportOption["tone"]) {
+  if (tone === "hot") return "border-red-300/30 bg-red-500/15 text-red-50 hover:bg-red-500/25";
+  if (tone === "active") return "border-orange-300/25 bg-orange-500/15 text-orange-50 hover:bg-orange-500/25";
+  if (tone === "watch") return "border-yellow-300/25 bg-yellow-500/15 text-yellow-50 hover:bg-yellow-500/25";
+  return "border-white/10 bg-white/10 text-white/75 hover:bg-white/15";
+}
+
 function venueType(venue: VenueWithEvent) {
   return venue.type || "Nightlife Spot";
 }
@@ -389,83 +667,105 @@ function getDeviceId() {
 }
 
 function hasRealVenueSignals(venue: VenueWithEvent) {
+  // Real signals are human votes, live updates, or a scheduled event.
+  // Ghost Data should guide discovery, but it should not create “packed” heat by itself.
   return (
     (venue.voteCount || 0) > 0 ||
     (venue.updateCount || 0) > 0 ||
+    (venue.liveReportCount || 0) > 0 ||
     !!venue.tonightEvent
   );
 }
 
+function hasGhostVenueSignal(venue: VenueWithEvent) {
+  return !!venue.hasGhostData && (venue.aiScore || 0) > 0;
+}
+
+function isAiWatchingVenue(venue: VenueWithEvent) {
+  // AI-only signal: visible, calm, and honest. No red heat.
+  return !hasRealVenueSignals(venue) && hasGhostVenueSignal(venue) && (venue.aiScore || 0) >= 45;
+}
+
+function getMapVisualStatus(venue: VenueWithEvent): "quiet" | "watching" | "active" | "packed" {
+  const hasReal = hasRealVenueSignals(venue);
+  const score = venue.vibeScore || venue.score || venue.aiScore || 0;
+
+  if (hasReal && score >= 78) return "packed";
+  if (hasReal) return "active";
+  if (isAiWatchingVenue(venue)) return "watching";
+  return "quiet";
+}
+
 function getHeatWeight(venue: VenueWithEvent) {
+  // Heatmap is only for confirmed or live context.
+  // AI-only venues stay as clean dots so the map doesn’t lie.
   if (!hasRealVenueSignals(venue)) return 0;
 
   const baseVotes = venue.voteCount || 0;
   const baseUpdates = venue.updateCount || 0;
-  const eventWeight = venue.tonightEvent ? 6 : 0;
+  const baseReports = venue.liveReportCount || 0;
+  const eventWeight = venue.tonightEvent ? 8 : 0;
   const score = Math.max(0, venue.vibeScore || venue.score || 0);
   const trending = Math.max(0, venue.trendingScore || 0);
 
-  const rawValue = baseVotes * 8 + baseUpdates * 7 + eventWeight + score * 0.25 + trending * 0.15;
+  const rawValue = baseVotes * 10 + baseUpdates * 8 + baseReports * 12 + eventWeight + score * 0.18 + trending * 0.12;
   return Math.max(1, rawValue);
 }
 
 function updateMarkerElement(el: HTMLElement, venue: VenueWithEvent, zoom: number) {
-  const signals = (venue.voteCount || 0) + (venue.updateCount || 0);
-  const trending = hasRealVenueSignals(venue) ? (venue.trendingScore || 0) : 0;
-  const hasRecentVotes = (venue.lastUpdated && Date.now() - new Date(venue.lastUpdated).getTime() <= 30 * 60 * 1000);
-  const active = hasRealVenueSignals(venue) && (signals > 0 || trending > 2 || venue.status === "lit" || !!venue.tonightEvent);
+  const signals = (venue.voteCount || 0) + (venue.updateCount || 0) + (venue.liveReportCount || 0);
+  const hasReal = hasRealVenueSignals(venue);
+  const visualStatus = getMapVisualStatus(venue);
+  const active = hasReal && (signals > 0 || (venue.trendingScore || 0) > 2 || venue.status === "lit" || !!venue.tonightEvent);
+  const watching = visualStatus === "watching";
   
   let shouldShow = true;
   let displaySize = 0;
   
   if (zoom < 10) {
-    shouldShow = active;
-    displaySize = active ? Math.max(10, Math.round(16 * 0.65)) : 4;
+    shouldShow = active || watching;
+    displaySize = active ? 11 : watching ? 7 : 4;
   } else if (zoom < 12) {
     shouldShow = true;
-    displaySize = active ? Math.max(12, Math.round(20 * 0.8)) : 8;
+    displaySize = active ? 14 : watching ? 9 : 7;
   } else {
     shouldShow = true;
     displaySize = active
-      ? signals === 0 ? 16 : signals <= 2 ? 24 : signals <= 5 ? 32 : 40
-      : 12;
+      ? signals === 0 ? 16 : signals <= 2 ? 22 : signals <= 5 ? 28 : 34
+      : watching
+      ? 12
+      : 9;
   }
   
   el.style.display = shouldShow ? "block" : "none";
   el.style.width = `${displaySize}px`;
   el.style.height = `${displaySize}px`;
-  
-  const isVeryZoomedOut = zoom <= 9;
-  el.style.opacity = active
-    ? "1"
-    : isVeryZoomedOut
-      ? "0"
-      : zoom < 12
-        ? "0.35"
-        : "0.72";
+  el.style.opacity = active ? "1" : watching ? "0.9" : zoom < 12 ? "0.45" : "0.65";
 
   const core = el.querySelector(".lit-marker-core") as HTMLElement | null;
   if (!core) return;
 
-  const baseColor = active ? energyColor(venue.energyLevel) : "#64748b";
+  const baseColor =
+    visualStatus === "packed"
+      ? "#ef4444"
+      : visualStatus === "active"
+      ? "#fb923c"
+      : visualStatus === "watching"
+      ? "#facc15"
+      : "#6b7280";
+
   core.style.background = baseColor;
-  core.style.border = active ? "2px solid white" : zoom < 12 ? "none" : "1px solid rgba(255,255,255,0.2)";
-  core.style.transform = active && zoom >= 12 && venue.energyLevel === "high" ? "scale(1.08)" : "scale(1)";
-  core.style.filter = active ? "none" : "brightness(0.75)";
-  
-  const glow = active
-    ? zoom <= 10
-      ? "0 0 12px rgba(239,146,60,0.15)"
-      : energyGlow(venue.energyLevel)
-    : zoom < 11
-      ? "none"
-      : "0 0 8px rgba(148,163,184,0.1)";
-  core.style.boxShadow = glow;
-  
-  core.style.animation =
-    active && venue.energyLevel === "high" && zoom >= 12
-      ? "litPulse 1.6s ease-in-out infinite"
-      : "none";
+  core.style.border = active || watching ? "1.5px solid white" : "1px solid rgba(255,255,255,0.25)";
+  core.style.transform = visualStatus === "packed" && zoom >= 12 ? "scale(1.08)" : "scale(1)";
+  core.style.filter = "none";
+  core.style.boxShadow = active
+    ? visualStatus === "packed"
+      ? "0 0 30px rgba(239,68,68,0.42)"
+      : "0 0 22px rgba(251,146,60,0.32)"
+    : watching
+    ? "0 0 12px rgba(250,204,21,0.18)"
+    : "none";
+  core.style.animation = visualStatus === "packed" && zoom >= 12 ? "litPulse 1.8s ease-in-out infinite" : "none";
 }
 
 function buildVenueHeatmapGeoJSON(
@@ -483,9 +783,8 @@ function buildVenueHeatmapGeoJSON(
   >;
 
   const features: HeatFeature[] = venues.flatMap((venue) => {
-    const active = hasRealVenueSignals(venue);
-
-    if (!active || !venue.lng || !venue.lat) return [];
+    // Only real/live signals create heat. Ghost Data alone stays out of the heatmap.
+    if (!hasRealVenueSignals(venue) || !venue.lng || !venue.lat) return [];
 
     const weight = getHeatWeight(venue);
 
@@ -500,6 +799,7 @@ function buildVenueHeatmapGeoJSON(
           weight,
           voteCount: venue.voteCount || 0,
           updateCount: venue.updateCount || 0,
+          liveReportCount: venue.liveReportCount || 0,
           score: venue.score || 0,
           trendingScore: venue.trendingScore || 0,
         },
@@ -529,6 +829,82 @@ function vibeMeterLabel(venue: VenueWithEvent | null) {
   return "Needs more live signals";
 }
 
+function getVenueScoreBreakdown(venue: VenueWithEvent | null) {
+  if (!venue) return [];
+
+  const hasEvent = !!venue.tonightEvent;
+  const ticketBoost = hasEvent
+    ? getTicketDemandBoost(venue.tonightEvent?.ticket_status || venue.tonightEvent?.cover_price)
+    : 0;
+  const timingBoost = hasEvent ? getEventTimingBoost(venue.tonightEvent) : 0;
+  const liveSignalCount = (venue.voteCount || 0) + (venue.updateCount || 0) + (venue.liveReportCount || 0);
+  const voteBoost = Math.min(24, (venue.voteCount || 0) * 9);
+  const reportBoost = Math.max(0, Math.min(24, Math.round(venue.liveReportScore || 0)));
+  const aiBoost = !hasEvent && liveSignalCount === 0 && venue.hasGhostData ? Math.round(venue.aiScore || 0) : 0;
+
+  const items = [
+    {
+      label: hasEvent ? "Event boost" : "Event boost",
+      value: hasEvent ? `+${22 + timingBoost}` : "+0",
+      detail: hasEvent
+        ? `${venue.tonightEvent?.title || "Event"} ${venue.tonightEvent?.starts_at_label ? `· ${venue.tonightEvent.starts_at_label}` : ""}`
+        : "No matched event yet",
+      active: hasEvent,
+    },
+    {
+      label: "Ticket demand",
+      value: ticketBoost ? `+${ticketBoost}` : "+0",
+      detail: venue.tonightEvent?.ticket_status || "No ticket pressure signal",
+      active: ticketBoost > 0,
+    },
+    {
+      label: "Live crowd",
+      value: liveSignalCount ? `+${voteBoost + reportBoost}` : "+0",
+      detail: liveSignalCount
+        ? `${liveSignalCount} live signal${liveSignalCount === 1 ? "" : "s"}`
+        : "No user votes yet",
+      active: liveSignalCount > 0,
+    },
+    {
+      label: "AI baseline",
+      value: aiBoost ? `+${aiBoost}` : venue.hasGhostData ? `+${Math.round((venue.aiScore || 0) * 0.28)}` : "+0",
+      detail: venue.hasGhostData ? "Ghost Data is watching this spot" : "No AI baseline",
+      active: !!venue.hasGhostData,
+    },
+  ];
+
+  return items;
+}
+
+function getPrimaryLitReason(venue: VenueWithEvent | null) {
+  if (!venue) return "Waiting on live signals.";
+
+  const event = venue.tonightEvent as any;
+  const liveSignalCount = (venue.voteCount || 0) + (venue.updateCount || 0) + (venue.liveReportCount || 0);
+
+  if (event?.title) {
+    const ticket = event.ticket_status || event.cover_price;
+    return `${event.title} is driving this score${ticket ? ` · ${ticket}` : ""}${event.starts_at_label ? ` · ${event.starts_at_label}` : ""}.`;
+  }
+
+  if (liveSignalCount > 0) {
+    return `${liveSignalCount} fresh live signal${liveSignalCount === 1 ? "" : "s"} are driving this score.`;
+  }
+
+  if (venue.hasGhostData) {
+    return "AI baseline is watching this venue until live votes come in.";
+  }
+
+  return "No event or live crowd signal yet — this needs check-ins.";
+}
+
+function getDecisionLabel(venue: VenueWithEvent | null) {
+  if (!venue) return "Check first";
+  if (venue.status === "lit") return "Go-worthy right now";
+  if (venue.status === "decent") return "Worth watching";
+  return "Needs confirmation";
+}
+
 function buildVenuePointsGeoJSON(
   venues: VenueWithEvent[],
   spotlightVenueId?: string | null
@@ -556,15 +932,18 @@ function buildVenuePointsGeoJSON(
   const features = venues.flatMap((venue) => {
     if (!venue.lng || !venue.lat) return [];
 
-    const signalCount = (venue.voteCount || 0) + (venue.updateCount || 0);
+    const signalCount = (venue.voteCount || 0) + (venue.updateCount || 0) + (venue.liveReportCount || 0);
     const realSignals = hasRealVenueSignals(venue);
-    const vibeScore = realSignals ? Math.max(0, venue.vibeScore || venue.score || 0) : 0;
+    const aiScore = Math.max(0, venue.aiScore || 0);
+    const vibeScore = Math.max(0, venue.vibeScore || venue.score || aiScore || 0);
+    const visualStatus = getMapVisualStatus(venue);
+    const isAiWatching = visualStatus === "watching";
     const trending = realSignals ? Math.max(0, venue.trendingScore || 0) : 0;
     const activeScore = realSignals
-      ? Math.max(1, signalCount * 6 + (venue.tonightEvent ? 6 : 0) + trending + vibeScore * 0.35)
+      ? Math.max(1, signalCount * 7 + (venue.tonightEvent ? 8 : 0) + trending + vibeScore * 0.25)
       : 0;
     const isSurging = realSignals && (venue.vibeTrend === "surging" || vibeScore >= 78 || trending >= 90);
-    const isHeating = realSignals && (venue.vibeTrend === "heating" || venue.energyLevel === "medium");
+    const isHeating = realSignals && !isSurging && (venue.vibeTrend === "heating" || venue.energyLevel === "medium" || vibeScore >= 55);
     const isCooling = realSignals && (venue.vibeTrend === "cooling" || venue.energyLevel === "negative");
     const isSpotlight = !!spotlightVenueId && venue.id === spotlightVenueId;
 
@@ -580,15 +959,19 @@ function buildVenuePointsGeoJSON(
           id: venue.id,
           name: venue.name,
           status: venue.status || "dead",
+          visualStatus,
           energyLevel: venue.energyLevel || "low",
           voteCount: venue.voteCount || 0,
           updateCount: venue.updateCount || 0,
-          score: realSignals ? venue.score || 0 : 0,
+          liveReportCount: venue.liveReportCount || 0,
+          score: vibeScore,
+          aiScore,
           vibeScore,
           vibeTrend: realSignals ? venue.vibeTrend || "quiet" : "quiet",
           trendingScore: trending,
           signalCount,
           activeScore,
+          isAiWatching,
           isSurging,
           isHeating,
           isCooling,
@@ -655,6 +1038,8 @@ export default function Home() {
   const [suggestionFeedback, setSuggestionFeedback] = useState("");
   const [suggestionStatus, setSuggestionStatus] = useState<"success" | "error" | null>(null);
   const [shareFeedback, setShareFeedback] = useState("");
+  const [liveReportFeedback, setLiveReportFeedback] = useState("");
+  const [liveReportLoading, setLiveReportLoading] = useState(false);
   const [eventOpen, setEventOpen] = useState(false);
   const [eventTitle, setEventTitle] = useState("");
   const [eventDate, setEventDate] = useState("");
@@ -795,6 +1180,8 @@ export default function Home() {
         ? "This is the move to watch over the next hour."
         : signals > 0
         ? "It has real signals, but keep checking before you commit."
+        : pick.hasGhostData
+        ? "AI has a read on this spot, but user votes can confirm it."
         : "No fresh crowd signals yet, so treat this as a discovery pick.";
 
       const reason = pick.vibeReason || "The live score, venue context, and latest signals make this the best move right now.";
@@ -807,6 +1194,8 @@ export default function Home() {
           ? `${signals} live signal${signals === 1 ? "" : "s"} from recent votes or updates.`
           : pick.tonightEvent
           ? "Event context is carrying this recommendation tonight."
+          : pick.hasGhostData
+          ? `Ghost Data AI score is ${pick.aiScore || 0}/100 for this spot.`
           : "Discovery pick because no venue has strong live signals yet.",
         pick.vibeTrend && pick.vibeTrend !== "quiet"
           ? `${vibeTrendLabel(pick.vibeTrend)} trend detected from the live scoring engine.`
@@ -1008,14 +1397,25 @@ export default function Home() {
       return;
     }
 
-    const today = new Date().toISOString().split("T")[0];
+    const nowWindowStart = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+    const futureWindowEnd = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
 
     const { data: eventsData, error: eventsError } = await supabase
       .from("events")
-      .select("*")
-      .eq("event_date", today);
+      .select("id, source_event_id, name, venue_name, start_time, end_time, source, ticket_status, created_at")
+      .not("start_time", "is", null)
+      .gte("start_time", nowWindowStart)
+      .lte("start_time", futureWindowEnd)
+      .order("start_time", { ascending: true });
 
-    if (eventsError) console.error("Events error:", eventsError);
+    if (eventsError) {
+      console.error("Events error details:", {
+        message: eventsError.message,
+        details: eventsError.details,
+        hint: eventsError.hint,
+        code: eventsError.code,
+      });
+    }
 
     const since = new Date(Date.now() - 90 * 60 * 1000).toISOString();
 
@@ -1033,6 +1433,26 @@ export default function Home() {
 
     if (updatesError) console.error("Suggested updates error:", updatesError);
 
+    const { data: liveReportsData, error: liveReportsError } = await supabase
+      .from("venue_live_reports")
+      .select("*")
+      .gte("created_at", since);
+
+    if (liveReportsError) console.error("Live reports error:", liveReportsError);
+
+    const { data: intelligenceData, error: intelligenceError } = await supabase
+      .from("venue_intelligence")
+      .select("*");
+
+    if (intelligenceError) {
+      console.error("Venue intelligence error:", intelligenceError);
+      console.warn("Ghost Data is not visible to the frontend. Check RLS SELECT policy on venue_intelligence.");
+    }
+
+    const intelligenceByVenueId = new Map(
+      (intelligenceData || []).map((intel) => [intel.venue_id, intel])
+    );
+
     const enriched =
       venuesData?.map((venue) => {
         const venueVotes =
@@ -1044,6 +1464,13 @@ export default function Home() {
               update.venue_id === venue.id ||
               (!update.venue_id && update.venue_name === venue.name)
           ) || [];
+
+        const liveReports =
+          liveReportsData?.filter((report) => report.venue_id === venue.id) || [];
+
+        const liveReportCount = liveReports.length;
+        const liveReportScore = getLiveReportScore(liveReports);
+        const reportSummary = getDominantReportSummary(liveReports);
 
         const updateCount = updateMatches.length;
 
@@ -1066,8 +1493,31 @@ export default function Home() {
             new Date(a.created_at).getTime()
         );
 
-        const tonightEvent =
-          eventsData?.find((event) => event.venue_id === venue.id) || null;
+        const sortedLiveReports = [...liveReports].sort(
+          (a, b) =>
+            new Date(b.created_at).getTime() -
+            new Date(a.created_at).getTime()
+        );
+
+        const matchedEvents = ((eventsData as SupabaseEventRow[] | null | undefined) || [])
+          .filter((event) => eventMatchesVenue(event, venue))
+          .sort((a, b) => {
+            const aNormalized = normalizeEventForUi(a);
+            const bNormalized = normalizeEventForUi(b);
+            const aScore =
+              eventVenueMatchScore(a, venue) * 100 +
+              getEventTimingBoost(aNormalized) +
+              getTicketDemandBoost(a.ticket_status);
+            const bScore =
+              eventVenueMatchScore(b, venue) * 100 +
+              getEventTimingBoost(bNormalized) +
+              getTicketDemandBoost(b.ticket_status);
+
+            return bScore - aScore;
+          });
+
+        const rawTonightEvent = matchedEvents[0] || null;
+        const tonightEvent = normalizeEventForUi(rawTonightEvent);
 
         const vibeEngine = calculateVenueVibe({
           venueVotes,
@@ -1075,11 +1525,44 @@ export default function Home() {
           tonightEvent,
         });
 
-        const finalScore = vibeEngine.finalScore;
-        const trendingScore = vibeEngine.trendingScore;
-        const momentumLabel = vibeEngine.momentumLabel;
-        const status = vibeEngine.status;
-        const energyLevel = vibeEngine.energyLevel;
+        const intel = intelligenceByVenueId.get(venue.id) as any;
+        const aiScore = typeof intel?.lit_score === "number" ? intel.lit_score : 0;
+        const hasGhostData = !!intel && aiScore > 0;
+        const behaviorCategory = getBehaviorCategory({ ...venue, tonightEvent });
+        const hasLiveSignals = voteCount + updateCount + liveReportCount > 0 || !!tonightEvent;
+
+        // Ghost Data System merge:
+        // - If users/events exist, real signals dominate.
+        // - If no users/events exist yet, AI keeps the venue useful instead of dead/empty.
+        const liveAdjustedScore = clampScore(vibeEngine.finalScore + liveReportScore);
+
+        const finalScore = clampScore(
+          hasLiveSignals
+            ? liveAdjustedScore * 0.72 + aiScore * 0.28
+            : hasGhostData
+            ? aiScore
+            : vibeEngine.finalScore
+        );
+
+        const finalStatus = scoreToVenueStatus(finalScore);
+        const finalTrend = hasLiveSignals
+          ? vibeEngine.vibeTrend
+          : scoreToVibeTrend(finalScore, hasLiveSignals);
+        const finalEnergyLevel = hasLiveSignals
+          ? vibeEngine.energyLevel
+          : scoreToEnergyLevel(finalScore);
+        const trendingScore = hasLiveSignals
+          ? Math.round(vibeEngine.trendingScore + liveReportCount * 9 + Math.max(0, liveReportScore) * 0.35 + aiScore * 0.2)
+          : hasGhostData
+          ? Math.round(aiScore)
+          : vibeEngine.trendingScore;
+        const momentumLabel = hasLiveSignals
+          ? vibeEngine.momentumLabel
+          : finalTrend === "heating"
+          ? "AI sees heat"
+          : finalTrend === "steady"
+          ? "AI steady read"
+          : "AI watching";
 
         return {
           ...venue,
@@ -1088,20 +1571,36 @@ export default function Home() {
           updateCount,
           trendingScore,
           momentumLabel,
-          vibeScore: vibeEngine.vibeScore,
-          vibeTier: vibeEngine.vibeTier,
-          vibeTrend: vibeEngine.vibeTrend,
-          vibeReason: vibeEngine.vibeReason,
+          vibeScore: finalScore,
+          vibeTier: finalStatus,
+          vibeTrend: finalTrend,
+          vibeReason: liveReportCount > 0
+            ? `${reportSummary}. Fresh user reports are pushing this score right now.`
+            : hasLiveSignals
+            ? vibeEngine.vibeReason
+            : intel?.summary || "Ghost Data is estimating this venue from AI signals until live user votes come in.",
           confidence:
-            voteCount + updateCount >= 5
+            voteCount + updateCount + liveReportCount >= 5
               ? "high"
-              : voteCount + updateCount >= 2
+              : voteCount + updateCount + liveReportCount >= 2 || String(intel?.confidence || "").toLowerCase() === "medium"
               ? "medium"
+              : hasGhostData
+              ? "low"
               : "low",
-          status,
-          energyLevel,
+          status: finalStatus,
+          energyLevel: finalEnergyLevel,
+          aiScore,
+          aiStatus: intel?.status || null,
+          aiConfidence: intel?.confidence || null,
+          aiSummary: intel?.summary || null,
+          aiSignals: intel?.signals_json || null,
+          hasGhostData,
+          liveReportCount,
+          liveReportScore,
+          reportSummary,
+          behaviorCategory,
           lastUpdated:
-            sortedVotes[0]?.created_at || sortedUpdates[0]?.created_at || null,
+            sortedVotes[0]?.created_at || sortedUpdates[0]?.created_at || sortedLiveReports[0]?.created_at || intel?.updated_at || null,
           tonightEvent,
         };
       }) || [];
@@ -1303,15 +1802,18 @@ export default function Home() {
       const surgingExpression: any = ["==", ["get", "isSurging"], true];
       const heatingExpression: any = ["==", ["get", "isHeating"], true];
       const coolingExpression: any = ["==", ["get", "isCooling"], true];
+      const aiWatchingExpression: any = ["==", ["get", "isAiWatching"], true];
       const hotColorExpression: any = [
         "case",
         surgingExpression,
-        "#ff3b30",
+        "#ef4444", // confirmed packed / live hot
         heatingExpression,
-        "#fb923c",
+        "#fb923c", // confirmed active
         coolingExpression,
-        "#60a5fa",
-        ["match", ["get", "energyLevel"], "high", "#fb923c", "medium", "#facc15", "negative", "#60a5fa", "#64748b"],
+        "#60a5fa", // confirmed cooling
+        aiWatchingExpression,
+        "#facc15", // AI watching only, no fake heat
+        "#6b7280", // quiet / monitored
       ];
 
 
@@ -1534,13 +2036,13 @@ export default function Home() {
               ["linear"],
               ["zoom"],
               8,
-              ["case", activeExpression, 1, 0.25],
+              ["case", activeExpression, 1, aiWatchingExpression, 0.95, 0.45],
               10,
-              ["case", activeExpression, 1, 0.42],
+              ["case", activeExpression, 1, aiWatchingExpression, 0.95, 0.52],
               12,
-              ["case", activeExpression, 1, 0.55],
+              ["case", activeExpression, 1, aiWatchingExpression, 0.95, 0.6],
               15,
-              ["case", activeExpression, 1, 0.72],
+              ["case", activeExpression, 1, aiWatchingExpression, 0.95, 0.68],
             ],
             "circle-stroke-color": "#ffffff",
             "circle-stroke-width": [
@@ -2015,6 +2517,67 @@ export default function Home() {
     if ("vibrate" in navigator) navigator.vibrate(40);
   }
 
+  async function submitLiveReport(option: LiveReportOption) {
+    if (!selected || liveReportLoading) return;
+
+    const deviceId = getDeviceId();
+    setLiveReportLoading(true);
+    setLiveReportFeedback("");
+
+    try {
+      const response = await fetch("/api/live-report", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          venue_id: selected.id,
+          report_type: option.type,
+          report_value: option.value,
+          venue_category: selected.behaviorCategory || getBehaviorCategory(selected),
+          device_id: deviceId,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "Live report failed");
+      }
+
+      setLiveReportFeedback(`Reported: ${option.label}`);
+      await loadVenues();
+
+      setSelected((prev) =>
+        prev
+          ? {
+              ...prev,
+              liveReportCount: (prev.liveReportCount || 0) + 1,
+              lastUpdated: new Date().toISOString(),
+            }
+          : prev
+      );
+
+      showActivityToast({
+        id: `live-report-${selected.id}-${Date.now()}`,
+        venueId: selected.id,
+        venueName: selected.name,
+        title: `${selected.name} got a live report`,
+        message: `${option.label} was reported just now.`,
+        icon: "",
+        createdAt: new Date().toISOString(),
+      });
+
+      if ("vibrate" in navigator) navigator.vibrate(35);
+      window.setTimeout(() => setLiveReportFeedback(""), 2200);
+    } catch (error) {
+      console.error("Live report error:", error);
+      setLiveReportFeedback("Could not send report. Try again.");
+    } finally {
+      setLiveReportLoading(false);
+    }
+  }
+
   async function uploadSuggestionMedia() {
     if (!suggestionMediaFile || !selected) {
       return { mediaUrl: null as string | null, mediaType: null as string | null };
@@ -2285,15 +2848,18 @@ export default function Home() {
     const surgingExpression: any = ["==", ["get", "isSurging"], true];
     const heatingExpression: any = ["==", ["get", "isHeating"], true];
     const coolingExpression: any = ["==", ["get", "isCooling"], true];
+    const aiWatchingExpression: any = ["==", ["get", "isAiWatching"], true];
     const hotColorExpression: any = [
       "case",
       surgingExpression,
-      "#ff3b30",
+      "#ef4444", // confirmed packed / live hot
       heatingExpression,
-      "#fb923c",
+      "#fb923c", // confirmed active
       coolingExpression,
-      "#60a5fa",
-      ["match", ["get", "energyLevel"], "high", "#fb923c", "medium", "#facc15", "negative", "#60a5fa", effectiveMode === "day" ? "#334155" : "#64748b"],
+      "#60a5fa", // confirmed cooling
+      aiWatchingExpression,
+      "#facc15", // AI watching only, no fake heat
+      effectiveMode === "day" ? "#334155" : "#6b7280", // quiet / monitored
     ];
 
 
@@ -2516,13 +3082,13 @@ export default function Home() {
             ["linear"],
             ["zoom"],
             8,
-            ["case", activeExpression, 1, 0.25],
+            ["case", activeExpression, 1, aiWatchingExpression, 0.95, 0.45],
             10,
-            ["case", activeExpression, 1, 0.42],
+            ["case", activeExpression, 1, aiWatchingExpression, 0.95, 0.52],
             12,
-            ["case", activeExpression, 1, 0.55],
+            ["case", activeExpression, 1, aiWatchingExpression, 0.95, 0.6],
             15,
-            ["case", activeExpression, 1, 0.72],
+            ["case", activeExpression, 1, aiWatchingExpression, 0.95, 0.68],
           ],
           "circle-stroke-color": effectiveMode === "day" ? "#0f172a" : "#ffffff",
           "circle-stroke-width": [
@@ -4030,7 +4596,7 @@ export default function Home() {
                 <div className="space-y-3">
                   {visibleTopSpots.map((venue, index) => {
                     const photoUrl = (venue as any).photo_url as string | undefined;
-                    const signalCount = (venue.voteCount || 0) + (venue.updateCount || 0);
+                    const signalCount = (venue.voteCount || 0) + (venue.updateCount || 0) + (venue.liveReportCount || 0);
                     const vibeIntensity = getVibeIntensity(venue);
                     const cardReason = venue.vibeReason || venue.momentumLabel || energyLabel(venue.energyLevel);
                     const eventLine = venue.tonightEvent
@@ -4162,7 +4728,7 @@ export default function Home() {
                           borderColor: energyColor(selected.energyLevel),
                         }}
                       >
-                         {selected.voteCount || 0} active • {selected.updateCount || 0} updates
+                         {(selected.voteCount || 0) + (selected.liveReportCount || 0)} active • {selected.updateCount || 0} updates
                       </span>
                       <span className="select-none rounded-full bg-white/10 px-2.5 py-1 font-semibold uppercase tracking-[0.18em] text-white/70 ring-1 ring-white/10 backdrop-blur-xl">
                         {confidenceLabel(selected.confidence)}
@@ -4244,106 +4810,186 @@ export default function Home() {
                 </div>
               )}
 
-              <div className="mb-4 overflow-hidden rounded-[2rem] border border-orange-300/20 bg-gradient-to-br from-orange-500/15 via-red-500/10 to-fuchsia-500/10 p-4 shadow-2xl shadow-orange-500/10 backdrop-blur-2xl">
-                <div className="flex items-start justify-between gap-3">
+              {(() => {
+                const scoreBreakdown = getVenueScoreBreakdown(selected);
+                const event = selected.tonightEvent as any;
+                const liveSignalCount = (selected.voteCount || 0) + (selected.updateCount || 0) + (selected.liveReportCount || 0);
+                const ticketLabel = event?.ticket_status || event?.cover_price || null;
+
+                return (
+                  <div className="mb-4 overflow-hidden rounded-[2rem] border border-orange-300/25 bg-gradient-to-br from-orange-500/18 via-red-500/12 to-fuchsia-500/12 p-4 shadow-2xl shadow-orange-500/10 backdrop-blur-2xl">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="min-w-0 flex-1">
+                        <div className="mb-3 flex flex-wrap items-center gap-2">
+                          <span className="rounded-full border border-orange-300/25 bg-orange-500/15 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-orange-100">
+                            Why it&apos;s {statusLabel(selected.status)}
+                          </span>
+                          {event && (
+                            <span className="rounded-full border border-fuchsia-300/25 bg-fuchsia-500/15 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-fuchsia-100">
+                              Event signal active
+                            </span>
+                          )}
+                          {ticketLabel && (
+                            <span className="rounded-full border border-amber-300/25 bg-amber-400/15 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-amber-100">
+                              {ticketLabel}
+                            </span>
+                          )}
+                        </div>
+
+                        <h3 className="text-2xl font-black leading-tight text-white sm:text-3xl">
+                          {getDecisionLabel(selected)}
+                        </h3>
+                        <p className="mt-2 max-w-3xl text-sm leading-6 text-white/70">
+                          {getPrimaryLitReason(selected)}
+                        </p>
+                      </div>
+
+                      <div className="shrink-0 rounded-[1.7rem] border border-white/10 bg-black/40 px-4 py-3 text-center shadow-inner shadow-white/5">
+                        <p className="text-4xl font-black text-white">{Math.round(selectedVibeIntensity)}</p>
+                        <p className="text-[10px] font-black uppercase tracking-[0.24em] text-white/40">Live Score</p>
+                      </div>
+                    </div>
+
+                    {event ? (
+                      <div className="mt-4 rounded-[1.7rem] border border-white/10 bg-black/35 p-4 shadow-inner shadow-white/5">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="min-w-0">
+                            <p className="text-[10px] font-black uppercase tracking-[0.28em] text-orange-200/80">Tonight&apos;s event</p>
+                            <h4 className="mt-2 text-xl font-black leading-tight text-white">{event.title}</h4>
+                            <p className="mt-1 text-sm text-white/60">
+                              {event.starts_at_label || "Time TBA"}
+                              {event.genre ? ` · ${event.genre}` : ""}
+                              {event.dj ? ` · DJ: ${event.dj}` : ""}
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap gap-2 sm:justify-end">
+                            {ticketLabel && (
+                              <span className="rounded-full border border-orange-300/25 bg-orange-500/15 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-orange-100">
+                                {ticketLabel}
+                              </span>
+                            )}
+                            <span className="rounded-full border border-white/10 bg-white/10 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-white/70">
+                              Score boost active
+                            </span>
+                          </div>
+                        </div>
+                        <p className="mt-3 rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs leading-5 text-white/65">
+                          This venue is lighting up because the event is matched to this spot and ticket/event demand is boosting the score before user votes come in.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="mt-4 rounded-[1.7rem] border border-white/10 bg-black/25 p-4">
+                        <p className="text-[10px] font-black uppercase tracking-[0.28em] text-white/40">No event matched yet</p>
+                        <p className="mt-2 text-sm leading-6 text-white/60">
+                          This spot needs live check-ins, user votes, or an event match before it should look truly hot.
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="mt-4">
+                      <div className="mb-2 flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.22em] text-white/45">
+                        <span>{selectedVibeMeterLabel}</span>
+                        <span>{vibeTrendLabel(selected.vibeTrend)} · {statusLabel(selected.status)}</span>
+                      </div>
+                      <div className="h-3 overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-orange-300 via-red-400 to-fuchsia-500 shadow-[0_0_22px_rgba(249,115,22,0.45)] transition-all duration-700"
+                          style={{ width: `${selectedVibeIntensity}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                      {scoreBreakdown.map((item) => (
+                        <div
+                          key={item.label}
+                          className={`rounded-2xl border px-3 py-3 shadow-inner shadow-white/5 ${
+                            item.active
+                              ? "border-orange-300/20 bg-orange-500/10"
+                              : "border-white/10 bg-white/[0.05]"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35">{item.label}</p>
+                            <p className="text-sm font-black text-white">{item.value}</p>
+                          </div>
+                          <p className="mt-2 line-clamp-2 text-[11px] leading-4 text-white/55">{item.detail}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
+                      <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3 shadow-inner shadow-white/5">
+                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35">Status</p>
+                        <p className="mt-1 text-base font-black text-white">{statusLabel(selected.status)}</p>
+                      </div>
+                      <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3 shadow-inner shadow-white/5">
+                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35">Signals</p>
+                        <p className="mt-1 text-base font-black text-white">{liveSignalCount}</p>
+                      </div>
+                      <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3 shadow-inner shadow-white/5">
+                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35">Trust</p>
+                        <p className="mt-1 text-xs font-black text-white">{confidenceLabel(selected.confidence)}</p>
+                      </div>
+                      <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3 shadow-inner shadow-white/5">
+                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35">Updated</p>
+                        <p className="mt-1 text-xs font-black text-white">{minutesAgo(selected.lastUpdated)}</p>
+                      </div>
+                    </div>
+
+                    <p className="mt-4 rounded-2xl border border-white/10 bg-black/25 px-3 py-2 text-[11px] leading-5 text-white/60">
+                      <span className="font-bold text-white/80">Score logic:</span> Event timing, ticket demand, live votes, check-ins, and AI baseline all feed the score. User votes still override the estimate as real people check in.
+                    </p>
+                  </div>
+                );
+              })()}
+
+              <div className="mb-4 overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.055] p-4 shadow-xl shadow-black/20 backdrop-blur-xl">
+                <div className="mb-3 flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-[10px] font-black uppercase tracking-[0.28em] text-orange-300">
-                      Tonight&apos;s Move
+                    <p className="text-[10px] font-black uppercase tracking-[0.26em] text-white/45">
+                      Live Check-In
                     </p>
-                    <h3 className="mt-2 text-lg font-black text-white">
-                      {selected.status === "lit"
-                        ? "Pull up now"
-                        : selected.status === "decent"
-                        ? "Worth watching"
-                        : "Check before you go"}
+                    <h3 className="mt-1 text-base font-black text-white">
+                      {selected.behaviorCategory === "restaurant"
+                        ? "How crowded is it?"
+                        : selected.behaviorCategory === "event"
+                        ? "How is the event?"
+                        : "How is the vibe?"}
                     </h3>
-                    <p className="mt-1 text-xs leading-5 text-white/65">
-                      {selected.status === "lit"
-                        ? `${selected.name} is showing the strongest live energy right now. The map signals say this is one of the better moves tonight.`
-                        : selected.status === "decent"
-                        ? `${selected.name} has some momentum, but it is not fully on fire yet. Watch the updates or ask AI before you commit.`
-                        : `${selected.name} is quiet based on the latest signals. A fresh vote or update could change this fast.`}
+                    <p className="mt-1 text-xs leading-5 text-white/50">
+                      One tap updates the score and helps the map reflect what is really happening.
                     </p>
                   </div>
-                  <div className="shrink-0 rounded-3xl border border-white/10 bg-black/35 px-3 py-2 text-center shadow-inner shadow-white/5">
-                    <p className="text-2xl font-black text-white">{Math.round(selectedVibeIntensity)}</p>
-                    <p className="text-[9px] font-bold uppercase tracking-[0.22em] text-white/40">Score</p>
-                  </div>
+                  <span className="shrink-0 rounded-full border border-white/10 bg-black/30 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.18em] text-white/55">
+                    {(selected.liveReportCount || 0)} live
+                  </span>
                 </div>
 
-                <div className="mt-4">
-                  <div className="mb-2 flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.22em] text-white/45">
-                    <span>{selectedVibeMeterLabel}</span>
-                    <span>{vibeTrendLabel(selected.vibeTrend)} · {statusLabel(selected.status)}</span>
-                  </div>
-                  <div className="h-3 overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-orange-300 via-red-400 to-fuchsia-500 shadow-[0_0_22px_rgba(249,115,22,0.45)] transition-all duration-700"
-                      style={{ width: `${selectedVibeIntensity}%` }}
-                    />
-                  </div>
-                  <p className="mt-3 rounded-2xl border border-white/10 bg-black/25 px-3 py-2 text-[11px] leading-5 text-white/60">
-                    <span className="font-bold text-white/80">Vibe engine:</span> {selected.vibeReason || "Score is based on fresh votes, live updates, event context, and time decay."}
-                  </p>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {getLiveReportOptions(selected.behaviorCategory || getBehaviorCategory(selected)).map((option) => (
+                    <button
+                      key={`${option.type}-${option.value}`}
+                      onClick={() => submitLiveReport(option)}
+                      disabled={liveReportLoading}
+                      className={`rounded-2xl border px-3 py-3 text-xs font-black uppercase tracking-[0.14em] transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 ${reportToneClasses(option.tone)}`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
                 </div>
 
-                <div className="mt-4 grid grid-cols-2 gap-2 text-center sm:grid-cols-3">
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3 shadow-inner shadow-white/5">
-                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35"> Vibe</p>
-                    <p className="mt-1 text-base font-black text-white">{selected.vibeScore || 0}/100</p>
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3 shadow-inner shadow-white/5">
-                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35"> Trend</p>
-                    <p className="mt-1 text-xs font-black text-white">{vibeTrendLabel(selected.vibeTrend)}</p>
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3 shadow-inner shadow-white/5">
-                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35"> Signals</p>
-                    <p className="mt-1 text-base font-black text-white">{(selected.voteCount || 0) + (selected.updateCount || 0)}</p>
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3 shadow-inner shadow-white/5">
-                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35"> Trust</p>
-                    <p className="mt-1 text-xs font-black text-white">{confidenceLabel(selected.confidence)}</p>
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3 shadow-inner shadow-white/5">
-                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35"> Updated</p>
-                    <p className="mt-1 text-xs font-black text-white">{minutesAgo(selected.lastUpdated)}</p>
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3 shadow-inner shadow-white/5">
-                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35"> Tonight</p>
-                    <p className="mt-1 text-xs font-black text-white">{selected.tonightEvent ? "Event" : "No event"}</p>
-                  </div>
-                </div>
-
-                <div className="mt-4 overflow-hidden rounded-3xl border border-white/10 bg-black/25 shadow-inner shadow-white/5">
-                  <div className="border-b border-white/10 px-4 py-3">
-                    <p className="text-[10px] font-black uppercase tracking-[0.28em] text-white/40">Why this score?</p>
-                    <p className="mt-1 text-xs leading-5 text-white/60">
-                      Lit757 weights fresh votes, live crowd updates, event context, and time decay. Older signals fade so the score stays focused on what is happening now.
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-1 divide-y divide-white/10 text-xs text-white/65 sm:grid-cols-2 sm:divide-x sm:divide-y-0">
-                    <div className="p-4">
-                      <p className="font-black uppercase tracking-[0.2em] text-white/35">Live proof</p>
-                      <p className="mt-2 leading-5">
-                        {(selected.voteCount || 0) + (selected.updateCount || 0) > 0
-                          ? `${selected.voteCount || 0} vote${(selected.voteCount || 0) === 1 ? "" : "s"} and ${selected.updateCount || 0} update${(selected.updateCount || 0) === 1 ? "" : "s"} are affecting this venue.`
-                          : selected.tonightEvent
-                          ? "No crowd votes yet, but tonight event context is keeping this venue on the board."
-                          : "No fresh crowd signals yet. This venue needs votes or updates before it can heat up."}
-                      </p>
-                    </div>
-                    <div className="p-4">
-                      <p className="font-black uppercase tracking-[0.2em] text-white/35">Recommendation</p>
-                      <p className="mt-2 leading-5">
-                        {selected.status === "lit"
-                          ? "Strong enough to consider now, especially if you want energy."
-                          : selected.status === "decent"
-                          ? "Worth watching, but check recent updates before committing."
-                          : "Treat this as quiet until more people check in."}
-                      </p>
-                    </div>
-                  </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-white/50">
+                  {selected.reportSummary && (
+                    <span className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5">
+                      {selected.reportSummary}
+                    </span>
+                  )}
+                  {liveReportFeedback && (
+                    <span className="rounded-full border border-emerald-300/20 bg-emerald-500/10 px-3 py-1.5 font-semibold text-emerald-100">
+                      {liveReportFeedback}
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -4496,9 +5142,16 @@ export default function Home() {
                     </p>
                   </div>
 
-                  <p className="text-sm font-black leading-tight">
-                    {selected.tonightEvent.title}
-                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="min-w-0 flex-1 text-sm font-black leading-tight">
+                      {selected.tonightEvent.title}
+                    </p>
+                    {selected.tonightEvent.ticket_status && (
+                      <span className="rounded-full border border-orange-300/25 bg-orange-500/15 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-orange-100">
+                        {selected.tonightEvent.ticket_status}
+                      </span>
+                    )}
+                  </div>
 
                   <p className="mt-1 text-[11px] text-white/50">
                     {selected.tonightEvent.genre || "Mixed"}
@@ -4509,8 +5162,8 @@ export default function Home() {
 
                   <p className="mt-2 text-[11px] text-white/45">
                     Cover: {selected.tonightEvent.cover_price || "Varies"}
-                    {selected.tonightEvent.start_time
-                      ? ` • Starts: ${selected.tonightEvent.start_time}`
+                    {selected.tonightEvent.starts_at_label
+                      ? ` • Starts: ${selected.tonightEvent.starts_at_label}`
                       : ""}
                   </p>
 
@@ -4807,7 +5460,7 @@ export default function Home() {
                       (venue as any).cover_image_url ||
                       ""
                   );
-                  const signalCount = (venue.voteCount || 0) + (venue.updateCount || 0);
+                  const signalCount = (venue.voteCount || 0) + (venue.updateCount || 0) + (venue.liveReportCount || 0);
 
                   return (
                     <button
