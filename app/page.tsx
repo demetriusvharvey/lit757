@@ -83,7 +83,6 @@ type SupabaseEventRow = {
   name?: string | null;
   title?: string | null;
   venue_name?: string | null;
-  venue_id?: string | null;
   start_time?: string | null;
   end_time?: string | null;
   source?: string | null;
@@ -184,9 +183,7 @@ function normalizeEventForUi(event: SupabaseEventRow | null): any | null {
 }
 
 function eventVenueMatchScore(event: SupabaseEventRow, venue: any) {
-  const eventVenueId = String(event.venue_id || "");
-  if (eventVenueId && eventVenueId === String(venue.id || "")) return 1;
-
+  // The production events table does not have venue_id. Match by normalized venue_name only.
   const eventVenueName = normalizeText(event.venue_name);
   const venueName = normalizeText(venue.name);
 
