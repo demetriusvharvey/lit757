@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 
 type VenueWithEvent = Venue & {
-  tonightEvent?: Event | null;
+  tonightEvent?: any | null;
   voteCount?: number;
   updateCount?: number;
   trendingScore?: number;
