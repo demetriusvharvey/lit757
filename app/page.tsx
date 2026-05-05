@@ -19,6 +19,8 @@ import {
 
 type VenueWithEvent = Venue & {
   tonightEvent?: any | null;
+  upcomingEvents?: any[];
+  hasUpcomingEvent?: boolean;
   voteCount?: number;
   updateCount?: number;
   trendingScore?: number;
@@ -94,6 +96,7 @@ type SupabaseEventRow = {
   age_limit?: string | null;
   dress_code?: string | null;
   description?: string | null;
+  source_url?: string | null;
   created_at?: string | null;
 };
 
@@ -715,22 +718,25 @@ function updateMarkerElement(el: HTMLElement, venue: VenueWithEvent, zoom: numbe
   const visualStatus = getMapVisualStatus(venue);
   const active = hasReal && (signals > 0 || (venue.trendingScore || 0) > 2 || venue.status === "lit" || !!venue.tonightEvent);
   const watching = visualStatus === "watching";
+  const hasUpcomingEvent = (venue.upcomingEvents || []).length > 0 || !!venue.hasUpcomingEvent;
   
   let shouldShow = true;
   let displaySize = 0;
   
   if (zoom < 10) {
-    shouldShow = active || watching;
-    displaySize = active ? 11 : watching ? 7 : 4;
+    shouldShow = active || watching || hasUpcomingEvent;
+    displaySize = active ? 11 : watching ? 7 : hasUpcomingEvent ? 7 : 4;
   } else if (zoom < 12) {
     shouldShow = true;
-    displaySize = active ? 14 : watching ? 9 : 7;
+    displaySize = active ? 14 : watching ? 9 : hasUpcomingEvent ? 9 : 7;
   } else {
     shouldShow = true;
     displaySize = active
       ? signals === 0 ? 16 : signals <= 2 ? 22 : signals <= 5 ? 28 : 34
       : watching
       ? 12
+      : hasUpcomingEvent
+      ? 11
       : 9;
   }
   
@@ -931,6 +937,7 @@ function buildVenuePointsGeoJSON(
 
     const signalCount = (venue.voteCount || 0) + (venue.updateCount || 0) + (venue.liveReportCount || 0);
     const realSignals = hasRealVenueSignals(venue);
+    const hasUpcomingEvent = (venue.upcomingEvents || []).length > 0 || !!venue.hasUpcomingEvent;
     const aiScore = Math.max(0, venue.aiScore || 0);
     const vibeScore = Math.max(0, venue.vibeScore || venue.score || aiScore || 0);
     const visualStatus = getMapVisualStatus(venue);
@@ -968,6 +975,7 @@ function buildVenuePointsGeoJSON(
           trendingScore: trending,
           signalCount,
           activeScore,
+          hasUpcomingEvent,
           isAiWatching,
           isSurging,
           isHeating,
@@ -993,6 +1001,7 @@ export default function Home() {
   const activeStripRef = useRef<HTMLDivElement | null>(null);
 
   const [venues, setVenues] = useState<VenueWithEvent[]>([]);
+  const [upcomingEvents, setUpcomingEvents] = useState<any[]>([]);
   const [venuesLoading, setVenuesLoading] = useState(true);
   const [selected, setSelected] = useState<VenueWithEvent | null>(null);
   const selectedRef = useRef<VenueWithEvent | null>(null);
@@ -1394,16 +1403,15 @@ export default function Home() {
       return;
     }
 
-    const nowWindowStart = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
-    const futureWindowEnd = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
+    const scoreWindowStartMs = Date.now() - 6 * 60 * 60 * 1000;
+    const scoreWindowEndMs = Date.now() + 12 * 60 * 60 * 1000;
+    const futureWindowEndMs = Date.now() + 60 * 24 * 60 * 60 * 1000;
 
     const { data: eventsData, error: eventsError } = await supabase
       .from("events")
-      .select("id, source_event_id, name, venue_name, start_time, end_time, source, ticket_status, created_at")
-      .not("start_time", "is", null)
-      .gte("start_time", nowWindowStart)
-      .lte("start_time", futureWindowEnd)
-      .order("start_time", { ascending: true });
+      .select("id, source_event_id, name, venue_name, start_time, end_time, source, ticket_status, source_url, created_at")
+      .order("start_time", { ascending: true, nullsFirst: false })
+      .limit(300);
 
     if (eventsError) {
       console.error("Events error details:", {
@@ -1413,6 +1421,27 @@ export default function Home() {
         code: eventsError.code,
       });
     }
+
+    const eventRows = ((eventsData as SupabaseEventRow[] | null | undefined) || []);
+
+    // Events tab can show future/TBA events, but only live/tonight events should affect lit scoring.
+    const upcomingEventRows = eventRows.filter((event) => {
+      if (!event.start_time) return true;
+      const startMs = new Date(event.start_time).getTime();
+      return Number.isNaN(startMs) || (startMs >= scoreWindowStartMs && startMs <= futureWindowEndMs);
+    });
+
+    const scoringEventRows = eventRows.filter((event) => {
+      if (!event.start_time) return false;
+      const startMs = new Date(event.start_time).getTime();
+      return !Number.isNaN(startMs) && startMs >= scoreWindowStartMs && startMs <= scoreWindowEndMs;
+    });
+
+    setUpcomingEvents(
+      upcomingEventRows
+        .map((event) => normalizeEventForUi(event))
+        .filter(Boolean)
+    );
 
     const since = new Date(Date.now() - 90 * 60 * 1000).toISOString();
 
@@ -1496,7 +1525,12 @@ export default function Home() {
             new Date(a.created_at).getTime()
         );
 
-        const matchedEvents = ((eventsData as SupabaseEventRow[] | null | undefined) || [])
+        const upcomingEventsForVenue = upcomingEventRows
+          .filter((event) => eventMatchesVenue(event, venue))
+          .map((event) => normalizeEventForUi(event))
+          .filter(Boolean);
+
+        const matchedEvents = scoringEventRows
           .filter((event) => eventMatchesVenue(event, venue))
           .sort((a, b) => {
             const aNormalized = normalizeEventForUi(a);
@@ -1598,6 +1632,8 @@ export default function Home() {
           behaviorCategory,
           lastUpdated:
             sortedVotes[0]?.created_at || sortedUpdates[0]?.created_at || sortedLiveReports[0]?.created_at || intel?.updated_at || null,
+          upcomingEvents: upcomingEventsForVenue,
+          hasUpcomingEvent: upcomingEventsForVenue.length > 0,
           tonightEvent,
         };
       }) || [];
@@ -1800,6 +1836,7 @@ export default function Home() {
       const heatingExpression: any = ["==", ["get", "isHeating"], true];
       const coolingExpression: any = ["==", ["get", "isCooling"], true];
       const aiWatchingExpression: any = ["==", ["get", "isAiWatching"], true];
+      const upcomingEventExpression: any = ["==", ["get", "hasUpcomingEvent"], true];
       const hotColorExpression: any = [
         "case",
         surgingExpression,
@@ -1810,6 +1847,8 @@ export default function Home() {
         "#60a5fa", // confirmed cooling
         aiWatchingExpression,
         "#facc15", // AI watching only, no fake heat
+        upcomingEventExpression,
+        "#38bdf8", // upcoming event venue, not live heat
         "#6b7280", // quiet / monitored
       ];
 
@@ -2846,6 +2885,7 @@ export default function Home() {
     const heatingExpression: any = ["==", ["get", "isHeating"], true];
     const coolingExpression: any = ["==", ["get", "isCooling"], true];
     const aiWatchingExpression: any = ["==", ["get", "isAiWatching"], true];
+    const upcomingEventExpression: any = ["==", ["get", "hasUpcomingEvent"], true];
     const hotColorExpression: any = [
       "case",
       surgingExpression,
@@ -2856,6 +2896,8 @@ export default function Home() {
       "#60a5fa", // confirmed cooling
       aiWatchingExpression,
       "#facc15", // AI watching only, no fake heat
+      upcomingEventExpression,
+      "#38bdf8", // upcoming event venue, not live heat
       effectiveMode === "day" ? "#334155" : "#6b7280", // quiet / monitored
     ];
 
@@ -3366,6 +3408,33 @@ export default function Home() {
   });
 
   const eventSpots = filteredVenues.filter((venue) => venue.tonightEvent);
+  const eventTabItems = upcomingEvents
+    .map((event) => {
+      const matchedVenue = venues.find((venue) => eventMatchesVenue(event, venue));
+      return { event, venue: matchedVenue || null };
+    })
+    .filter(({ event, venue }) => {
+      if (city !== "All 757" && venue?.city !== city && !String(event.venue_name || "").toLowerCase().includes(city.toLowerCase())) {
+        return false;
+      }
+
+      if (!query.trim()) return true;
+
+      const q = query.toLowerCase();
+      return [
+        event.title,
+        event.name,
+        event.venue_name,
+        event.source,
+        event.ticket_status,
+        venue?.name,
+        venue?.city,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(q);
+    });
   const visibleTopSpots = sheetExpanded ? topSpots : topSpots.slice(0, 3);
 
   const trending = [...filteredVenues]
@@ -4494,7 +4563,7 @@ export default function Home() {
                     {venuesLoading
                       ? "Loading live spots..."
                       : viewMode === "events"
-                      ? `${eventSpots.length} events found`
+                      ? `${eventTabItems.length} events found`
                       : `${filteredVenues.length} spots found`}
                   </p>
                 </div>
@@ -4531,53 +4600,53 @@ export default function Home() {
                 </div>
               ) : viewMode === "events" ? (
                 <div className="space-y-2">
-                  {eventSpots.map((venue) => (
+                  {eventTabItems.map(({ event, venue }) => (
                     <button
-                      key={venue.id}
+                      key={event.id || event.source_event_id || `${event.title}-${event.venue_name}`}
                       onClick={() => {
+                        if (!venue) return;
                         setSelected(venue);
                         setSheetExpanded(true);
                         setViewMode("map");
-                        map?.flyTo({
-                          center: [venue.lng, venue.lat],
-                          zoom: 14,
-                        });
+                        if (venue.lng && venue.lat) {
+                          map?.flyTo({
+                            center: [venue.lng, venue.lat],
+                            zoom: 14,
+                          });
+                        }
                       }}
                       className="w-full rounded-2xl bg-white/[0.07] p-4 text-left active:scale-[0.99]"
                     >
                       <div className="mb-2 flex items-start justify-between gap-3">
                         <div>
                           <p className="text-sm font-black">
-                            {venue.tonightEvent?.title}
+                            {event.title || event.name}
                           </p>
                           <p className="text-xs text-white/45">
-                            {venue.name} • {venue.city}
+                            {venue ? `${venue.name} • ${venue.city}` : event.venue_name || "Event venue TBA"}
                           </p>
                         </div>
 
-                        <p className="shrink-0 text-xs font-black">
-                          {statusLabel(venue.status)}
+                        <p className="shrink-0 text-xs font-black uppercase tracking-[0.18em] text-cyan-200">
+                          {event.source || "event"}
                         </p>
                       </div>
 
                       <div className="rounded-xl bg-black/30 p-3 text-xs text-white/55">
                         <p>
-                          {venue.tonightEvent?.genre || "Mixed"}
-                          {venue.tonightEvent?.dj
-                            ? ` • DJ: ${venue.tonightEvent.dj}`
-                            : ""}
+                          {event.starts_at_label || "Time TBA"}
+                          {event.ticket_status ? ` • ${event.ticket_status}` : ""}
                         </p>
 
                         <p className="mt-1">
-                          Cover: {venue.tonightEvent?.cover_price || "Varies"}
-                          {venue.tonightEvent?.start_time
-                            ? ` • Starts: ${venue.tonightEvent.start_time}`
-                            : ""}
+                          {event.genre || "Event"}
+                          {event.source_url ? " • Source link saved" : ""}
                         </p>
 
                         <p className="mt-1 text-white/40">
-                          {venue.voteCount || 0} active •{" "}
-                          {minutesAgo(venue.lastUpdated)}
+                          {venue
+                            ? "Tap to view the venue pin on the map."
+                            : "This event is listed, but it has not matched a venue pin yet."}
                         </p>
                       </div>
                     </button>
