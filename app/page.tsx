@@ -185,6 +185,29 @@ function normalizeEventForUi(event: SupabaseEventRow | null): any | null {
   };
 }
 
+function getEventDedupeKey(event: any) {
+  const titleKey = normalizeText(event?.title || event?.event_title || event?.name || "untitled event");
+  const venueKey = normalizeText(event?.venue_name || "unknown venue");
+  const sourceKey = normalizeText(event?.source || "unknown source");
+
+  // Group recurring/repeated imports together by what users actually see: title + venue.
+  // This keeps the Events tab clean when scrapers return the same event across dates/pages.
+  if (titleKey && venueKey) return `${titleKey}__${venueKey}__${sourceKey}`;
+
+  return String(event?.source_event_id || event?.source_url || event?.id || `${titleKey}__${venueKey}__${sourceKey}`).toLowerCase();
+}
+
+function dedupeEvents<T extends any>(events: T[]) {
+  const seen = new Set<string>();
+
+  return events.filter((event) => {
+    const key = getEventDedupeKey(event);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function eventVenueMatchScore(event: SupabaseEventRow, venue: any) {
   // The production events table does not have venue_id. Match by normalized venue_name only.
   const eventVenueName = normalizeText(event.venue_name);
@@ -1438,9 +1461,11 @@ export default function Home() {
     });
 
     setUpcomingEvents(
-      upcomingEventRows
-        .map((event) => normalizeEventForUi(event))
-        .filter(Boolean)
+      dedupeEvents(
+        upcomingEventRows
+          .map((event) => normalizeEventForUi(event))
+          .filter(Boolean)
+      )
     );
 
     const since = new Date(Date.now() - 90 * 60 * 1000).toISOString();
@@ -1525,10 +1550,12 @@ export default function Home() {
             new Date(a.created_at).getTime()
         );
 
-        const upcomingEventsForVenue = upcomingEventRows
-          .filter((event) => eventMatchesVenue(event, venue))
-          .map((event) => normalizeEventForUi(event))
-          .filter(Boolean);
+        const upcomingEventsForVenue = dedupeEvents(
+          upcomingEventRows
+            .filter((event) => eventMatchesVenue(event, venue))
+            .map((event) => normalizeEventForUi(event))
+            .filter(Boolean)
+        );
 
         const matchedEvents = scoringEventRows
           .filter((event) => eventMatchesVenue(event, venue))
@@ -3407,34 +3434,50 @@ export default function Home() {
     return rankVenue(b) - rankVenue(a);
   });
 
-  const eventSpots = filteredVenues.filter((venue) => venue.tonightEvent);
-  const eventTabItems = upcomingEvents
-    .map((event) => {
-      const matchedVenue = venues.find((venue) => eventMatchesVenue(event, venue));
-      return { event, venue: matchedVenue || null };
-    })
-    .filter(({ event, venue }) => {
-      if (city !== "All 757" && venue?.city !== city && !String(event.venue_name || "").toLowerCase().includes(city.toLowerCase())) {
-        return false;
-      }
+  const eventSpots = useMemo(() => {
+    const seen = new Set<string>();
 
-      if (!query.trim()) return true;
+    return filteredVenues
+      .filter((venue) => venue.tonightEvent)
+      .filter((venue) => {
+        const key = getEventDedupeKey(venue.tonightEvent);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }, [filteredVenues]);
 
-      const q = query.toLowerCase();
-      return [
-        event.title,
-        event.name,
-        event.venue_name,
-        event.source,
-        event.ticket_status,
-        venue?.name,
-        venue?.city,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase()
-        .includes(q);
-    });
+  const eventTabItems = useMemo(() => {
+    const cleanEvents = dedupeEvents(upcomingEvents);
+
+    return cleanEvents
+      .map((event) => {
+        const matchedVenue = venues.find((venue) => eventMatchesVenue(event, venue));
+        return { event, venue: matchedVenue || null };
+      })
+      .filter(({ event, venue }) => {
+        if (city !== "All 757" && venue?.city !== city && !String(event.venue_name || "").toLowerCase().includes(city.toLowerCase())) {
+          return false;
+        }
+
+        if (!query.trim()) return true;
+
+        const q = query.toLowerCase();
+        return [
+          event.title,
+          event.name,
+          event.venue_name,
+          event.source,
+          event.ticket_status,
+          venue?.name,
+          venue?.city,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(q);
+      });
+  }, [upcomingEvents, venues, city, query]);
   const visibleTopSpots = sheetExpanded ? topSpots : topSpots.slice(0, 3);
 
   const trending = [...filteredVenues]
