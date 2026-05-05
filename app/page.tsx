@@ -778,6 +778,8 @@ function updateMarkerElement(el: HTMLElement, venue: VenueWithEvent, zoom: numbe
       ? "#fb923c"
       : visualStatus === "watching"
       ? "#facc15"
+      : hasUpcomingEvent
+      ? "#38bdf8"
       : "#6b7280";
 
   core.style.background = baseColor;
@@ -3588,6 +3590,13 @@ export default function Home() {
       created_at: update.created_at,
     }))
     .slice(0, 6);
+
+  const selectedUpcomingEvents = selected
+    ? dedupeEvents((selected.upcomingEvents || []).filter(Boolean))
+    : [];
+  const selectedPrimaryEvent = selected?.tonightEvent || selectedUpcomingEvents[0] || null;
+  const selectedPrimaryEventIsLive = !!selected?.tonightEvent;
+  const selectedPrimaryEventUrl = selectedPrimaryEvent?.source_url || null;
   const isDay = mapMode === "day";
 
   return (
@@ -4695,9 +4704,9 @@ export default function Home() {
                     </button>
                   ))}
 
-                  {eventSpots.length === 0 && (
+                  {eventTabItems.length === 0 && (
                     <div className="rounded-2xl bg-white/[0.07] p-4 text-sm text-white/50">
-                      No events listed for tonight yet.
+                      No events match this filter yet.
                     </div>
                   )}
                 </div>
@@ -4817,9 +4826,9 @@ export default function Home() {
             </>
           ) : (
             <>
-              <div className="mb-3 overflow-hidden rounded-[2rem] bg-white/5 bg-gradient-to-br from-white/10 via-white/5 to-transparent p-4 shadow-[0_0_40px_rgba(255,255,255,0.08)] backdrop-blur-xl">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="min-w-0">
+              <div className="mb-3 overflow-hidden rounded-[2rem] border border-white/10 bg-white/5 bg-gradient-to-br from-white/10 via-white/5 to-transparent p-4 shadow-[0_0_40px_rgba(255,255,255,0.08)] backdrop-blur-xl">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <h2 className="truncate text-3xl font-extrabold leading-tight tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-white to-slate-200 drop-shadow-[0_0_14px_rgba(255,255,255,0.2)] sm:text-4xl">
                         {selected.name}
@@ -4827,6 +4836,11 @@ export default function Home() {
                       <span className="select-none rounded-full border border-white/10 bg-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-white/65 backdrop-blur-xl">
                         {venueType(selected)}
                       </span>
+                      {(selected.upcomingEvents || []).length > 0 && (
+                        <span className="select-none rounded-full border border-cyan-300/20 bg-cyan-400/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-cyan-100">
+                          {(selected.upcomingEvents || []).length} event{(selected.upcomingEvents || []).length === 1 ? "" : "s"}
+                        </span>
+                      )}
                     </div>
 
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
@@ -4837,12 +4851,54 @@ export default function Home() {
                           borderColor: energyColor(selected.energyLevel),
                         }}
                       >
-                         {(selected.voteCount || 0) + (selected.liveReportCount || 0)} active • {selected.updateCount || 0} updates
+                        {(selected.voteCount || 0) + (selected.liveReportCount || 0)} active • {selected.updateCount || 0} updates
                       </span>
                       <span className="select-none rounded-full bg-white/10 px-2.5 py-1 font-semibold uppercase tracking-[0.18em] text-white/70 ring-1 ring-white/10 backdrop-blur-xl">
                         {confidenceLabel(selected.confidence)}
                       </span>
+                      {selectedPrimaryEvent && (
+                        <span className="select-none rounded-full border border-orange-300/20 bg-orange-500/10 px-2.5 py-1 font-semibold uppercase tracking-[0.18em] text-orange-100">
+                          {selectedPrimaryEventIsLive ? "Live / Tonight event" : "Upcoming event"}
+                        </span>
+                      )}
                     </div>
+
+                    {selectedPrimaryEvent && (
+                      <div className="mt-4 rounded-[1.6rem] border border-orange-300/20 bg-gradient-to-r from-orange-500/15 via-red-500/10 to-fuchsia-500/10 p-3 shadow-lg shadow-orange-500/10">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="min-w-0">
+                            <p className="text-[10px] font-black uppercase tracking-[0.25em] text-orange-100/70">
+                              {selectedPrimaryEventIsLive ? "Why this pin is hot" : "Next event at this spot"}
+                            </p>
+                            <p className="mt-1 line-clamp-2 text-base font-black text-white sm:text-lg">
+                              {selectedPrimaryEvent.title || selectedPrimaryEvent.name}
+                            </p>
+                            <p className="mt-1 text-xs font-semibold text-white/55">
+                              {selectedPrimaryEvent.starts_at_label || "Time TBA"}
+                              {selectedPrimaryEvent.ticket_status ? ` • ${selectedPrimaryEvent.ticket_status}` : ""}
+                              {selectedPrimaryEvent.source ? ` • ${String(selectedPrimaryEvent.source).toUpperCase()}` : ""}
+                            </p>
+                          </div>
+                          <div className="flex shrink-0 flex-wrap gap-2">
+                            {selectedPrimaryEvent.ticket_status && (
+                              <span className="rounded-full border border-amber-300/25 bg-amber-400/15 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-amber-100">
+                                {selectedPrimaryEvent.ticket_status}
+                              </span>
+                            )}
+                            {selectedPrimaryEventUrl && (
+                              <a
+                                href={selectedPrimaryEventUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="rounded-full border border-cyan-300/25 bg-cyan-400/15 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-cyan-100 transition hover:bg-cyan-400/25"
+                              >
+                                View Tickets
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
@@ -4921,7 +4977,8 @@ export default function Home() {
 
               {(() => {
                 const scoreBreakdown = getVenueScoreBreakdown(selected);
-                const event = selected.tonightEvent as any;
+                const event = selectedPrimaryEvent as any;
+                const isLiveOrTonightEvent = !!selected.tonightEvent;
                 const liveSignalCount = (selected.voteCount || 0) + (selected.updateCount || 0) + (selected.liveReportCount || 0);
                 const ticketLabel = event?.ticket_status || event?.cover_price || null;
 
@@ -4935,7 +4992,7 @@ export default function Home() {
                           </span>
                           {event && (
                             <span className="rounded-full border border-fuchsia-300/25 bg-fuchsia-500/15 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-fuchsia-100">
-                              Event signal active
+                              {isLiveOrTonightEvent ? "Live event signal" : "Upcoming event listed"}
                             </span>
                           )}
                           {ticketLabel && (
@@ -4963,7 +5020,7 @@ export default function Home() {
                       <div className="mt-4 rounded-[1.7rem] border border-white/10 bg-black/35 p-4 shadow-inner shadow-white/5">
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                           <div className="min-w-0">
-                            <p className="text-[10px] font-black uppercase tracking-[0.28em] text-orange-200/80">Tonight&apos;s event</p>
+                            <p className="text-[10px] font-black uppercase tracking-[0.28em] text-orange-200/80">{isLiveOrTonightEvent ? "Tonight\'s event" : "Upcoming event"}</p>
                             <h4 className="mt-2 text-xl font-black leading-tight text-white">{event.title}</h4>
                             <p className="mt-1 text-sm text-white/60">
                               {event.starts_at_label || "Time TBA"}
@@ -4978,12 +5035,14 @@ export default function Home() {
                               </span>
                             )}
                             <span className="rounded-full border border-white/10 bg-white/10 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-white/70">
-                              Score boost active
+                              {isLiveOrTonightEvent ? "Score boost active" : "No current score boost"}
                             </span>
                           </div>
                         </div>
                         <p className="mt-3 rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs leading-5 text-white/65">
-                          This venue is lighting up because the event is matched to this spot and ticket/event demand is boosting the score before user votes come in.
+                          {isLiveOrTonightEvent
+                            ? "This venue is lighting up because the event is matched to this spot and ticket/event demand is boosting the current score before user votes come in."
+                            : "This event is listed for this venue, but it is not boosting the current lit score until it gets close to showtime."}
                         </p>
                       </div>
                     ) : (
@@ -5242,45 +5301,50 @@ export default function Home() {
                 </div>
               )}
 
-              {selected.tonightEvent && (
+              {selectedUpcomingEvents.length > 0 && (
                 <div className="mb-4 rounded-3xl border border-white/10 bg-white/5 p-4">
-                  <div className="mb-2 flex items-center gap-2">
-                    <CalendarDays size={16} className="text-white/60" />
-                    <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-white/35">
-                      Tonight&apos;s Event
-                    </p>
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <CalendarDays size={16} className="text-white/60" />
+                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-white/35">
+                        Upcoming Events
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-white/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-white/50">
+                      {selectedUpcomingEvents.length}
+                    </span>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="min-w-0 flex-1 text-sm font-black leading-tight">
-                      {selected.tonightEvent.title}
-                    </p>
-                    {selected.tonightEvent.ticket_status && (
-                      <span className="rounded-full border border-orange-300/25 bg-orange-500/15 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-orange-100">
-                        {selected.tonightEvent.ticket_status}
-                      </span>
-                    )}
+                  <div className="space-y-2">
+                    {selectedUpcomingEvents.slice(0, 4).map((event) => (
+                      <div
+                        key={event.id || event.source_event_id || `${event.title}-${event.starts_at_label}`}
+                        className="rounded-2xl border border-white/10 bg-black/25 p-3"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="line-clamp-1 text-sm font-black text-white">
+                              {event.title || event.name}
+                            </p>
+                            <p className="mt-1 text-[11px] text-white/50">
+                              {event.starts_at_label || "Time TBA"}
+                              {event.ticket_status ? ` • ${event.ticket_status}` : ""}
+                            </p>
+                          </div>
+                          {event.source_url && (
+                            <a
+                              href={event.source_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="shrink-0 rounded-full border border-cyan-300/25 bg-cyan-400/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-cyan-100"
+                            >
+                              Tickets
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-
-                  <p className="mt-1 text-[11px] text-white/50">
-                    {selected.tonightEvent.genre || "Mixed"}
-                    {selected.tonightEvent.dj
-                      ? ` • DJ: ${selected.tonightEvent.dj}`
-                      : ""}
-                  </p>
-
-                  <p className="mt-2 text-[11px] text-white/45">
-                    Cover: {selected.tonightEvent.cover_price || "Varies"}
-                    {selected.tonightEvent.starts_at_label
-                      ? ` • Starts: ${selected.tonightEvent.starts_at_label}`
-                      : ""}
-                  </p>
-
-                  {selected.tonightEvent.description && (
-                    <p className="mt-3 text-sm text-white/45">
-                      {selected.tonightEvent.description}
-                    </p>
-                  )}
                 </div>
               )}
 
