@@ -14,16 +14,49 @@ export async function GET(req: Request) {
     return new Response("Unauthorized", { status: 401 });
   }
 
+  const baseUrl = requestUrl.origin;
+
   try {
-    const API_KEY = process.env.TICKETMASTER_API_KEY;
+    const ticketmasterResult = await fetchTicketmasterEvents();
 
-    if (!API_KEY) {
-      return NextResponse.json({ error: "Missing Ticketmaster API key" }, { status: 500 });
-    }
+    const eventbriteResult = await safeInternalFetch(
+      `${baseUrl}/api/scrape-eventbrite?secret=${secret}`
+    );
 
+    const venueIntelResult = await safeInternalFetch(
+      `${baseUrl}/api/agents/run-venue-intel?secret=${secret}`
+    );
+
+    return NextResponse.json({
+      success: true,
+      ticketmaster: ticketmasterResult,
+      eventbrite: eventbriteResult,
+      venue_intel: venueIntelResult,
+    });
+  } catch (err) {
+    console.error("Pipeline error:", err);
+    return NextResponse.json(
+      { error: "Failed to run event pipeline" },
+      { status: 500 }
+    );
+  }
+}
+
+async function fetchTicketmasterEvents() {
+  const API_KEY = process.env.TICKETMASTER_API_KEY;
+
+  if (!API_KEY) {
+    return { success: false, error: "Missing Ticketmaster API key" };
+  }
+
+  const cities = ["Norfolk", "Virginia Beach", "Chesapeake", "Hampton", "Newport News"];
+
+  const allFormatted = [];
+
+  for (const city of cities) {
     const ticketmasterUrl =
       `https://app.ticketmaster.com/discovery/v2/events.json?apikey=${API_KEY}` +
-      `&city=Norfolk&stateCode=VA&size=50`;
+      `&city=${encodeURIComponent(city)}&stateCode=VA&size=50`;
 
     const res = await fetch(ticketmasterUrl);
     const data = await res.json();
@@ -34,32 +67,55 @@ export async function GET(req: Request) {
       const venue = event._embedded?.venues?.[0];
 
       return {
-        source_event_id: event.id,
+        source_event_id: `ticketmaster_${event.id}`,
         name: event.name,
-        venue_name: venue?.name || "Unknown Venue",
+        venue_name: venue?.name || `${city} Event`,
         start_time: event.dates?.start?.dateTime || null,
         end_time: null,
         source: "ticketmaster",
         ticket_status: getTicketStatus(event),
+        source_url: event.url || null,
       };
     });
 
-    const { error } = await supabase
-      .from("events")
-      .upsert(formatted, { onConflict: "source_event_id" });
+    allFormatted.push(...formatted);
+  }
 
-    if (error) {
-      console.error("Upsert error:", error);
-      return NextResponse.json({ error }, { status: 500 });
-    }
+  if (!allFormatted.length) {
+    return { success: true, upserted: 0, message: "No Ticketmaster events found" };
+  }
 
-    return NextResponse.json({
-      success: true,
-      upserted: formatted.length,
-    });
-  } catch (err) {
-    console.error("Fetch error:", err);
-    return NextResponse.json({ error: "Failed to fetch events" }, { status: 500 });
+  const { error } = await supabase
+    .from("events")
+    .upsert(allFormatted, { onConflict: "source_event_id" });
+
+  if (error) {
+    console.error("Ticketmaster upsert error:", error);
+    return { success: false, error };
+  }
+
+  return {
+    success: true,
+    source: "ticketmaster",
+    upserted: allFormatted.length,
+  };
+}
+
+async function safeInternalFetch(url: string) {
+  try {
+    const res = await fetch(url, { cache: "no-store" });
+    const data = await res.json().catch(() => null);
+
+    return {
+      success: res.ok,
+      status: res.status,
+      data,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error?.message || "Internal fetch failed",
+    };
   }
 }
 
