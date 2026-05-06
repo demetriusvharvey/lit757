@@ -3949,84 +3949,119 @@ export default function Home() {
             ? "border-white/70 bg-white/90 text-slate-950 shadow-slate-900/10"
             : "border-white/10 bg-black/75 text-white"
         }`}>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className={`text-[10px] font-bold uppercase tracking-wide ${isDay ? "text-red-600" : "text-red-400"}`}>
-                    Live in the 757
+          <div className="space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className={`text-[10px] font-bold uppercase tracking-wide ${isDay ? "text-red-600" : "text-red-400"}`}>
+                  Live in the 757
+                </p>
+                <h1 className={`text-[22px] font-black leading-tight tracking-tight sm:text-xl truncate ${isDay ? "text-slate-950" : "text-white"}`}>
+                  {activeCount > 0
+                    ? ` ${activeCount} active right now`
+                    : "What’s lit tonight? "}
+                </h1>
+                <div className={`mt-1 flex items-center gap-2 text-xs ${isDay ? "text-slate-600" : "text-white/50"}`}>
+                  <p className="truncate">
+                    {heroSpot
+                      ? `Best move: ${heroSpot.name}`
+                      : "Real-time nightlife map for Hampton Roads"}
                   </p>
-                  <h1 className={`text-[22px] font-black leading-tight tracking-tight sm:text-xl truncate ${isDay ? "text-slate-950" : "text-white"}`}>
-                    {activeCount > 0
-                      ? ` ${activeCount} active right now`
-                      : "What’s lit tonight? "}
-                  </h1>
+                  <span className={`shrink-0 inline-flex items-center gap-2 rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.22em] shadow-[0_0_12px_rgba(251,146,60,0.12)] ${isDay ? "border-red-500/30 bg-red-500/10 text-red-700" : "border-red-500/20 bg-red-500/10 text-red-100"}`}>
+                    <span className="h-2 w-2 rounded-full bg-red-400 live-pulse" />
+                    Live
+                  </span>
                 </div>
-                <select
-                  value={city}
-                  onChange={(e) => setCity(e.target.value)}
-                  className="shrink-0 w-24 rounded-full bg-zinc-900 px-2 py-1 text-xs font-semibold text-white outline-none sm:w-28"
-                >
-                  <option>All 757</option>
-                  <option>Norfolk</option>
-                  <option>Virginia Beach</option>
-                  <option>Chesapeake</option>
-                  <option>Portsmouth</option>
-                  <option>Suffolk</option>
-                  <option>Hampton</option>
-                  <option>Newport News</option>
-                </select>
               </div>
 
-              <div className={`mt-2 flex items-center gap-2 text-xs ${isDay ? "text-slate-600" : "text-white/50"}`}>
-                <p className="truncate">
-                  {heroSpot
-                    ? `Best move: ${heroSpot.name}`
-                    : "Real-time nightlife map for Hampton Roads"}
-                </p>
-                <span className={`shrink-0 inline-flex items-center gap-2 rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.22em] shadow-[0_0_12px_rgba(251,146,60,0.12)] ${isDay ? "border-red-500/30 bg-red-500/10 text-red-700" : "border-red-500/20 bg-red-500/10 text-red-100"}`}>
-                  <span className="h-2 w-2 rounded-full bg-red-400 live-pulse" />
-                  Live
-                </span>
-              </div>
+              <select
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
+                className="shrink-0 w-24 rounded-full bg-zinc-900 px-2 py-1 text-xs font-semibold text-white outline-none sm:w-28"
+              >
+                <option>All 757</option>
+                <option>Norfolk</option>
+                <option>Virginia Beach</option>
+                <option>Chesapeake</option>
+                <option>Portsmouth</option>
+                <option>Suffolk</option>
+                <option>Hampton</option>
+                <option>Newport News</option>
+              </select>
             </div>
 
-            <div className="flex flex-col gap-2 sm:items-end">
-              <div className="flex gap-1 overflow-x-auto pb-0.5 pr-1 no-scrollbar sm:flex-wrap sm:justify-end sm:overflow-visible sm:pb-0 sm:pr-0">
-                {["Turn up", "Chill", "Hip-Hop", "Cheap cover", "21+"].map((pref) => (
-                  <button
-                    key={pref}
-                    onClick={() => setSelectedPreference(selectedPreference === pref ? null : pref)}
-                    className={`shrink-0 whitespace-nowrap px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] rounded-full border transition sm:px-1.5 sm:py-0.5 sm:text-[9px] ${
-                      selectedPreference === pref
-                        ? isDay
-                          ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-800"
-                          : "border-emerald-400/30 bg-emerald-500/20 text-emerald-100"
-                        : isDay
-                          ? "border-slate-300/70 bg-slate-900/5 text-slate-700 hover:bg-slate-900/10"
-                          : "border-white/10 bg-white/5 text-white/60 hover:bg-white/10"
-                    }`}
-                  >
-                    {pref}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const question = askText.trim();
+                if (!question) return;
+                setVoiceBubbleOpen(true);
+                setVoiceTranscript(question);
+                setVoiceStatus("thinking");
+                fetchRecommendation(question).then((responseText) => {
+                  if (responseText) {
+                    speakRecommendation(responseText);
+                  } else {
+                    setVoiceStatus("idle");
+                  }
+                });
+              }}
+              className={`flex items-center gap-2 rounded-2xl border px-3 py-2 shadow-2xl transition ${isDay ? "border-slate-300/80 bg-white/90 shadow-slate-900/10" : "border-white/10 bg-white/[0.08] shadow-black/20"}`}
+            >
+              <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${isDay ? "bg-slate-950 text-white" : "bg-white text-black"}`}>
+                <Search size={15} />
+              </div>
+              <input
+                value={askText}
+                onChange={(e) => setAskText(e.target.value)}
+                placeholder="Ask anything: “What’s packed?”, “18+ clubs”, “hookah tonight”, “cheap drinks”..."
+                className={`min-w-0 flex-1 bg-transparent text-sm font-semibold outline-none ${isDay ? "text-slate-950 placeholder:text-slate-500" : "text-white placeholder:text-white/40"}`}
+              />
+              <button
+                type="submit"
+                disabled={recommendationLoading || !askText.trim()}
+                className={`shrink-0 rounded-full px-4 py-2 text-xs font-black transition disabled:cursor-not-allowed disabled:opacity-50 ${isDay ? "bg-slate-950 text-white hover:bg-slate-800" : "bg-white text-black hover:bg-white/90"}`}
+              >
+                {recommendationLoading ? "Thinking" : "Ask"}
+              </button>
+            </form>
+
+            <div className="space-y-1.5">
+              <p className={`px-1 text-[10px] font-black uppercase tracking-[0.22em] ${isDay ? "text-slate-500" : "text-white/45"}`}>
+                Try asking:
+              </p>
+              <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+                {[
+                  "Where should I go?",
+                  "What’s lit now?",
+                  "18+ spots",
+                  "Cheap cover",
+                ].map((prompt) => (
+                <button
+                  key={prompt}
+                  onClick={() => {
+                    setAskText(prompt);
+                    const preference =
+                      prompt === "18+ spots"
+                        ? "18+"
+                        : prompt === "Cheap cover"
+                        ? "cheap"
+                        : prompt === "Hookah tonight"
+                        ? "hookah"
+                        : prompt === "Afrobeats"
+                        ? "afrobeats"
+                        : prompt.includes("packed") || prompt.includes("lit")
+                        ? "turn up"
+                        : null;
+
+                    setSelectedPreference(preference);
+                    fetchRecommendation(prompt, preference);
+                  }}
+                  className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold transition ${isDay ? "border-slate-300/80 bg-white/80 text-slate-700 hover:bg-slate-100" : "border-white/10 bg-white/10 text-white/75 hover:bg-white/15 hover:text-white"}`}
+                >
+                  {prompt}
                   </button>
                 ))}
               </div>
-              <button
-                onClick={handleRecommendationButtonClick}
-                disabled={false}
-                className={`inline-flex w-full items-center justify-center gap-1 rounded-full border px-3 py-2 text-sm font-semibold shadow-lg transition disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto sm:py-1.5 sm:text-xs ${isDay ? "border-slate-300/70 bg-slate-950 text-white shadow-slate-900/10 hover:bg-slate-800" : "border-white/10 bg-gradient-to-r from-white/10 to-white/5 text-white shadow-black/20 hover:from-white/20 hover:to-white/10"}`}
-              >
-                {recommendationLoading ? (
-                  <>
-                    <span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
-                    Finding...
-                  </>
-                ) : recommendation ? (
-                  "Hide pick"
-                ) : (
-                  "Where should I go?"
-                )}
-              </button>
             </div>
           </div>
 
@@ -4250,7 +4285,7 @@ export default function Home() {
       </div>
 
       {hotRightNowSpots.length > 0 && !selected && viewMode === "map" && (
-        <div className="pointer-events-none absolute inset-x-0 top-[286px] z-20 px-3 sm:top-[218px] sm:px-4 lg:left-[330px] lg:right-[260px]">
+        <div className="pointer-events-none absolute inset-x-0 top-[342px] z-40 px-3 sm:top-[342px] sm:px-4 lg:left-[330px] lg:right-[260px]">
           <div
             className={`lit-desktop-ticker lit-mobile-ticker pointer-events-auto overflow-hidden rounded-full border shadow-2xl backdrop-blur-2xl ${
               isDay
