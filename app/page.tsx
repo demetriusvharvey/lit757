@@ -15,6 +15,7 @@ import {
   BadgeDollarSign,
   UserRoundCheck,
   CalendarDays,
+  LocateFixed,
 } from "lucide-react";
 
 type VenueWithEvent = Venue & {
@@ -336,9 +337,9 @@ function vibeReasonText(args: {
   if (args.negativeDominant) return "Recent dead votes are pulling the vibe down.";
   if (args.tier === "lit") return "Strong live signals, recent activity, and tonight context are pushing this spot up.";
   if (args.tier === "decent") return args.hasEvent
-    ? "Some live activity plus event context makes this worth watching."
-    : "There are some signals, but it needs more fresh check-ins to call it lit.";
-  if (args.voteCount + args.updateCount === 0) return "No fresh crowd signals yet. The app needs votes or updates from people nearby.";
+    ? "Tonight has some momentum, so this spot is worth watching."
+    : "Some momentum is building here.";
+  if (args.voteCount + args.updateCount === 0) return "Quiet right now. The night may shift later.";
   return "Signals are light right now, so check again before making the move.";
 }
 
@@ -377,7 +378,7 @@ function calculateVenueVibe(args: {
   );
   const hasRecentPositiveVote = recentVotes.some((vote) => ["lit", "decent", "line_crazy"].includes(vote.vibe));
   const hasRecentPositive = hasRecentPositiveVote || hasRecentPositiveUpdate;
-  const hasLineUpdate = args.updateMatches.some((update) => update.update_type === "Line update");
+  const hasLineUpdate = args.updateMatches.some((update) => update.update_type === "Line");
 
   const eventTimingBoost = args.tonightEvent ? getEventTimingBoost(args.tonightEvent) : 0;
   const ticketDemandBoost = args.tonightEvent ? getTicketDemandBoost(args.tonightEvent.ticket_status || args.tonightEvent.cover_price) : 0;
@@ -450,9 +451,9 @@ function getStatus(score: number, signalCount: number) {
 }
 
 function confidenceLabel(confidence?: "high" | "medium" | "low") {
-  if (confidence === "high") return "High confidence";
-  if (confidence === "medium") return "Medium confidence";
-  return "Low confidence";
+  if (confidence === "high") return "Strong read";
+  if (confidence === "medium") return "Good read";
+  return "Early read";
 }
 
 function pinColor(status?: string) {
@@ -462,9 +463,27 @@ function pinColor(status?: string) {
 }
 
 function statusLabel(status?: string) {
-  if (status === "lit") return "Lit";
-  if (status === "decent") return "Decent";
-  return "Dead";
+  if (status === "lit") return "Buzzing";
+  if (status === "decent") return "Worth a look";
+  return "Quiet";
+}
+
+function activityPhrase(venue: Partial<VenueWithEvent>) {
+  if (venue.status === "lit") return "Active right now";
+  if (venue.status === "decent") return "Warming up";
+  return "Still early";
+}
+
+function checkInLabel(count: number) {
+  if (count <= 0) return "No check-ins yet";
+  if (count === 1) return "1 live check-in";
+  return `${count} night moves`;
+}
+
+function trustLabel(confidence?: "high" | "medium" | "low") {
+  if (confidence === "high") return "Looks solid";
+  if (confidence === "medium") return "Some motion";
+  return "Still early";
 }
 
 function scoreToVenueStatus(score: number): "lit" | "decent" | "dead" {
@@ -510,23 +529,23 @@ function energyGlow(level?: string) {
 }
 
 function energyLabel(level?: string) {
-  if (level === "high") return "heating up";
-  if (level === "medium") return "gaining fast";
-  if (level === "negative") return "dead right now";
-  return "quiet night";
+  if (level === "high") return "Buzzing now";
+  if (level === "medium") return "Picking up";
+  if (level === "negative") return "Quiet right now";
+  return "Low motion";
 }
 
 function updateTypeIcon(type?: string) {
   switch (type) {
-    case "Crowd/vibe":
+    case "Vibe":
       return "";
-    case "Line update":
+    case "Line":
       return "";
-    case "Music/DJ":
+    case "Music":
       return "";
-    case "Event info":
+    case "Event":
       return "";
-    case "Cover charge":
+    case "Cover":
       return "";
     default:
       return "";
@@ -537,7 +556,7 @@ function getUpdateScore(update: { update_type?: string | null; message?: string 
   const type = update.update_type || "";
   const message = (update.message || "").toLowerCase();
 
-  if (type === "Crowd/vibe") {
+  if (type === "Vibe") {
     const positive = ["packed", "lit", "crowded", "busy", "good", "jumping"];
     const negative = ["dead", "empty", "slow", "quiet"];
 
@@ -546,8 +565,8 @@ function getUpdateScore(update: { update_type?: string | null; message?: string 
     return 0;
   }
 
-  if (type === "Line update") return 1;
-  if (type === "Music/DJ" || type === "Event info") return 1;
+  if (type === "Line") return 1;
+  if (type === "Music" || type === "Event") return 1;
   return 0;
 }
 
@@ -588,23 +607,26 @@ function getLiveReportOptions(category: "nightlife" | "restaurant" | "event"): L
       { label: "Busy", type: "crowd", value: "busy", tone: "watch" },
       { label: "Packed", type: "crowd", value: "packed", tone: "hot" },
       { label: "Long Wait", type: "wait", value: "long_wait", tone: "active" },
+      { label: "Date Vibe", type: "vibe", value: "decent", tone: "watch" },
     ];
   }
 
   if (category === "event") {
     return [
       { label: "Selling Fast", type: "tickets", value: "selling_fast", tone: "active" },
-      { label: "Great Crowd", type: "crowd", value: "great_crowd", tone: "hot" },
       { label: "Packed", type: "crowd", value: "packed", tone: "hot" },
-      { label: "Dead", type: "crowd", value: "dead", tone: "quiet" },
+      { label: "Good Crowd", type: "crowd", value: "great_crowd", tone: "hot" },
+      { label: "Long Line", type: "line", value: "line_crazy", tone: "active" },
+      { label: "Quiet", type: "crowd", value: "dead", tone: "quiet" },
     ];
   }
 
   return [
-    { label: "Dead", type: "vibe", value: "dead", tone: "quiet" },
-    { label: "Decent", type: "vibe", value: "decent", tone: "watch" },
-    { label: "Lit", type: "vibe", value: "lit", tone: "hot" },
-    { label: "Line Crazy", type: "line", value: "line_crazy", tone: "active" },
+    { label: "Packed", type: "crowd", value: "packed", tone: "hot" },
+    { label: "Good Crowd", type: "crowd", value: "great_crowd", tone: "hot" },
+    { label: "Good Energy", type: "vibe", value: "decent", tone: "watch" },
+    { label: "Long Line", type: "line", value: "line_crazy", tone: "active" },
+    { label: "Quiet", type: "vibe", value: "dead", tone: "quiet" },
   ];
 }
 
@@ -654,7 +676,7 @@ function getDominantReportSummary(reports: any[]) {
 
   const [value, count] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
   const label = value.replace(/_/g, " ");
-  return `${count} live report${count === 1 ? "" : "s"}: ${label}`;
+  return `People are calling it: ${label}`;
 }
 
 function reportToneClasses(tone: LiveReportOption["tone"]) {
@@ -691,7 +713,7 @@ function getDeviceId() {
 
 function hasRealVenueSignals(venue: VenueWithEvent) {
   // Real signals are human votes, live updates, or a scheduled event.
-  // Ghost Data should guide discovery, but it should not create “packed” heat by itself.
+  // Local signal should guide discovery, but it should not create “packed” heat by itself.
   return (
     (venue.voteCount || 0) > 0 ||
     (venue.updateCount || 0) > 0 ||
@@ -811,7 +833,7 @@ function buildVenueHeatmapGeoJSON(
   >;
 
   const features: HeatFeature[] = venues.flatMap((venue) => {
-    // Only real/live signals create heat. Ghost Data alone stays out of the heatmap.
+    // Only real/live signals create heat. Local signal alone stays out of the heatmap.
     if (!hasRealVenueSignals(venue) || !venue.lng || !venue.lat) return [];
 
     const weight = getHeatWeight(venue);
@@ -850,11 +872,11 @@ function getVibeIntensity(venue: VenueWithEvent | null) {
 
 function vibeMeterLabel(venue: VenueWithEvent | null) {
   if (!venue) return "Warming up";
-  if (venue.vibeTrend === "surging") return "Live signals are surging";
+  if (venue.vibeTrend === "surging") return "People are checking in";
   if (venue.vibeTrend === "heating") return "Momentum is building";
-  if (venue.vibeTrend === "steady") return "Steady but not explosive";
-  if (venue.vibeTrend === "cooling") return "Recent signals are cooling";
-  return "Needs more live signals";
+  if (venue.vibeTrend === "steady") return "Steady energy";
+  if (venue.vibeTrend === "cooling") return "Cooling off";
+  return "Needs more night moves";
 }
 
 function getVenueScoreBreakdown(venue: VenueWithEvent | null) {
@@ -872,31 +894,31 @@ function getVenueScoreBreakdown(venue: VenueWithEvent | null) {
 
   const items = [
     {
-      label: hasEvent ? "Event boost" : "Event boost",
+      label: hasEvent ? "Event pull" : "Event pull",
       value: hasEvent ? `+${22 + timingBoost}` : "+0",
       detail: hasEvent
         ? `${venue.tonightEvent?.title || "Event"} ${venue.tonightEvent?.starts_at_label ? `· ${venue.tonightEvent.starts_at_label}` : ""}`
-        : "No matched event yet",
+        : "No event matched yet",
       active: hasEvent,
     },
     {
-      label: "Ticket demand",
+      label: "Ticket heat",
       value: ticketBoost ? `+${ticketBoost}` : "+0",
-      detail: venue.tonightEvent?.ticket_status || "No ticket pressure signal",
+      detail: venue.tonightEvent?.ticket_status || "No ticket trend yet",
       active: ticketBoost > 0,
     },
     {
-      label: "Live crowd",
+      label: "People there",
       value: liveSignalCount ? `+${voteBoost + reportBoost}` : "+0",
       detail: liveSignalCount
         ? `${liveSignalCount} live signal${liveSignalCount === 1 ? "" : "s"}`
-        : "No user votes yet",
+        : "No night moves yet",
       active: liveSignalCount > 0,
     },
     {
-      label: "AI baseline",
+      label: "Tonight's vibe",
       value: aiBoost ? `+${aiBoost}` : venue.hasGhostData ? `+${Math.round((venue.aiScore || 0) * 0.28)}` : "+0",
-      detail: venue.hasGhostData ? "Ghost Data is watching this spot" : "No AI baseline",
+      detail: venue.hasGhostData ? "This spot has a read for tonight" : "Still early tonight",
       active: !!venue.hasGhostData,
     },
   ];
@@ -920,17 +942,17 @@ function getPrimaryLitReason(venue: VenueWithEvent | null) {
   }
 
   if (venue.hasGhostData) {
-    return "AI baseline is watching this venue until live votes come in.";
+    return "This spot is on the radar tonight.";
   }
 
-  return "No event or live crowd signal yet — this needs check-ins.";
+  return "Quiet right now. Check back later tonight.";
 }
 
 function getDecisionLabel(venue: VenueWithEvent | null) {
-  if (!venue) return "Check first";
-  if (venue.status === "lit") return "Go-worthy right now";
-  if (venue.status === "decent") return "Worth watching";
-  return "Needs confirmation";
+  if (!venue) return "Check before you go";
+  if (venue.status === "lit") return "Strong move right now";
+  if (venue.status === "decent") return "Worth keeping on your list";
+  return "Needs more check-ins";
 }
 
 function buildVenuePointsGeoJSON(
@@ -1019,6 +1041,217 @@ function buildVenuePointsGeoJSON(
   };
 }
 
+
+type RecommendationIntent = {
+  raw: string;
+  preference: string;
+  asksHookah: boolean;
+  asksBar: boolean;
+  asksClub: boolean;
+  asksLounge: boolean;
+  asksRestaurant: boolean;
+  asksEvent: boolean;
+  asksConcert: boolean;
+  asksCheap: boolean;
+  asksNoCover: boolean;
+  asksEighteenPlus: boolean;
+  asksTwentyOnePlus: boolean;
+  asksPacked: boolean;
+  asksChill: boolean;
+  asksTurnUp: boolean;
+  musicTerms: string[];
+  hasHardFilters: boolean;
+};
+
+function includesAny(value: string, terms: string[]) {
+  return terms.some((term) => value.includes(term));
+}
+
+function getVenueSearchText(venue: Partial<VenueWithEvent>) {
+  return [
+    venue.name,
+    (venue as any).city,
+    (venue as any).address,
+    venue.category,
+    venue.type,
+    venue.music_genre,
+    (venue as any).cover,
+    (venue as any).age_limit,
+    (venue as any).description,
+    venue.tonightEvent?.title,
+    venue.tonightEvent?.name,
+    venue.tonightEvent?.genre,
+    venue.tonightEvent?.dj,
+    venue.tonightEvent?.cover_price,
+    venue.tonightEvent?.age_limit,
+    venue.tonightEvent?.description,
+    venue.aiSummary,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function getVenueKind(venue: Partial<VenueWithEvent>) {
+  const text = getVenueSearchText(venue);
+
+  const isHookah = /\bhookah\b|\bshisha\b|\bcigar lounge\b/.test(text);
+  const isTheaterOrEventOnly = /\btheater\b|\btheatre\b|\bopera\b|\bperformance hall\b|\bconcert hall\b|\barena\b|\bcoliseum\b|\bmuseum\b|\bgallery\b|\barts center\b|\bperforming arts\b/.test(text);
+  const isRestaurant = /\brestaurant\b|\bgrill\b|\bkitchen\b|\bcafe\b|\bdiner\b|\bseafood\b|\btaco\b|\bpizza\b|\bburger\b|\bbrunch\b|\beats\b|\bdining\b/.test(text);
+  const isBar = /\bbar\b|\bpub\b|\btavern\b|\bsaloon\b|\bcocktail\b|\bbrewery\b|\btaproom\b|\bbeer\b|\bsports bar\b/.test(text);
+  const isClub = /\bclub\b|\bnightclub\b|\bdance\b|\bdj\b/.test(text);
+  const isLounge = /\blounge\b|\bupscale\b|\bcocktail lounge\b/.test(text);
+  const isConcert = /\bconcert\b|\blive music\b|\bshow\b|\btour\b|\bartist\b|\bperformance\b/.test(text);
+  const isNightlife = isHookah || isBar || isClub || isLounge || (!isTheaterOrEventOnly && /\bnightlife\b|\bparty\b|\bdrinks\b|\bcover\b|\b21\+\b|\b18\+\b/.test(text));
+
+  return {
+    text,
+    isHookah,
+    isTheaterOrEventOnly,
+    isRestaurant,
+    isBar,
+    isClub,
+    isLounge,
+    isConcert,
+    isNightlife,
+  };
+}
+
+function parseRecommendationIntent(question?: string, preferenceOverride?: string | null, selectedPreference?: string | null): RecommendationIntent {
+  const raw = `${question || ""} ${preferenceOverride ?? selectedPreference ?? ""}`.toLowerCase().trim();
+  const preference = String(preferenceOverride ?? selectedPreference ?? "").toLowerCase();
+  const asksHookah = /\bhookah\b|\bshisha\b/.test(raw) || preference.includes("hookah");
+  const asksBar = /\bbar\b|\bbars\b|\bpub\b|\btavern\b|\bcocktail\b|\bdrinks\b|\bcountry bar\b/.test(raw) || preference.includes("bar");
+  const asksClub = /\bclub\b|\bclubs\b|\bnightclub\b|\bdance\b/.test(raw) || preference.includes("club");
+  const asksLounge = /\blounge\b|\blounges\b/.test(raw) || preference.includes("lounge");
+  const asksRestaurant = /\brestaurant\b|\bfood\b|\bdinner\b|\beat\b|\bbrunch\b|\bdate night\b/.test(raw) || preference.includes("food") || preference.includes("brunch");
+  const asksConcert = /\bconcert\b|\bshow\b|\blive music\b|\bperformance\b/.test(raw) || preference.includes("concert") || preference.includes("live music");
+  const asksEvent = /\bevent\b|\bevents\b|\btonight\b/.test(raw) || preference.includes("event");
+  const asksCheap = /\bcheap\b|\blow cover\b|\baffordable\b|\bfree\b|\bno cover\b/.test(raw) || preference.includes("cheap");
+  const asksNoCover = /\bno cover\b|\bfree cover\b|\bfree entry\b/.test(raw);
+  const asksEighteenPlus = /\b18\+\b|\b18 and up\b|\beighteen\b/.test(raw) || preference.includes("18+");
+  const asksTwentyOnePlus = /\b21\+\b|\b21 and up\b|\btwenty one\b|\btwenty-one\b/.test(raw) || preference.includes("21+");
+  const asksPacked = /\bpacked\b|\bcrowded\b|\bbusy\b|\bjumping\b|\bactive\b|\bwhat'?s lit\b|\blit now\b/.test(raw);
+  const asksChill = /\bchill\b|\brelaxed\b|\blowkey\b|\blow key\b/.test(raw);
+  const asksTurnUp = /\bturn up\b|\bparty\b|\blit\b|\bhype\b/.test(raw);
+
+  const possibleMusicTerms = [
+    "country",
+    "hip-hop",
+    "hip hop",
+    "rap",
+    "r&b",
+    "rnb",
+    "latin",
+    "salsa",
+    "bachata",
+    "reggaeton",
+    "afrobeats",
+    "afrobeat",
+    "amapiano",
+    "dancehall",
+    "edm",
+    "house",
+    "techno",
+    "jazz",
+    "karaoke",
+  ];
+  const musicTerms = possibleMusicTerms.filter((term) => raw.includes(term));
+
+  const hasHardFilters =
+    asksHookah ||
+    asksBar ||
+    asksClub ||
+    asksLounge ||
+    asksRestaurant ||
+    asksConcert ||
+    asksCheap ||
+    asksNoCover ||
+    asksEighteenPlus ||
+    asksTwentyOnePlus ||
+    musicTerms.length > 0;
+
+  return {
+    raw,
+    preference,
+    asksHookah,
+    asksBar,
+    asksClub,
+    asksLounge,
+    asksRestaurant,
+    asksEvent,
+    asksConcert,
+    asksCheap,
+    asksNoCover,
+    asksEighteenPlus,
+    asksTwentyOnePlus,
+    asksPacked,
+    asksChill,
+    asksTurnUp,
+    musicTerms,
+    hasHardFilters,
+  };
+}
+
+function venueMatchesRecommendationIntent(venue: VenueWithEvent, intent: RecommendationIntent) {
+  const kind = getVenueKind(venue);
+  const text = kind.text;
+  const ageText = `${(venue as any).age_limit || ""} ${venue.tonightEvent?.age_limit || ""}`.toLowerCase();
+  const coverText = `${(venue as any).cover || ""} ${venue.tonightEvent?.cover_price || ""} ${venue.tonightEvent?.ticket_status || ""}`.toLowerCase();
+
+  if (intent.asksHookah && !kind.isHookah) return false;
+
+  if (intent.asksBar && !(kind.isBar || kind.isLounge || kind.isClub || kind.isHookah)) return false;
+  if (intent.asksClub && !kind.isClub) return false;
+  if (intent.asksLounge && !(kind.isLounge || kind.isHookah)) return false;
+  if (intent.asksRestaurant && !(kind.isRestaurant || text.includes("food") || text.includes("brunch"))) return false;
+  if (intent.asksConcert && !(kind.isConcert || kind.isTheaterOrEventOnly)) return false;
+
+  // If someone asks for nightlife/bar/club/lounge/hookah, do not let theaters, museums, or event-only venues win
+  // unless the user specifically asked for concerts/events.
+  const asksNightlifePlace = intent.asksHookah || intent.asksBar || intent.asksClub || intent.asksLounge || intent.asksTwentyOnePlus || intent.asksEighteenPlus;
+  if (asksNightlifePlace && kind.isTheaterOrEventOnly && !intent.asksConcert) return false;
+
+  if (intent.asksTwentyOnePlus && !(/21\+|21 and up|twenty one|twenty-one/.test(ageText) || (kind.isBar || kind.isClub || kind.isLounge || kind.isHookah))) {
+    return false;
+  }
+
+  if (intent.asksEighteenPlus && !(/18\+|18 and up|eighteen/.test(ageText))) {
+    return false;
+  }
+
+  if (intent.asksNoCover && !(/no cover|free cover|free entry|\$0|free/.test(coverText))) return false;
+  if (intent.asksCheap && !(/cheap|low cover|no cover|free|\$0|\$5|\$10|varies/.test(coverText) || !coverText.trim())) return false;
+
+  if (intent.musicTerms.length > 0) {
+    const normalizedText = text.replace(/r and b/g, "r&b");
+    const hasMusicMatch = intent.musicTerms.some((term) => normalizedText.includes(term));
+    if (!hasMusicMatch) return false;
+  }
+
+  return true;
+}
+
+function getRecommendationIntentLabel(intent: RecommendationIntent) {
+  const parts: string[] = [];
+  if (intent.asksEighteenPlus) parts.push("18+");
+  if (intent.asksTwentyOnePlus) parts.push("21+");
+  if (intent.musicTerms.length) parts.push(intent.musicTerms[0]);
+  if (intent.asksHookah) parts.push("hookah");
+  else if (intent.asksClub) parts.push("club");
+  else if (intent.asksBar) parts.push("bar");
+  else if (intent.asksLounge) parts.push("lounge");
+  else if (intent.asksRestaurant) parts.push("food spot");
+  else if (intent.asksConcert) parts.push("event");
+  if (intent.asksCheap) parts.push("cheap cover");
+  return parts.length ? parts.join(" ") : "best move";
+}
+
+function getNoExactMatchMessage(intent: RecommendationIntent) {
+  const label = getRecommendationIntentLabel(intent);
+  return `I couldn’t find a clean ${label} match yet. Try a broader ask like “what’s lit now?” or check another category.`;
+}
+
 export default function Home() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const filteredVenuesRef = useRef<VenueWithEvent[]>([]);
@@ -1062,7 +1295,7 @@ export default function Home() {
   const [selectedPreference, setSelectedPreference] = useState<string | null>(null);
   const [venueDirectoryOpen, setVenueDirectoryOpen] = useState(false);
   const [suggestionOpen, setSuggestionOpen] = useState(false);
-  const [suggestionType, setSuggestionType] = useState("Event info");
+  const [suggestionType, setSuggestionType] = useState("Event");
   const [suggestionMessage, setSuggestionMessage] = useState("");
   const [suggestionMediaFile, setSuggestionMediaFile] = useState<File | null>(null);
   const [suggestionLoading, setSuggestionLoading] = useState(false);
@@ -1120,6 +1353,26 @@ export default function Home() {
     fetchSummary();
   }, []);
 
+  useEffect(() => {
+    function handleOutsideClick(event: MouseEvent) {
+      const target = event.target as HTMLElement;
+
+      if (
+        venueDirectoryOpen &&
+        !target.closest(".venue-directory-panel") &&
+        !target.closest(".all-chip-button")
+      ) {
+        setVenueDirectoryOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleOutsideClick);
+
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+    };
+  }, [venueDirectoryOpen]);
+
   async function fetchRecommendation(question?: string, preferenceOverride?: string | null) {
     try {
       setRecommendationLoading(true);
@@ -1128,45 +1381,52 @@ export default function Home() {
       setRecommendationReasons([]);
       setRecommendationQuestion(question || "");
 
-      // Fast local recommendation engine. This uses the same live venue data
-      // powering the map instead of waiting on the API, so the button feels instant.
+      // Intent-first recommendation engine:
+      // 1) Understand what the user asked for.
+      // 2) Hard-filter obvious wrong categories before scoring.
+      // 3) Rank only valid matches so theaters do not win bar/hookah/21+ requests.
+      const intent = parseRecommendationIntent(question, preferenceOverride, selectedPreference);
       const userQuestion = (question || "").toLowerCase();
       const preference = (preferenceOverride !== undefined ? preferenceOverride ?? "" : selectedPreference ?? "").toLowerCase();
       const pool = filteredVenues.length > 0 ? filteredVenues : venues;
-      const withSignals = pool.filter((venue) => hasRealVenueSignals(venue));
-      const candidates = withSignals.length > 0 ? withSignals : pool;
+
+      const exactMatches = intent.hasHardFilters
+        ? pool.filter((venue) => venueMatchesRecommendationIntent(venue, intent))
+        : pool;
+
+      if (intent.hasHardFilters && exactMatches.length === 0) {
+        const fallback = getNoExactMatchMessage(intent);
+        setRecommendationReasons([
+          `No exact ${getRecommendationIntentLabel(intent)} match passed the hard filters.`,
+          "I blocked weak matches like theaters, museums, or restaurants from winning nightlife-specific requests.",
+          "A broader search may surface better options tonight.",
+        ]);
+        setRecommendation(fallback);
+        return fallback;
+      }
+
+      const withSignals = exactMatches.filter((venue) => hasRealVenueSignals(venue));
+      const candidates = withSignals.length > 0 ? withSignals : exactMatches;
 
       const scored = candidates.map((venue) => {
         const vibeScore = venue.vibeScore || venue.score || 0;
-        const signals = (venue.voteCount || 0) + (venue.updateCount || 0);
-        const eventBoost = venue.tonightEvent ? 14 : 0;
+        const signals = (venue.voteCount || 0) + (venue.updateCount || 0) + (venue.liveReportCount || 0);
+        const eventBoost = venue.tonightEvent ? 10 : 0;
         const photoBoost = (venue as any).photo_url ? 4 : 0;
         const confidenceBoost = venue.confidence === "high" ? 8 : venue.confidence === "medium" ? 4 : 0;
         const trendBoost = venue.vibeTrend === "surging" ? 18 : venue.vibeTrend === "heating" ? 10 : venue.vibeTrend === "steady" ? 4 : 0;
-        const realSignalBoost = hasRealVenueSignals(venue) ? 18 : -8;
-
-        const searchable = [
-          venue.name,
-          venue.city,
-          venue.category,
-          venue.type,
-          venue.music_genre,
-          venue.cover,
-          venue.age_limit,
-          venue.tonightEvent?.title,
-          venue.tonightEvent?.genre,
-          venue.tonightEvent?.dj,
-          venue.tonightEvent?.cover_price,
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase();
+        const realSignalBoost = hasRealVenueSignals(venue) ? 18 : -4;
+        const kind = getVenueKind(venue);
+        const searchable = kind.text;
 
         const preferenceBoost = preference && searchable.includes(preference.replace("-", " ")) ? 18 : 0;
-        const questionBoost = userQuestion && searchable.split(" ").some((word) => userQuestion.includes(word) && word.length > 3) ? 8 : 0;
-        const cheapBoost = (preference.includes("cheap") || userQuestion.includes("cheap")) && /free|cheap|\$0|no cover/i.test(String(venue.cover || venue.tonightEvent?.cover_price || "")) ? 16 : 0;
-        const turnUpBoost = (preference.includes("turn") || userQuestion.includes("lit") || userQuestion.includes("party")) && ["lit", "decent"].includes(String(venue.status)) ? 12 : 0;
-        const chillBoost = (preference.includes("chill") || userQuestion.includes("chill")) && venue.vibeTrend !== "surging" ? 10 : 0;
+        const questionBoost = userQuestion && searchable.split(/\s+/).some((word) => userQuestion.includes(word) && word.length > 3) ? 8 : 0;
+        const exactIntentBoost = intent.hasHardFilters ? 28 : 0;
+        const packedBoost = intent.asksPacked && (venue.vibeTrend === "surging" || venue.vibeTrend === "heating" || (venue.liveReportCount || 0) > 0) ? 16 : 0;
+        const cheapBoost = (intent.asksCheap || preference.includes("cheap")) && /free|cheap|\$0|no cover|\$5|\$10|varies/i.test(String((venue as any).cover || venue.tonightEvent?.cover_price || "")) ? 16 : 0;
+        const turnUpBoost = (intent.asksTurnUp || preference.includes("turn")) && ["lit", "decent"].includes(String(venue.status)) ? 12 : 0;
+        const chillBoost = (intent.asksChill || preference.includes("chill")) && venue.vibeTrend !== "surging" ? 10 : 0;
+        const eventOnlyPenalty = kind.isTheaterOrEventOnly && !intent.asksConcert && !intent.asksEvent ? -35 : 0;
 
         return {
           venue,
@@ -1180,9 +1440,12 @@ export default function Home() {
             realSignalBoost +
             preferenceBoost +
             questionBoost +
+            exactIntentBoost +
+            packedBoost +
             cheapBoost +
             turnUpBoost +
-            chillBoost,
+            chillBoost +
+            eventOnlyPenalty,
         };
       });
 
@@ -1190,18 +1453,19 @@ export default function Home() {
       const pick = scored[0]?.venue || null;
 
       if (!pick) {
-        const fallback = "I don’t have enough venue data yet. Try switching city filters or check back after more votes come in.";
+        const fallback = "I don’t see a strong move yet. Try switching city filters or check back later tonight.";
         setRecommendationReasons([
-          "No strong live signals were found in the current filters.",
-          "Try widening the city/category filters or check back after more votes come in.",
+          "No strong move is standing out in the current filters.",
+          "Try widening the city/category filters or check back later tonight.",
         ]);
         setRecommendation(fallback);
         return fallback;
       }
 
-      const signals = (pick.voteCount || 0) + (pick.updateCount || 0);
+      const signals = (pick.voteCount || 0) + (pick.updateCount || 0) + (pick.liveReportCount || 0);
       const confidence = confidenceLabel(pick.confidence);
       const trend = vibeTrendLabel(pick.vibeTrend);
+      const intentLabel = getRecommendationIntentLabel(intent);
       const eventText = pick.tonightEvent
         ? ` There’s also ${pick.tonightEvent.title} tonight${pick.tonightEvent.dj ? ` with ${pick.tonightEvent.dj}` : ""}.`
         : "";
@@ -1210,30 +1474,32 @@ export default function Home() {
         : pick.vibeTrend === "heating"
         ? "This is the move to watch over the next hour."
         : signals > 0
-        ? "It has real signals, but keep checking before you commit."
+        ? "It has some real activity, but check again before you commit."
         : pick.hasGhostData
-        ? "AI has a read on this spot, but user votes can confirm it."
-        : "No fresh crowd signals yet, so treat this as a discovery pick.";
+        ? "This spot has momentum tonight."
+        : "Still early, so treat this as a discovery pick.";
 
-      const reason = pick.vibeReason || "The live score, venue context, and latest signals make this the best move right now.";
+      const reason = pick.vibeReason || "The venue context and tonight’s momentum make this a strong move.";
       const vibeScoreText = `${pick.vibeScore || pick.score || 0}/100 vibe score`;
-      const recommendationText = `${trend} · ${vibeScoreText} · ${signals} live signal${signals === 1 ? "" : "s"}. ${reason}${eventText} ${confidence}. ${urgency}`;
+      const recommendationText = `${pick.name} is my ${intent.hasHardFilters ? intentLabel : "best move"} pick. ${trend}. ${reason}${eventText} ${urgency}`;
 
       const whyReasons = [
-        `Best current match in your filters with a ${vibeScoreText}.`,
+        intent.hasHardFilters
+          ? `It matches what you asked for: ${intentLabel}.`
+          : `Best current match for your filters.`,
         signals > 0
-          ? `${signals} live signal${signals === 1 ? "" : "s"} from recent votes or updates.`
+          ? `This spot has some motion right now.`
           : pick.tonightEvent
-          ? "Event context is carrying this recommendation tonight."
+          ? "Tonight’s event makes this one worth watching."
           : pick.hasGhostData
-          ? `Ghost Data AI score is ${pick.aiScore || 0}/100 for this spot.`
-          : "Discovery pick because no venue has strong live signals yet.",
+          ? `This spot has momentum tonight.`
+          : "Discovery pick while the night is still warming up.",
         pick.vibeTrend && pick.vibeTrend !== "quiet"
-          ? `${vibeTrendLabel(pick.vibeTrend)} trend detected from the live scoring engine.`
-          : "Quiet trend, so this is a safer pick rather than a hype pick.",
+          ? `${vibeTrendLabel(pick.vibeTrend)} momentum around this spot tonight.`
+          : "Still early, so this is more of a safe pick than a hype pick.",
         pick.tonightEvent
           ? `${pick.tonightEvent.title} is on the schedule tonight${pick.tonightEvent.dj ? ` with ${pick.tonightEvent.dj}` : ""}.`
-          : `${confidence} based on current vote/update volume.`,
+          : `Current vibe based on tonight’s context.`,
       ];
 
       setRecommendationVenue(pick.name);
@@ -1274,7 +1540,7 @@ export default function Home() {
     shareUrl.searchParams.set("venue", selected.id);
 
     const shareTitle = `${selected.name} on Lit757`;
-    const shareText = `${selected.name} is ${statusLabel(selected.status)} right now on Lit757. Vibe score: ${selected.vibeScore || selected.score || 0}/100.`;
+    const shareText = `${selected.name} on Lit757: ${statusLabel(selected.status)} right now.`;
 
     try {
       if (navigator.share) {
@@ -1491,7 +1757,7 @@ export default function Home() {
       .select("*")
       .gte("created_at", since);
 
-    if (liveReportsError) console.error("Live reports error:", liveReportsError);
+    if (liveReportsError) console.error("Updates error:", liveReportsError);
 
     const { data: intelligenceData, error: intelligenceError } = await supabase
       .from("venue_intelligence")
@@ -1499,7 +1765,7 @@ export default function Home() {
 
     if (intelligenceError) {
       console.error("Venue intelligence error:", intelligenceError);
-      console.warn("Ghost Data is not visible to the frontend. Check RLS SELECT policy on venue_intelligence.");
+      console.warn("Local signal is not visible to the frontend. Check RLS SELECT policy on venue_intelligence.");
     }
 
     const intelligenceByVenueId = new Map(
@@ -1591,7 +1857,7 @@ export default function Home() {
         const behaviorCategory = getBehaviorCategory({ ...venue, tonightEvent });
         const hasLiveSignals = voteCount + updateCount + liveReportCount > 0 || !!tonightEvent;
 
-        // Ghost Data System merge:
+        // Local signal System merge:
         // - If users/events exist, real signals dominate.
         // - If no users/events exist yet, AI keeps the venue useful instead of dead/empty.
         const liveAdjustedScore = clampScore(vibeEngine.finalScore + liveReportScore);
@@ -1619,10 +1885,10 @@ export default function Home() {
         const momentumLabel = hasLiveSignals
           ? vibeEngine.momentumLabel
           : finalTrend === "heating"
-          ? "AI sees heat"
+          ? "Looks hot"
           : finalTrend === "steady"
-          ? "AI steady read"
-          : "AI watching";
+          ? "Steady read"
+          : "Watching";
 
         return {
           ...venue,
@@ -1635,10 +1901,10 @@ export default function Home() {
           vibeTier: finalStatus,
           vibeTrend: finalTrend,
           vibeReason: liveReportCount > 0
-            ? `${reportSummary}. Fresh user reports are pushing this score right now.`
+            ? `${reportSummary}.`
             : hasLiveSignals
             ? vibeEngine.vibeReason
-            : intel?.summary || "Ghost Data is estimating this venue from AI signals until live user votes come in.",
+            : intel?.summary || "This spot is on the radar for tonight.",
           confidence:
             voteCount + updateCount + liveReportCount >= 5
               ? "high"
@@ -1875,7 +2141,7 @@ export default function Home() {
         coolingExpression,
         "#60a5fa", // confirmed cooling
         aiWatchingExpression,
-        "#facc15", // AI watching only, no fake heat
+        "#facc15", // Watching only, no fake heat
         upcomingEventExpression,
         "#38bdf8", // upcoming event venue, not live heat
         "#6b7280", // quiet / monitored
@@ -2272,7 +2538,7 @@ export default function Home() {
       ? rawMessage.trim()
       : updateType
       ? `${updateType} just came in.`
-      : "The city just updated this spot.";
+      : "Someone just added a vibe.";
 
     const nextToast: ActivityToast = {
       id: item.id,
@@ -2573,8 +2839,8 @@ export default function Home() {
       id: `vote-${selected.id}-${Date.now()}`,
       venueId: selected.id,
       venueName: selected.name,
-      title: vibe === "lit" ? `${selected.name} just got a Lit vote` : vibe === "dead" ? `${selected.name} got a Dead vote` : `${selected.name} got a vibe check`,
-      message: vibe === "lit" ? "Someone nearby says this spot is lit right now." : vibe === "dead" ? "Someone nearby says the energy is low right now." : "Someone nearby says this spot is decent right now.",
+      title: vibe === "lit" ? `${selected.name} just got a Buzzing check-in` : vibe === "dead" ? `${selected.name} got a Quiet check-in` : `${selected.name} got a comment`,
+      message: vibe === "lit" ? "Someone nearby says this spot has energy right now." : vibe === "dead" ? "Someone nearby says it is quiet right now." : "Someone nearby says this spot has a decent crowd right now.",
       icon: "",
       createdAt: new Date().toISOString(),
     });
@@ -2607,10 +2873,10 @@ export default function Home() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data?.error || "Live report failed");
+        throw new Error(data?.error || "Update failed");
       }
 
-      setLiveReportFeedback(`Reported: ${option.label}`);
+      setLiveReportFeedback(`${option.label} added`);
       await loadVenues();
 
       setSelected((prev) =>
@@ -2627,7 +2893,7 @@ export default function Home() {
         id: `live-report-${selected.id}-${Date.now()}`,
         venueId: selected.id,
         venueName: selected.name,
-        title: `${selected.name} got a live report`,
+        title: `${selected.name} got a update`,
         message: `${option.label} was reported just now.`,
         icon: "",
         createdAt: new Date().toISOString(),
@@ -2636,8 +2902,8 @@ export default function Home() {
       if ("vibrate" in navigator) navigator.vibrate(35);
       window.setTimeout(() => setLiveReportFeedback(""), 2200);
     } catch (error) {
-      console.error("Live report error:", error);
-      setLiveReportFeedback("Could not send report. Try again.");
+      console.error("Update error:", error);
+      setLiveReportFeedback("Could not add that. Try again.");
     } finally {
       setLiveReportLoading(false);
     }
@@ -2718,17 +2984,17 @@ export default function Home() {
         id: `update-${selected.id}-${Date.now()}`,
         venueId: selected.id,
         venueName: selected.name,
-        title: `${updateTypeIcon(suggestionType)} New update at ${selected.name}`,
+        title: `${updateTypeIcon(suggestionType)} New comment at ${selected.name}`,
         message: suggestionMessage.trim() || `${suggestionType} just came in.`,
         icon: updateTypeIcon(suggestionType),
         createdAt: new Date().toISOString(),
       });
 
       setSuggestionStatus("success");
-      setSuggestionFeedback("Update sent — thanks for helping the city.");
+      setSuggestionFeedback("Comment added — you just put people on.");
       setSuggestionMessage("");
       setSuggestionMediaFile(null);
-      setSuggestionType("Event info");
+      setSuggestionType("Event");
       setSuggestionOpen(false);
     } catch (error) {
       console.error("Suggestion error:", error);
@@ -2924,7 +3190,7 @@ export default function Home() {
       coolingExpression,
       "#60a5fa", // confirmed cooling
       aiWatchingExpression,
-      "#facc15", // AI watching only, no fake heat
+      "#facc15", // Watching only, no fake heat
       upcomingEventExpression,
       "#38bdf8", // upcoming event venue, not live heat
       effectiveMode === "day" ? "#334155" : "#6b7280", // quiet / monitored
@@ -3499,7 +3765,7 @@ export default function Home() {
     id: `fallback-${venue.id}`,
     venue_name: venue.name,
     venue_id: venue.id,
-    update_type: venue.energyLevel === "high" ? "Crowd/vibe" : "Event info",
+    update_type: venue.energyLevel === "high" ? "Vibe" : "Event",
     message:
       venue.energyLevel === "high"
         ? "is heating up right now"
@@ -3538,6 +3804,38 @@ export default function Home() {
   const primaryChips = CHIP_CONFIGS.slice(0, 17);
   const moreChips = CHIP_CONFIGS.slice(17);
   const chips = CHIP_CONFIGS.map((chip) => chip.label);
+
+  function handleChipClick(chip: (typeof CHIP_CONFIGS)[number]) {
+    const nextPreference = chip.preference;
+
+    // All is the venue-directory trigger. Pressing it again should close the list.
+    if (chip.label === "All" && activeChip === "All" && venueDirectoryOpen) {
+      setVenueDirectoryOpen(false);
+      setViewMode("map");
+      setSelected(null);
+      return;
+    }
+
+    setActiveChip(chip.label);
+    setSelectedPreference(nextPreference);
+    setSelected(null);
+    setSheetExpanded(true);
+
+    if (chip.label === "Events") {
+      setViewMode("events");
+      setVenueDirectoryOpen(false);
+    } else if (chip.label === "All") {
+      setViewMode("map");
+      setVenueDirectoryOpen(true);
+    } else {
+      setViewMode("map");
+      setVenueDirectoryOpen(false);
+    }
+
+    if (recommendation || recommendationLoading) {
+      fetchRecommendation(undefined, nextPreference);
+    }
+  }
 
   const vibeGlowClass = selected?.status === "lit"
     ? "border-red-400/20 bg-red-500/10 shadow-[0_0_30px_rgba(239,68,68,0.22)]"
@@ -3831,7 +4129,7 @@ export default function Home() {
               <div className="relative h-12 w-12 overflow-hidden rounded-2xl bg-white/10 skeleton-shimmer" />
               <div>
                 <p className="text-[10px] font-black uppercase tracking-[0.28em] text-orange-300">Loading Lit757</p>
-                <p className="mt-1 text-sm font-semibold text-white/75">Pulling live venue signals...</p>
+                <p className="mt-1 text-sm font-semibold text-white/75">Finding tonight’s best moves...</p>
               </div>
             </div>
           </div>
@@ -3956,15 +4254,13 @@ export default function Home() {
                   Live in the 757
                 </p>
                 <h1 className={`text-[22px] font-black leading-tight tracking-tight sm:text-xl truncate ${isDay ? "text-slate-950" : "text-white"}`}>
-                  {activeCount > 0
-                    ? ` ${activeCount} active right now`
-                    : "What’s lit tonight? "}
+                  Find what’s happening tonight
                 </h1>
                 <div className={`mt-1 flex items-center gap-2 text-xs ${isDay ? "text-slate-600" : "text-white/50"}`}>
                   <p className="truncate">
                     {heroSpot
-                      ? `Best move: ${heroSpot.name}`
-                      : "Real-time nightlife map for Hampton Roads"}
+                      ? `Tonight: ${heroSpot.name}`
+                      : "Food, music, events, bars, and more around Hampton Roads"}
                   </p>
                   <span className={`shrink-0 inline-flex items-center gap-2 rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.22em] shadow-[0_0_12px_rgba(251,146,60,0.12)] ${isDay ? "border-red-500/30 bg-red-500/10 text-red-700" : "border-red-500/20 bg-red-500/10 text-red-100"}`}>
                     <span className="h-2 w-2 rounded-full bg-red-400 live-pulse" />
@@ -4032,9 +4328,9 @@ export default function Home() {
               <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar">
                 {[
                   "Where should I go?",
-                  "What’s lit now?",
+                  "What’s active now?",
                   "18+ spots",
-                  "Cheap cover",
+                  "Cheap drinks",
                 ].map((prompt) => (
                 <button
                   key={prompt}
@@ -4070,13 +4366,13 @@ export default function Home() {
               <button
                 onClick={closeRecommendationPanel}
                 className={`absolute right-2 top-2 z-20 inline-flex h-7 w-7 items-center justify-center rounded-full border transition ${isDay ? "border-slate-300/80 bg-white/80 text-slate-700 hover:bg-slate-100" : "border-white/10 bg-black/30 text-white/70 hover:bg-white/10 hover:text-white"}`}
-                aria-label="Close AI recommendation"
+                aria-label="Close recommendation"
               >
                 <X size={14} />
               </button>
               <div className="flex flex-wrap items-center gap-2">
                 <span className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.22em] ${isDay ? "bg-slate-900/10 text-slate-700" : "bg-white/10 text-white/75"}`}>
-                  AI Pick
+                  Best Move
                 </span>
                 {selectedPreference && (
                   <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.18em] text-emerald-100 border border-emerald-400/30">
@@ -4084,12 +4380,12 @@ export default function Home() {
                   </span>
                 )}
                 <p className={`text-[9px] uppercase tracking-[0.25em] ${isDay ? "text-slate-500" : "text-white/45"}`}>
-                  {recommendationLoading ? "Reading the city right now" : "Tonight’s best move"}
+                  {recommendationLoading ? "Reading tonight" : "Tonight’s best move"}
                 </p>
               </div>
               <p className={`mt-1 text-xs leading-4 ${isDay ? "text-slate-700" : "text-white/90"}`}>
                 {recommendationLoading
-                  ? "Scanning live votes, updates, events, and vibe score."
+                  ? "Reading tonight’s best moves."
                   : recommendationVenue ? (
                       <>
                         <span className={isDay ? "font-semibold text-slate-950" : "font-semibold text-white"}>
@@ -4148,29 +4444,8 @@ export default function Home() {
                 {primaryChips.map((chip) => (
                   <button
                     key={chip.label}
-                    onClick={() => {
-                      const nextPreference = chip.preference;
-                      setActiveChip(chip.label);
-                      setSelectedPreference(nextPreference);
-                      setSelected(null);
-                      setSheetExpanded(true);
-
-                      if (chip.label === "Events") {
-                        setViewMode("events");
-                        setVenueDirectoryOpen(false);
-                      } else if (chip.label === "All") {
-                        setViewMode("map");
-                        setVenueDirectoryOpen(true);
-                      } else {
-                        setViewMode("map");
-                        setVenueDirectoryOpen(false);
-                      }
-
-                      if (recommendation || recommendationLoading) {
-                        fetchRecommendation(undefined, nextPreference);
-                      }
-                    }}
-                    className={`snap-start shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm font-black transition active:scale-95 sm:px-3 sm:py-1.5 sm:text-xs ${
+                    onClick={() => handleChipClick(chip)}
+                    className={`${chip.label === "All" ? "all-chip-button " : ""}snap-start shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm font-black transition active:scale-95 sm:px-3 sm:py-1.5 sm:text-xs ${
                       activeChip === chip.label
                         ? isDay
                           ? "border-slate-950 bg-slate-950 text-white shadow-sm"
@@ -4207,25 +4482,7 @@ export default function Home() {
                 {moreChips.map((chip) => (
                   <button
                     key={chip.label}
-                    onClick={() => {
-                      const nextPreference = chip.preference;
-                      setActiveChip(chip.label);
-                      setSelectedPreference(nextPreference);
-                      setSelected(null);
-                      setSheetExpanded(true);
-
-                      if (chip.label === "Events") {
-                        setViewMode("events");
-                        setVenueDirectoryOpen(false);
-                      } else {
-                        setViewMode("map");
-                        setVenueDirectoryOpen(false);
-                      }
-
-                      if (recommendation || recommendationLoading) {
-                        fetchRecommendation(undefined, nextPreference);
-                      }
-                    }}
+                    onClick={() => handleChipClick(chip)}
                     className={`whitespace-nowrap rounded-2xl border px-3 py-2 text-left text-xs font-black transition active:scale-[0.98] ${
                       activeChip === chip.label
                         ? isDay
@@ -4346,7 +4603,7 @@ export default function Home() {
                         <span className={`${isDay ? "text-slate-500" : "text-white/45"}`}>·</span>
                         <span className="text-[11px] font-black text-orange-300">{vibeIntensity} vibe</span>
                         <span className={`${isDay ? "text-slate-500" : "text-white/45"}`}>·</span>
-                        <span className={`text-[11px] font-bold ${isDay ? "text-slate-500" : "text-white/55"}`}>{signals} signal{signals === 1 ? "" : "s"}</span>
+                        <span className={`text-[11px] font-bold ${isDay ? "text-slate-500" : "text-white/55"}`}>{signals} check-in{signals === 1 ? "" : "s"}</span>
                         <span className="text-orange-300/70">•</span>
                       </button>
                     );
@@ -4358,7 +4615,7 @@ export default function Home() {
         </div>
       )}
 
-      <div className="absolute right-3 top-[365px] z-30 flex flex-col items-end gap-2 sm:right-4 sm:top-[330px] sm:gap-3 lg:top-[310px]">
+      <div className="absolute right-3 top-[305px] z-30 flex flex-col items-end gap-2 sm:right-4 sm:top-[285px] sm:gap-3 lg:top-[265px]">
         <button
           onClick={() => {
             if (!map) return;
@@ -4417,10 +4674,11 @@ export default function Home() {
               { enableHighAccuracy: true, timeout: 12000, maximumAge: 15000 }
             );
           }}
-          className="flex h-11 w-11 items-center justify-center rounded-full bg-black/80 text-white shadow-xl ring-1 ring-white/10 backdrop-blur-xl transition active:scale-95"
-          aria-label="Locate me"
+          className="flex h-11 w-11 items-center justify-center rounded-full bg-black/85 text-white shadow-xl ring-1 ring-white/10 backdrop-blur-xl transition hover:bg-black/95 active:scale-95"
+          aria-label="Use my location"
+          title="Use my location"
         >
-          <Navigation size={18} />
+          <LocateFixed size={18} />
         </button>
 
         <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/70 shadow-xl backdrop-blur-xl">
@@ -4542,7 +4800,7 @@ export default function Home() {
 
             {recommendation && (
               <div className="rounded-2xl bg-emerald-500/10 p-2 ring-1 ring-emerald-300/10">
-                <p className="text-[9px] uppercase tracking-[0.2em] text-emerald-200/60">AI says</p>
+                <p className="text-[9px] uppercase tracking-[0.2em] text-emerald-200/60">The move</p>
                 <p className="mt-1 text-xs leading-4 text-white/85">
                   {recommendationVenue ? `${recommendationVenue} — ` : ""}
                   {recommendation}
@@ -4618,19 +4876,17 @@ export default function Home() {
         onTouchEnd={handleTouchEnd}
       >
         <div
-          className={`overflow-y-auto rounded-t-[1.65rem] border border-white/10 bg-zinc-950/95 p-3 shadow-[0_-18px_80px_rgba(0,0,0,0.55)] backdrop-blur-3xl transition-all duration-300 select-none sm:rounded-t-[2rem] ${
+          className={`transition-all duration-300 select-none ${
             selected
-              ? sheetExpanded
-                ? "max-h-[70vh] sm:max-h-[64vh]"
-                : "max-h-[24vh] sm:max-h-[22vh]"
+              ? "max-h-[84vh] overflow-visible rounded-t-[2rem] border border-white/5 bg-black/35 p-4 shadow-[0_-18px_90px_rgba(0,0,0,0.45)] backdrop-blur-xl sm:max-h-[82vh] sm:p-5 lg:px-8 lg:pb-6"
               : sheetExpanded
-              ? "max-h-[45vh] sm:max-h-[48vh]"
-              : "max-h-[12vh] sm:max-h-[14vh]"
+              ? "max-h-[45vh] overflow-y-auto rounded-t-[1.65rem] border border-white/10 bg-zinc-950/95 p-3 shadow-[0_-18px_80px_rgba(0,0,0,0.55)] backdrop-blur-3xl sm:max-h-[48vh] sm:rounded-t-[2rem]"
+              : "max-h-[12vh] overflow-y-auto rounded-t-[1.65rem] border border-white/10 bg-zinc-950/95 p-3 shadow-[0_-18px_80px_rgba(0,0,0,0.55)] backdrop-blur-3xl sm:max-h-[14vh] sm:rounded-t-[2rem]"
           }`}
         >
           <button
             onClick={() => setSheetExpanded((prev) => !prev)}
-            className="mx-auto mb-3 flex h-6 w-20 items-center justify-center rounded-full text-white/50"
+            className={selected ? "mx-auto mb-4 flex h-6 w-24 items-center justify-center rounded-full text-white/50" : "mx-auto mb-3 flex h-6 w-20 items-center justify-center rounded-full text-white/50"}
           >
             <div className="h-1 w-12 rounded-full bg-white/20" />
           </button>
@@ -4835,10 +5091,10 @@ export default function Home() {
                                 {statusLabel(venue.status)}
                               </span>
                               <span className="rounded-full bg-white/10 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.14em] text-white/70">
-                                {signalCount} signal{signalCount === 1 ? "" : "s"}
+                                {activityPhrase(venue)}
                               </span>
                               <span className="rounded-full bg-white/10 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.14em] text-white/70">
-                                {confidenceLabel(venue.confidence)}
+                                {vibeTrendLabel(venue.vibeTrend)}
                               </span>
                             </div>
 
@@ -4861,759 +5117,322 @@ export default function Home() {
             </>
           ) : (
             <>
-              <div className="mb-3 overflow-hidden rounded-[2rem] border border-white/10 bg-white/5 bg-gradient-to-br from-white/10 via-white/5 to-transparent p-4 shadow-[0_0_40px_rgba(255,255,255,0.08)] backdrop-blur-xl">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="truncate text-3xl font-extrabold leading-tight tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-white to-slate-200 drop-shadow-[0_0_14px_rgba(255,255,255,0.2)] sm:text-4xl">
-                        {selected.name}
-                      </h2>
-                      <span className="select-none rounded-full border border-white/10 bg-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-white/65 backdrop-blur-xl">
-                        {venueType(selected)}
-                      </span>
-                      {(selected.upcomingEvents || []).length > 0 && (
-                        <span className="select-none rounded-full border border-cyan-300/20 bg-cyan-400/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-cyan-100">
-                          {(selected.upcomingEvents || []).length} event{(selected.upcomingEvents || []).length === 1 ? "" : "s"}
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
-                      <span
-                        className="select-none rounded-full border px-2.5 py-1 font-semibold uppercase tracking-[0.18em] text-white/85 ring-1 ring-white/10"
-                        style={{
-                          backgroundColor: `${energyColor(selected.energyLevel)}1f`,
-                          borderColor: energyColor(selected.energyLevel),
-                        }}
-                      >
-                        {(selected.voteCount || 0) + (selected.liveReportCount || 0)} active • {selected.updateCount || 0} updates
-                      </span>
-                      <span className="select-none rounded-full bg-white/10 px-2.5 py-1 font-semibold uppercase tracking-[0.18em] text-white/70 ring-1 ring-white/10 backdrop-blur-xl">
-                        {confidenceLabel(selected.confidence)}
-                      </span>
-                      {selectedPrimaryEvent && (
-                        <span className="select-none rounded-full border border-orange-300/20 bg-orange-500/10 px-2.5 py-1 font-semibold uppercase tracking-[0.18em] text-orange-100">
-                          {selectedPrimaryEventIsLive ? "Live / Tonight event" : "Upcoming event"}
-                        </span>
-                      )}
-                    </div>
-
-                    {selectedPrimaryEvent && (
-                      <div className="mt-4 rounded-[1.6rem] border border-orange-300/20 bg-gradient-to-r from-orange-500/15 via-red-500/10 to-fuchsia-500/10 p-3 shadow-lg shadow-orange-500/10">
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                          <div className="min-w-0">
-                            <p className="text-[10px] font-black uppercase tracking-[0.25em] text-orange-100/70">
-                              {selectedPrimaryEventIsLive ? "Why this pin is hot" : "Next event at this spot"}
-                            </p>
-                            <p className="mt-1 line-clamp-2 text-base font-black text-white sm:text-lg">
-                              {selectedPrimaryEvent.title || selectedPrimaryEvent.name}
-                            </p>
-                            <p className="mt-1 text-xs font-semibold text-white/55">
-                              {selectedPrimaryEvent.starts_at_label || "Time TBA"}
-                              {selectedPrimaryEvent.ticket_status ? ` • ${selectedPrimaryEvent.ticket_status}` : ""}
-                              {selectedPrimaryEvent.source ? ` • ${String(selectedPrimaryEvent.source).toUpperCase()}` : ""}
-                            </p>
-                          </div>
-                          <div className="flex shrink-0 flex-wrap gap-2">
-                            {selectedPrimaryEvent.ticket_status && (
-                              <span className="rounded-full border border-amber-300/25 bg-amber-400/15 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-amber-100">
-                                {selectedPrimaryEvent.ticket_status}
-                              </span>
-                            )}
-                            {selectedPrimaryEventUrl && (
-                              <a
-                                href={selectedPrimaryEventUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="rounded-full border border-cyan-300/25 bg-cyan-400/15 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-cyan-100 transition hover:bg-cyan-400/25"
-                              >
-                                View Tickets
-                              </a>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      onClick={() => {
-                        setSuggestionOpen(true);
-                        setSuggestionStatus(null);
-                        setSuggestionFeedback("");
-                      }}
-                      className="select-none flex h-10 items-center justify-center rounded-3xl bg-white/10 px-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-white transition hover:bg-white/15 focus:outline-none"
-                    >
-                      Suggest Update
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        setEventOpen(true);
-                        setEventStatus(null);
-                        setEventFeedback("");
-                      }}
-                      className="select-none flex h-10 items-center justify-center rounded-3xl bg-white/10 px-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-white transition hover:bg-white/15 focus:outline-none"
-                    >
-                      Submit Event
-                    </button>
-
-                    <button
-                      onClick={shareSelectedVenue}
-                      className="select-none flex h-10 w-10 items-center justify-center rounded-3xl bg-white/10 text-white transition hover:bg-white/15 focus:outline-none"
-                      aria-label="Share this venue"
-                    >
-                      <Share2 size={18} />
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        setSelected(null);
-                        setSheetExpanded(false);
-                      }}
-                      className="select-none flex h-10 w-10 items-center justify-center rounded-3xl bg-white/10 text-white transition hover:bg-white/15 focus:outline-none"
-                    >
-                      <X size={20} />
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {suggestionStatus && suggestionFeedback && (
-                <div
-                  className={`mb-3 rounded-3xl border px-3 py-2 text-sm ${
-                    suggestionStatus === "success"
-                      ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-100"
-                      : "border-rose-400/20 bg-rose-500/10 text-rose-100"
-                  }`}
-                >
-                  {suggestionFeedback}
-                </div>
-              )}
-
-              {eventStatus && eventFeedback && (
-                <div
-                  className={`mb-3 rounded-3xl border px-3 py-2 text-sm ${
-                    eventStatus === "success"
-                      ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-100"
-                      : "border-rose-400/20 bg-rose-500/10 text-rose-100"
-                  }`}
-                >
-                  {eventFeedback}
-                </div>
-              )}
-
-              {shareFeedback && (
-                <div className="mb-3 rounded-3xl border border-sky-300/20 bg-sky-500/10 px-3 py-2 text-sm font-semibold text-sky-100">
-                  {shareFeedback}
-                </div>
-              )}
-
               {(() => {
-                const scoreBreakdown = getVenueScoreBreakdown(selected);
-                const event = selectedPrimaryEvent as any;
-                const isLiveOrTonightEvent = !!selected.tonightEvent;
-                const liveSignalCount = (selected.voteCount || 0) + (selected.updateCount || 0) + (selected.liveReportCount || 0);
-                const ticketLabel = event?.ticket_status || event?.cover_price || null;
+                const liveSignalCount =
+                  (selected.voteCount || 0) +
+                  (selected.updateCount || 0) +
+                  (selected.liveReportCount || 0);
+                const heroUrl =
+                  selectedVenueHeroPhoto?.url ||
+                  ((selected as any).photo_url as string | undefined) ||
+                  ((selected as any).venue_photo_url as string | undefined) ||
+                  ((selected as any).image_url as string | undefined) ||
+                  null;
+                const phoneNumber =
+                  (selected as any).phone ||
+                  (selected as any).phone_number ||
+                  (selected as any).formatted_phone_number ||
+                  null;
+                const phoneHref = phoneNumber
+                  ? `tel:${String(phoneNumber).replace(/[^+0-9]/g, "")}`
+                  : undefined;
+                const score = clampScore(selected.vibeScore ?? selected.score ?? selected.aiScore ?? 0);
+                const websiteUrl = (selected as any).website || (selected as any).url || selectedPrimaryEventUrl || null;
+                const hoursText =
+                  (selected as any).hours ||
+                  (selected as any).opening_hours ||
+                  (selected as any).hours_text ||
+                  null;
+                const addressText = selected.address || selected.city || "757";
+                const rawAiLine =
+                  selected.aiSummary ||
+                  selected.vibeReason ||
+                  getPrimaryLitReason(selected) ||
+                  "Still early here tonight.";
+                const aiLine = /local signal|confirmed crowd activity|unless votes|event energy/i.test(rawAiLine)
+                  ? score >= 70
+                    ? `${selected.name} looks active tonight. This could be one of the better moves tonight.`
+                    : score >= 40
+                    ? `${selected.name} has some momentum, and could keep building as the night moves.`
+                    : `${selected.name} looks quiet right now. Could pick up later if the night shifts.`
+                  : rawAiLine;
+                const activeLabel =
+                  selected.status === "lit"
+                    ? "Active right now"
+                    : selected.status === "decent"
+                    ? "Warming up"
+                    : "Quiet right now";
+                const actionReport = () => {
+                  setSuggestionType("Vibe");
+                  setSuggestionOpen(true);
+                  setSuggestionStatus(null);
+                  setSuggestionFeedback("");
+                };
+                const quickOptions: LiveReportOption[] = [
+                  { label: "🔥 Active", type: "crowd", value: "packed", tone: "hot" },
+                  { label: "✨ Good Energy", type: "vibe", value: "decent", tone: "watch" },
+                  { label: "😴 Slow", type: "vibe", value: "dead", tone: "quiet" },
+                ];
+                const readConfidence =
+                  selected.confidence === "high"
+                    ? "Strong read"
+                    : selected.confidence === "medium"
+                    ? "Good read"
+                    : liveSignalCount > 0 || selected.tonightEvent
+                    ? "Warming up"
+                    : "Still early";
+                const liveActivityItems = [
+                  selected.tonightEvent
+                    ? `${selected.tonightEvent.title || selected.tonightEvent.name || "Event tonight"} · ${selected.tonightEvent.starts_at_label || "Time TBA"}`
+                    : null,
+                  selected.reportSummary || null,
+                  liveSignalCount > 0
+                    ? "The spot is starting to move"
+                    : "Be first to call the vibe",
+                ].filter(Boolean) as string[];
 
                 return (
-                  <div className="mb-4 overflow-hidden rounded-[2rem] border border-orange-300/25 bg-gradient-to-br from-orange-500/18 via-red-500/12 to-fuchsia-500/12 p-4 shadow-2xl shadow-orange-500/10 backdrop-blur-2xl">
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                      <div className="min-w-0 flex-1">
-                        <div className="mb-3 flex flex-wrap items-center gap-2">
-                          <span className="rounded-full border border-orange-300/25 bg-orange-500/15 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-orange-100">
-                            Why it&apos;s {statusLabel(selected.status)}
-                          </span>
-                          {event && (
-                            <span className="rounded-full border border-fuchsia-300/25 bg-fuchsia-500/15 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-fuchsia-100">
-                              {isLiveOrTonightEvent ? "Live event signal" : "Upcoming event listed"}
-                            </span>
-                          )}
-                          {ticketLabel && (
-                            <span className="rounded-full border border-amber-300/25 bg-amber-400/15 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-amber-100">
-                              {ticketLabel}
-                            </span>
-                          )}
-                        </div>
-
-                        <h3 className="text-2xl font-black leading-tight text-white sm:text-3xl">
-                          {getDecisionLabel(selected)}
-                        </h3>
-                        <p className="mt-2 max-w-3xl text-sm leading-6 text-white/70">
-                          {getPrimaryLitReason(selected)}
-                        </p>
-                      </div>
-
-                      <div className="shrink-0 rounded-[1.7rem] border border-white/10 bg-black/40 px-4 py-3 text-center shadow-inner shadow-white/5">
-                        <p className="text-4xl font-black text-white">{Math.round(selectedVibeIntensity)}</p>
-                        <p className="text-[10px] font-black uppercase tracking-[0.24em] text-white/40">Live Score</p>
-                      </div>
-                    </div>
-
-                    {event ? (
-                      <div className="mt-4 rounded-[1.7rem] border border-white/10 bg-black/35 p-4 shadow-inner shadow-white/5">
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                          <div className="min-w-0">
-                            <p className="text-[10px] font-black uppercase tracking-[0.28em] text-orange-200/80">{isLiveOrTonightEvent ? "Tonight\'s event" : "Upcoming event"}</p>
-                            <h4 className="mt-2 text-xl font-black leading-tight text-white">{event.title}</h4>
-                            <p className="mt-1 text-sm text-white/60">
-                              {event.starts_at_label || "Time TBA"}
-                              {event.genre ? ` · ${event.genre}` : ""}
-                              {event.dj ? ` · DJ: ${event.dj}` : ""}
-                            </p>
+                  <div className="mx-auto w-full max-w-[390px] overflow-hidden rounded-[2.75rem] border border-white/10 bg-[#0b0b0c]/95 text-white shadow-[0_30px_120px_rgba(0,0,0,0.85)] backdrop-blur-3xl min-[560px]:max-w-[92vw] xl:max-w-[1480px] min-[560px]:rounded-[2.25rem] min-[560px]:border-white/12">
+                    {(suggestionStatus && suggestionFeedback) || (eventStatus && eventFeedback) || shareFeedback || liveReportFeedback || navigationError ? (
+                      <div className="space-y-2 border-b border-white/10 bg-black/40 px-5 py-3 lg:px-6">
+                        {suggestionStatus && suggestionFeedback && (
+                          <div
+                            className={`rounded-2xl border px-3 py-2 text-xs font-semibold ${
+                              suggestionStatus === "success"
+                                ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-100"
+                                : "border-rose-400/20 bg-rose-500/10 text-rose-100"
+                            }`}
+                          >
+                            {suggestionFeedback}
                           </div>
-                          <div className="flex flex-wrap gap-2 sm:justify-end">
-                            {ticketLabel && (
-                              <span className="rounded-full border border-orange-300/25 bg-orange-500/15 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-orange-100">
-                                {ticketLabel}
-                              </span>
-                            )}
-                            <span className="rounded-full border border-white/10 bg-white/10 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-white/70">
-                              {isLiveOrTonightEvent ? "Score boost active" : "No current score boost"}
-                            </span>
+                        )}
+                        {eventStatus && eventFeedback && (
+                          <div
+                            className={`rounded-2xl border px-3 py-2 text-xs font-semibold ${
+                              eventStatus === "success"
+                                ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-100"
+                                : "border-rose-400/20 bg-rose-500/10 text-rose-100"
+                            }`}
+                          >
+                            {eventFeedback}
                           </div>
-                        </div>
-                        <p className="mt-3 rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs leading-5 text-white/65">
-                          {isLiveOrTonightEvent
-                            ? "This venue is lighting up because the event is matched to this spot and ticket/event demand is boosting the current score before user votes come in."
-                            : "This event is listed for this venue, but it is not boosting the current lit score until it gets close to showtime."}
-                        </p>
+                        )}
+                        {shareFeedback && (
+                          <div className="rounded-2xl border border-sky-300/20 bg-sky-500/10 px-3 py-2 text-xs font-semibold text-sky-100">
+                            {shareFeedback}
+                          </div>
+                        )}
+                        {liveReportFeedback && (
+                          <div className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-100">
+                            {liveReportFeedback}
+                          </div>
+                        )}
+                        {navigationError && (
+                          <div className="rounded-2xl border border-red-400/20 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-100">
+                            {navigationError}
+                          </div>
+                        )}
                       </div>
-                    ) : (
-                      <div className="mt-4 rounded-[1.7rem] border border-white/10 bg-black/25 p-4">
-                        <p className="text-[10px] font-black uppercase tracking-[0.28em] text-white/40">No event matched yet</p>
-                        <p className="mt-2 text-sm leading-6 text-white/60">
-                          This spot needs live check-ins, user votes, or an event match before it should look truly hot.
-                        </p>
-                      </div>
-                    )}
+                    ) : null}
 
-                    <div className="mt-4">
-                      <div className="mb-2 flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.22em] text-white/45">
-                        <span>{selectedVibeMeterLabel}</span>
-                        <span>{vibeTrendLabel(selected.vibeTrend)} · {statusLabel(selected.status)}</span>
-                      </div>
-                      <div className="h-3 overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10">
-                        <div
-                          className="h-full rounded-full bg-gradient-to-r from-orange-300 via-red-400 to-fuchsia-500 shadow-[0_0_22px_rgba(249,115,22,0.45)] transition-all duration-700"
-                          style={{ width: `${selectedVibeIntensity}%` }}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                      {scoreBreakdown.map((item) => (
-                        <div
-                          key={item.label}
-                          className={`rounded-2xl border px-3 py-3 shadow-inner shadow-white/5 ${
-                            item.active
-                              ? "border-orange-300/20 bg-orange-500/10"
-                              : "border-white/10 bg-white/[0.05]"
-                          }`}
+                    <div className="min-[560px]:grid min-[560px]:min-h-[420px] min-[560px]:grid-cols-[minmax(280px,0.92fr)_1fr] lg:min-h-[560px] lg:grid-cols-[minmax(540px,680px)_1fr] xl:min-h-[610px] xl:grid-cols-[minmax(620px,760px)_1fr]">
+                      <div className="relative flex h-[200px] flex-col justify-end overflow-hidden bg-[linear-gradient(135deg,#1a0a0a_0%,#060606_100%)] px-5 pb-4 min-[560px]:h-auto min-[560px]:min-h-[420px] min-[560px]:px-7 min-[560px]:pb-7 lg:min-h-[560px] lg:px-10 lg:pb-10 xl:min-h-[610px] xl:px-12 xl:pb-12">
+                        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_30%_60%,rgba(239,68,68,0.28)_0%,transparent_62%),radial-gradient(ellipse_at_80%_20%,rgba(251,146,60,0.12)_0%,transparent_55%)]" />
+                        {heroUrl && (
+                          <img
+                            src={heroUrl}
+                            alt=""
+                            className="absolute inset-0 h-full w-full object-cover opacity-[0.34] mix-blend-screen lg:opacity-[0.46]"
+                            aria-hidden="true"
+                          />
+                        )}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/45 to-black/10" />
+                        <button
+                          onClick={() => {
+                            setSelected(null);
+                            setSheetExpanded(false);
+                          }}
+                          className="absolute right-4 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/10 text-white/70 backdrop-blur-xl transition hover:bg-white/15 hover:text-white min-[560px]:h-9 min-[560px]:w-9 lg:h-10 lg:w-10"
+                          aria-label="Close venue"
                         >
-                          <div className="flex items-center justify-between gap-2">
-                            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35">{item.label}</p>
-                            <p className="text-sm font-black text-white">{item.value}</p>
+                          <X size={16} />
+                        </button>
+
+                        <div className="relative z-10">
+                          <div className="mb-1.5 flex items-baseline gap-1 min-[560px]:mb-2 lg:mb-3">
+                            <span className="text-[42px] font-semibold leading-none text-white min-[560px]:text-[64px] lg:text-[86px]">
+                              {score}
+                            </span>
+                            <span className="text-xs uppercase tracking-[0.12em] text-white/45 min-[560px]:text-xs lg:text-sm">
+                              / 100 vibe
+                            </span>
                           </div>
-                          <p className="mt-2 line-clamp-2 text-[11px] leading-4 text-white/55">{item.detail}</p>
+
+                          <h2 className="text-[24px] font-semibold leading-[1.05] tracking-tight text-white min-[560px]:text-4xl min-[560px]:font-bold lg:text-6xl lg:font-bold">
+                            {selected.name}
+                          </h2>
+                          <p className="mt-1 text-[13px] text-white/45 lg:mt-3 min-[560px]:text-xs lg:text-sm">
+                            {selected.city || "757"} · {venueType(selected)}
+                          </p>
+
+                          <div className="mt-4 hidden max-w-sm rounded-2xl border border-white/10 bg-black/25 px-4 py-3 backdrop-blur-xl min-[560px]:block lg:block">
+                            <p className="text-[10px] uppercase tracking-[0.18em] text-white/35">Tonight</p>
+                            <p className="mt-1 text-lg font-semibold text-white">{activeLabel}</p>
+                            <p className="mt-1 text-sm leading-5 text-white/55">Tonight · {selected.city || "757"}</p>
+                          </div>
                         </div>
-                      ))}
-                    </div>
+                      </div>
 
-                    <div className="mt-4 grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
-                      <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3 shadow-inner shadow-white/5">
-                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35">Status</p>
-                        <p className="mt-1 text-base font-black text-white">{statusLabel(selected.status)}</p>
-                      </div>
-                      <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3 shadow-inner shadow-white/5">
-                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35">Signals</p>
-                        <p className="mt-1 text-base font-black text-white">{liveSignalCount}</p>
-                      </div>
-                      <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3 shadow-inner shadow-white/5">
-                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35">Trust</p>
-                        <p className="mt-1 text-xs font-black text-white">{confidenceLabel(selected.confidence)}</p>
-                      </div>
-                      <div className="rounded-2xl border border-white/10 bg-white/[0.06] px-2 py-3 shadow-inner shadow-white/5">
-                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35">Updated</p>
-                        <p className="mt-1 text-xs font-black text-white">{minutesAgo(selected.lastUpdated)}</p>
+                      <div className="flex flex-col min-[560px]:p-5 lg:p-7 xl:p-8">
+                        <div className="mx-5 pt-3.5 min-[560px]:mx-0 min-[560px]:pt-0">
+                          <div className="h-1 overflow-hidden rounded-full bg-white/[0.08]">
+                            <div
+                              className="h-full rounded-full bg-red-500 transition-all"
+                              style={{ width: `${Math.max(5, score)}%` }}
+                            />
+                          </div>
+                          <div className="mt-1.5 flex justify-between text-[11px] text-white/30">
+                            <span className={score < 36 ? "text-red-400" : ""}>Dead</span>
+                            <span className={score >= 36 && score < 75 ? "text-red-400" : ""}>Heating up</span>
+                            <span className={score >= 75 ? "text-red-400" : ""}>Surging</span>
+                          </div>
+                        </div>
+
+                        <div className="mx-5 mt-3.5 rounded-xl border border-red-500/20 bg-[linear-gradient(135deg,rgba(239,68,68,0.13),rgba(239,68,68,0.05))] px-3.5 py-3 shadow-[0_0_50px_rgba(239,68,68,0.08)] min-[560px]:mx-0 min-[560px]:mt-4 min-[560px]:rounded-2xl min-[560px]:px-4 min-[560px]:py-4 lg:mt-5 lg:rounded-3xl lg:px-6 lg:py-6">
+                          <p className="mb-1.5 text-[10px] uppercase tracking-[0.16em] text-red-400/80 min-[560px]:text-[10px] lg:text-xs">
+                            Tonight · {readConfidence}
+                          </p>
+                          <p className="text-[13px] leading-5 text-white/80 min-[560px]:text-sm min-[560px]:leading-6 min-[560px]:text-sm lg:text-base lg:leading-7">
+                            {aiLine}
+                          </p>
+                        </div>
+
+                        <div className="mx-5 mt-3 rounded-2xl border border-white/[0.07] bg-white/[0.035] px-3.5 py-3 min-[560px]:mx-0 min-[560px]:mt-4 lg:rounded-3xl lg:px-5 lg:py-4">
+                          <div className="mb-2 flex items-center justify-between gap-3">
+                            <p className="text-[10px] uppercase tracking-[0.16em] text-white/30">Tonight</p>
+                            <span className="inline-flex items-center gap-1.5 rounded-full bg-red-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-red-300">
+                              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-400" />
+                              live
+                            </span>
+                          </div>
+                          <div className="space-y-1.5">
+                            {liveActivityItems.slice(0, 3).map((item, index) => (
+                              <div key={`${item}-${index}`} className="flex items-center gap-2 text-xs text-white/55 lg:text-sm">
+                                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-white/25" />
+                                <span className="truncate">{item}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="mx-5 mt-3.5 grid grid-cols-[1.35fr_1fr_1fr] gap-2 min-[560px]:mx-0 min-[560px]:mt-4 min-[560px]:gap-3 lg:mt-5">
+                          <button
+                            type="button"
+                            onClick={startInAppNavigation}
+                            disabled={navigationLoading}
+                            className="flex flex-col items-center gap-1.5 rounded-[14px] border border-red-400/35 bg-[linear-gradient(135deg,rgba(239,68,68,0.28),rgba(249,115,22,0.18))] px-2 py-3 text-white shadow-[0_0_45px_rgba(239,68,68,0.16)] transition hover:scale-[1.01] hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-60 min-[560px]:rounded-2xl min-[560px]:py-5 lg:py-6"
+                          >
+                            <Navigation size={22} className="text-red-200" />
+                            <span className="text-[11px] font-semibold text-red-50 min-[560px]:text-xs lg:text-sm">
+                              {navigationLoading ? "Loading" : "Directions"}
+                            </span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={shareSelectedVenue}
+                            className="flex flex-col items-center gap-1.5 rounded-[14px] border border-white/10 bg-white/[0.05] px-2 py-3 text-white transition hover:bg-white/[0.08] min-[560px]:rounded-2xl min-[560px]:py-4 lg:py-5"
+                          >
+                            <Share2 size={20} className="text-white/70" />
+                            <span className="text-[11px] text-white/55 min-[560px]:text-xs lg:text-sm">Share</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={actionReport}
+                            className="flex flex-col items-center gap-1.5 rounded-[14px] border border-white/10 bg-white/[0.05] px-2 py-3 text-white transition hover:bg-white/[0.08] min-[560px]:rounded-2xl min-[560px]:py-4 lg:py-5"
+                          >
+                            <span className="text-xl leading-none text-white/70">✦</span>
+                            <span className="text-[11px] text-white/55 min-[560px]:text-xs lg:text-sm">Comment</span>
+                          </button>
+                        </div>
+
+                        <div className="min-[560px]:grid min-[560px]:flex-1 min-[560px]:grid-cols-2 min-[560px]:gap-4">
+                          {selected.tonightEvent && (
+                            <div>
+                              <div className="mx-5 mt-4 h-px bg-white/[0.06] min-[560px]:mx-0 min-[560px]:mt-4 lg:mt-5" />
+                              <p className="mx-5 mb-2 mt-3.5 text-[10px] uppercase tracking-[0.16em] text-white/30 min-[560px]:mx-0 lg:mx-0">
+                                Tonight&apos;s event
+                              </p>
+                              <div className="mx-5 flex items-center justify-between gap-2.5 rounded-[14px] border border-white/[0.08] bg-white/[0.04] px-3.5 py-3 min-[560px]:mx-0 lg:mx-0 min-[560px]:min-h-[86px] min-[560px]:rounded-2xl min-[560px]:px-4 min-[560px]:py-4 lg:min-h-[96px]">
+                                <div className="min-w-0">
+                                  <p className="truncate text-sm font-medium text-white min-[560px]:text-sm lg:text-base">
+                                    {selected.tonightEvent.title || selected.tonightEvent.name || "Tonight event"}
+                                  </p>
+                                  <p className="mt-1 truncate text-xs text-white/40 min-[560px]:text-xs lg:text-sm">
+                                    {selected.tonightEvent.starts_at_label || "Time TBA"}
+                                    {selected.tonightEvent.ticket_status ? ` · ${selected.tonightEvent.ticket_status}` : ""}
+                                  </p>
+                                </div>
+                                {selectedPrimaryEventUrl && (
+                                  <button
+                                    type="button"
+                                    onClick={() => window.open(selectedPrimaryEventUrl, "_blank")}
+                                    className="shrink-0 rounded-full border border-orange-400/30 bg-orange-500/12 px-3.5 py-1.5 text-[11px] uppercase tracking-[0.1em] text-orange-300 transition hover:bg-orange-500/20"
+                                  >
+                                    Tickets
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          <div className={selected.tonightEvent ? "" : "min-[560px]:col-span-2 lg:col-span-2"}>
+                            <div className="mx-5 mt-4 h-px bg-white/[0.06] min-[560px]:mx-0 min-[560px]:mt-4 lg:mt-5" />
+                            <div className="mx-5 mb-2 mt-3.5 flex items-center justify-between gap-3 min-[560px]:mx-0 lg:mx-0">
+                              <p className="text-[10px] uppercase tracking-[0.16em] text-white/30">
+                                What’s the vibe?
+                              </p>
+                              <p className="hidden text-xs text-white/30 min-[560px]:block lg:block">tap in</p>
+                            </div>
+                            <div className="mx-5 grid grid-cols-3 gap-2 min-[560px]:mx-0 lg:mx-0 min-[560px]:gap-3 lg:gap-3">
+                              {quickOptions.map((option) => {
+                                const optionClass =
+                                  option.value === "packed"
+                                    ? "bg-red-500/15 text-red-300 hover:bg-red-500/20"
+                                    : option.value === "decent"
+                                    ? "bg-orange-500/12 text-orange-300 hover:bg-orange-500/20"
+                                    : "bg-slate-400/10 text-slate-300/80 hover:bg-slate-400/15";
+
+                                return (
+                                  <button
+                                    key={`${option.type}-${option.value}`}
+                                    type="button"
+                                    onClick={() => submitLiveReport(option)}
+                                    disabled={liveReportLoading}
+                                    className={`rounded-[14px] px-2 py-3 text-center text-xs font-medium transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 min-[560px]:rounded-2xl min-[560px]:py-4 lg:py-5 min-[560px]:text-xs lg:text-sm ${optionClass}`}
+                                  >
+                                    {option.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="mx-5 mt-4 h-px bg-white/[0.06] min-[560px]:mx-0 min-[560px]:mt-4 lg:mt-5" />
+
+                        <div className="mx-5 flex items-center gap-2 pb-6 pt-3.5 min-[560px]:mx-0 lg:mx-0 min-[560px]:pb-0 lg:pb-0">
+                          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" />
+                          <p className="truncate text-xs text-white/35 min-[560px]:text-xs lg:text-sm">
+                            Current vibe · {selected.city || "757"}
+                          </p>
+                        </div>
                       </div>
                     </div>
-
-                    <p className="mt-4 rounded-2xl border border-white/10 bg-black/25 px-3 py-2 text-[11px] leading-5 text-white/60">
-                      <span className="font-bold text-white/80">Score logic:</span> Event timing, ticket demand, live votes, check-ins, and AI baseline all feed the score. User votes still override the estimate as real people check in.
-                    </p>
                   </div>
                 );
               })()}
-
-              <div className="mb-4 overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.055] p-4 shadow-xl shadow-black/20 backdrop-blur-xl">
-                <div className="mb-3 flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-[10px] font-black uppercase tracking-[0.26em] text-white/45">
-                      Live Check-In
-                    </p>
-                    <h3 className="mt-1 text-base font-black text-white">
-                      {selected.behaviorCategory === "restaurant"
-                        ? "How crowded is it?"
-                        : selected.behaviorCategory === "event"
-                        ? "How is the event?"
-                        : "How is the vibe?"}
-                    </h3>
-                    <p className="mt-1 text-xs leading-5 text-white/50">
-                      One tap updates the score and helps the map reflect what is really happening.
-                    </p>
-                  </div>
-                  <span className="shrink-0 rounded-full border border-white/10 bg-black/30 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.18em] text-white/55">
-                    {(selected.liveReportCount || 0)} live
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  {getLiveReportOptions(selected.behaviorCategory || getBehaviorCategory(selected)).map((option) => (
-                    <button
-                      key={`${option.type}-${option.value}`}
-                      onClick={() => submitLiveReport(option)}
-                      disabled={liveReportLoading}
-                      className={`rounded-2xl border px-3 py-3 text-xs font-black uppercase tracking-[0.14em] transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 ${reportToneClasses(option.tone)}`}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-white/50">
-                  {selected.reportSummary && (
-                    <span className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5">
-                      {selected.reportSummary}
-                    </span>
-                  )}
-                  {liveReportFeedback && (
-                    <span className="rounded-full border border-emerald-300/20 bg-emerald-500/10 px-3 py-1.5 font-semibold text-emerald-100">
-                      {liveReportFeedback}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              <div className="mb-4 overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.055] shadow-2xl shadow-black/20">
-                <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
-                  <div>
-                    <p className="text-[10px] font-black uppercase tracking-[0.26em] text-white/45">
-                      Venue Photo
-                    </p>
-                    <p className="mt-1 text-xs font-semibold text-white/55">
-                      Official building photo so people can recognize the spot
-                    </p>
-                  </div>
-                  <span className="shrink-0 rounded-full border border-white/10 bg-white/10 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.18em] text-white/70">
-                    {selectedVenueHeroPhoto ? "Building" : "Needs Photo"}
-                  </span>
-                </div>
-
-                {selectedVenueHeroPhoto ? (
-                  <>
-                    <div className="relative min-h-[280px] overflow-hidden bg-black sm:min-h-[340px] lg:min-h-[380px]">
-                      <img
-                        src={selectedVenueHeroPhoto.url}
-                        alt=""
-                        aria-hidden="true"
-                        className="absolute inset-0 h-full w-full scale-110 object-cover opacity-45 blur-2xl"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-br from-black/60 via-black/30 to-black/80" />
-                      <div className="absolute inset-x-0 top-0 z-10 h-24 bg-gradient-to-b from-black/55 to-transparent" />
-                      <div className="absolute inset-x-0 bottom-0 z-10 h-40 bg-gradient-to-t from-black/90 via-black/45 to-transparent" />
-
-                      <div className="relative z-10 flex min-h-[280px] items-center justify-center p-3 sm:min-h-[340px] sm:p-4 lg:min-h-[380px]">
-                        <img
-                          src={selectedVenueHeroPhoto.url}
-                          alt={`${selected.name} building exterior`}
-                          className="max-h-[250px] w-full rounded-[1.6rem] border border-white/10 object-contain shadow-2xl shadow-black/50 sm:max-h-[305px] lg:max-h-[345px]"
-                        />
-                      </div>
-
-                      <div className="absolute bottom-4 left-4 right-4 z-20 flex items-end justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="truncate text-2xl font-black text-white drop-shadow sm:text-3xl">
-                            {selected.name}
-                          </p>
-                          <p className="mt-1 truncate text-xs font-semibold text-white/75">
-                            {selected.address || selected.city || "Venue exterior"}
-                          </p>
-                        </div>
-                        <span className="shrink-0 rounded-full border border-white/10 bg-black/65 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-white/80 shadow-lg backdrop-blur-xl">
-                          Venue
-                        </span>
-                      </div>
-                    </div>
-
-                    {selectedOfficialVenuePhotos.length > 1 && (
-                      <div className="no-scrollbar flex gap-2 overflow-x-auto p-3">
-                        {selectedOfficialVenuePhotos.slice(1).map((item) => (
-                          <div
-                            key={item.id}
-                            className="relative h-20 min-w-[112px] overflow-hidden rounded-2xl border border-white/10 bg-black/40"
-                          >
-                            <img
-                              src={item.url}
-                              alt={`${selected.name} venue building`}
-                              className="h-full w-full object-cover"
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="p-4">
-                    <div className="flex min-h-[190px] flex-col items-center justify-center rounded-[1.75rem] border border-dashed border-white/15 bg-gradient-to-br from-white/[0.08] to-white/[0.025] p-5 text-center">
-                      <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10 text-2xl">
-                        
-                      </div>
-                      <p className="text-base font-black text-white">
-                        Add this venue’s building photo
-                      </p>
-                      <p className="mt-2 max-w-sm text-xs leading-5 text-white/50">
-                        Add a Supabase `photo_url` for this venue. This should be an exterior/entrance shot like Google Maps, not a user-uploaded crowd picture.
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {selectedUpdateMedia.length > 0 && (
-                <div className="mb-4 overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.045] p-4 shadow-xl shadow-black/20">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-[10px] font-black uppercase tracking-[0.26em] text-white/45">
-                        Live Crowd Media
-                      </p>
-                      <p className="mt-1 text-xs font-semibold text-white/55">
-                        Recent user uploads from this spot
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => {
-                        setSuggestionOpen(true);
-                        setSuggestionType("Crowd/vibe");
-                        setSuggestionStatus(null);
-                        setSuggestionFeedback("");
-                      }}
-                      className="shrink-0 rounded-full border border-white/10 bg-white/10 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.18em] text-white transition hover:bg-white/15"
-                    >
-                      Add Photo
-                    </button>
-                  </div>
-                  <div className="no-scrollbar flex gap-2 overflow-x-auto">
-                    {selectedUpdateMedia.map((item) => (
-                      <div
-                        key={item.id}
-                        className="relative h-24 min-w-[132px] overflow-hidden rounded-2xl border border-white/10 bg-black/40"
-                      >
-                        {item.type === "video" ? (
-                          <>
-                            <video
-                              src={item.url}
-                              muted
-                              playsInline
-                              className="h-full w-full object-cover"
-                            />
-                            <div className="absolute inset-0 flex items-center justify-center bg-black/20 text-lg">▶</div>
-                          </>
-                        ) : (
-                          <img
-                            src={item.url}
-                            alt={`${selected.name} crowd upload`}
-                            className="h-full w-full object-cover"
-                          />
-                        )}
-                        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2">
-                          <p className="truncate text-[10px] font-bold text-white/85">{item.label}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {selectedUpcomingEvents.length > 0 && (
-                <div className="mb-4 rounded-3xl border border-white/10 bg-white/5 p-4">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <CalendarDays size={16} className="text-white/60" />
-                      <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-white/35">
-                        Upcoming Events
-                      </p>
-                    </div>
-                    <span className="rounded-full bg-white/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-white/50">
-                      {selectedUpcomingEvents.length}
-                    </span>
-                  </div>
-
-                  <div className="space-y-2">
-                    {selectedUpcomingEvents.slice(0, 4).map((event) => (
-                      <div
-                        key={event.id || event.source_event_id || `${event.title}-${event.starts_at_label}`}
-                        className="rounded-2xl border border-white/10 bg-black/25 p-3"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="line-clamp-1 text-sm font-black text-white">
-                              {event.title || event.name}
-                            </p>
-                            <p className="mt-1 text-[11px] text-white/50">
-                              {event.starts_at_label || "Time TBA"}
-                              {event.ticket_status ? ` • ${event.ticket_status}` : ""}
-                            </p>
-                          </div>
-                          {event.source_url && (
-                            <a
-                              href={event.source_url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="shrink-0 rounded-full border border-cyan-300/25 bg-cyan-400/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-cyan-100"
-                            >
-                              Tickets
-                            </a>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="mb-3 grid gap-2 sm:grid-cols-3">
-                <div className="select-none rounded-3xl bg-white/10 backdrop-blur-xl border border-white/10 p-3 shadow-inner shadow-white/5 transition duration-200 ease-out hover:-translate-y-0.5 active:scale-[0.98]">
-                  <div className="mb-2 flex items-center gap-2">
-                    <Music size={16} className="text-white/60" />
-                    <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-white/35">
-                      Music
-                    </p>
-                  </div>
-                  <p className="text-sm font-black leading-tight text-white">
-                    {selected.tonightEvent?.genre ||
-                      selected.music_genre ||
-                      "Mixed"}
-                  </p>
-                </div>
-
-                <div className="select-none rounded-3xl bg-white/10 backdrop-blur-xl border border-white/10 p-3 shadow-inner shadow-white/5 transition duration-200 ease-out hover:-translate-y-0.5 active:scale-[0.98]">
-                  <div className="mb-2 flex items-center gap-2">
-                    <UserRoundCheck size={16} className="text-white/60" />
-                    <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-white/35">
-                      Age
-                    </p>
-                  </div>
-                  <p className="text-sm font-black leading-tight text-white">
-                    {selected.age_limit || "21+"}
-                  </p>
-                </div>
-
-                <div className="select-none rounded-3xl bg-white/10 backdrop-blur-xl border border-white/10 p-3 shadow-inner shadow-white/5 transition duration-200 ease-out hover:-translate-y-0.5 active:scale-[0.98]">
-                  <div className="mb-2 flex items-center gap-2">
-                    <BadgeDollarSign size={16} className="text-white/60" />
-                    <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-white/35">
-                      Cover
-                    </p>
-                  </div>
-                  <p className="text-sm font-black leading-tight text-white">
-                    {selected.tonightEvent?.cover_price ||
-                      selected.cover ||
-                      "Varies"}
-                  </p>
-                </div>
-              </div>
-
-              <div className="mb-3 grid gap-2 sm:grid-cols-2">
-                <div className={`select-none rounded-[2rem] border p-4 ${vibeGlowClass} ${selectedEnergyGlowClass}`}>
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/45">
-                        Current Vibe
-                      </p>
-                      <p className="mt-3 text-2xl font-extrabold text-white sm:text-3xl">
-                        {statusLabel(selected.status)}
-                      </p>
-                    </div>
-                    <div className="flex h-16 w-16 items-center justify-center rounded-full border border-white/10 bg-black/30 text-xl shadow-inner shadow-white/5">
-                      {selected.energyLevel === "high" ? "" : selected.energyLevel === "medium" ? "" : selected.energyLevel === "negative" ? "" : ""}
-                    </div>
-                  </div>
-                  <p className="mt-3 text-[11px] font-semibold text-white/65">
-                    {selected.momentumLabel} · {vibeTrendLabel(selected.vibeTrend)}
-                  </p>
-                  <p className="mt-1 text-[10px] uppercase tracking-[0.18em] text-white/40">
-                    Live score: {selected.vibeScore || 0}/100 · {energyLabel(selected.energyLevel)}
-                  </p>
-                </div>
-
-                <div className="select-none rounded-[2rem] border border-white/10 bg-white/[0.06] p-4 shadow-inner shadow-white/5">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/45">
-                    Crowd Confidence
-                  </p>
-                  <p className="mt-3 text-2xl font-extrabold text-white sm:text-3xl">
-                    {confidenceLabel(selected.confidence)}
-                  </p>
-                  <p className="mt-3 text-[11px] leading-5 text-white/50">
-                    Based on the vibe engine: recent votes, user updates, event boosts, crowd signals, and time decay. More live check-ins make this smarter.
-                  </p>
-                </div>
-              </div>
-
-              <div className="mb-4 rounded-3xl border border-white/10 bg-white/5 p-3">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/45">
-                  Recent Updates
-                </p>
-                <div className="mt-3 space-y-2">
-                  {recentUpdates.length === 0 ? (
-                    <div className="rounded-3xl bg-white/5 p-3 text-sm text-white/55">
-                      No updates yet — be the first
-                    </div>
-                  ) : (
-                    recentUpdates.map((update) => (
-                      <div
-                        key={update.id}
-                        className="rounded-3xl bg-white/5 p-3 text-sm text-white/90"
-                      >
-                        <div className="flex items-start gap-3">
-                          <div className="mt-1 text-lg">
-                            {updateTypeIcon(update.update_type || "")}
-                          </div>
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-white">
-                              {update.message || "No message provided"}
-                            </p>
-                            <p className="mt-1 text-[11px] text-white/50">
-                              {minutesAgo(update.created_at)}
-                            </p>
-                          </div>
-                        </div>
-
-                        {update.media_url && (
-                          <div className="mt-3 max-h-[220px] overflow-hidden rounded-2xl border border-white/10 bg-black/40">
-                            {update.media_type === "video" ? (
-                              <video
-                                src={update.media_url}
-                                controls
-                                playsInline
-                                className="h-full max-h-[220px] w-full object-cover"
-                              />
-                            ) : (
-                              <img
-                                src={update.media_url}
-                                alt="User submitted nightlife update"
-                                className="h-full max-h-[220px] w-full object-cover"
-                              />
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              <div className="mb-4 rounded-3xl border border-white/10 bg-white/5 p-3 text-xs text-white/55">
-                <p className="select-none">Parking: {selected.parking || "Unknown"}</p>
-                <p className="select-none">
-                  Dress: {selected.tonightEvent?.dress_code ||
-                    selected.dress_code ||
-                    "Casual"}
-                </p>
-              </div>
-
-              <div className="mb-4 rounded-[1.75rem] border border-yellow-300/20 bg-yellow-400/10 p-3 shadow-lg shadow-yellow-400/5">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-yellow-100/60">
-                      Wrong vibe?
-                    </p>
-                    <p className="mt-1 text-sm font-bold text-white">
-                      Help fix the city signal
-                    </p>
-                    <p className="mt-1 text-xs leading-5 text-white/50">
-                      If this spot looks more lit, dead, packed, or empty than the app says, send a quick correction.
-                    </p>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSuggestionType("Crowd/vibe");
-                      setSuggestionMessage("The vibe shown looks wrong. Needs a fresh crowd check.");
-                      setSuggestionOpen(true);
-                      setSheetExpanded(true);
-                    }}
-                    className="shrink-0 rounded-2xl border border-yellow-200/25 bg-yellow-300/15 px-3 py-2 text-xs font-black text-yellow-50 transition hover:bg-yellow-300/25 active:scale-[0.98]"
-                  >
-                    Report
-                  </button>
-                </div>
-              </div>
-
-
-              <p className="mb-2 text-sm font-bold text-white/80 select-none">
-                How&apos;s the vibe?
-              </p>
-
-              <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                <button
-                  onClick={() => vote("lit")}
-                  className="select-none rounded-[1.75rem] border border-red-300/20 bg-gradient-to-br from-red-500 via-red-500 to-red-700 px-3 py-3 text-sm font-black shadow-lg shadow-red-500/15 transition hover:-translate-y-0.5 active:scale-[0.98]"
-                >
-                  <span className="block text-xl"></span>
-                  <span className="mt-1 block text-[10px] uppercase tracking-[0.24em]">
-                    Lit
-                  </span>
-                </button>
-
-                <button
-                  onClick={() => vote("decent")}
-                  className="select-none rounded-[1.75rem] border border-yellow-200/30 bg-gradient-to-br from-yellow-400 to-yellow-600 px-3 py-3 text-sm font-black text-black shadow-lg shadow-yellow-400/15 transition hover:-translate-y-0.5 active:scale-[0.98]"
-                >
-                  <span className="block text-xl"></span>
-                  <span className="mt-1 block text-[10px] uppercase tracking-[0.24em]">
-                    Decent
-                  </span>
-                </button>
-
-                <button
-                  onClick={() => vote("dead")}
-                  className="select-none rounded-[1.75rem] border border-slate-300/20 bg-gradient-to-br from-slate-600 via-slate-700 to-slate-900 px-3 py-3 text-sm font-black shadow-lg shadow-slate-800/25 transition hover:-translate-y-0.5 active:scale-[0.98]"
-                >
-                  <span className="block text-xl"></span>
-                  <span className="mt-1 block text-[10px] uppercase tracking-[0.24em]">
-                    Dead
-                  </span>
-                </button>
-
-                <button
-                  onClick={() => vote("line_crazy")}
-                  className="select-none rounded-[1.75rem] border border-purple-300/20 bg-gradient-to-br from-purple-500 to-fuchsia-700 px-3 py-3 text-sm font-black shadow-lg shadow-purple-500/15 transition hover:-translate-y-0.5 active:scale-[0.98]"
-                >
-                  <span className="block text-xl"></span>
-                  <span className="mt-1 block text-[10px] uppercase tracking-[0.24em]">
-                    Line
-                  </span>
-                </button>
-              </div>
-
-              <button
-                type="button"
-                onClick={startInAppNavigation}
-                disabled={navigationLoading}
-                className="select-none sticky bottom-0 z-10 flex w-full items-center justify-center gap-2 rounded-3xl border border-orange-300/30 bg-gradient-to-r from-orange-400 via-red-500 to-fuchsia-600 py-3 text-center text-sm font-black text-white shadow-xl shadow-orange-500/25 transition hover:-translate-y-0.5 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                <Navigation size={17} />
-                {navigationLoading ? "Starting route..." : "Start In-App Navigation"}
-              </button>
-
-              {navigationError && (
-                <p className="mt-2 rounded-2xl border border-red-400/20 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-100">
-                  {navigationError}
-                </p>
-              )}
             </>
           )}
         </div>
@@ -5621,19 +5440,19 @@ export default function Home() {
 
 
       {venueDirectoryOpen && (
-        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/55 px-3 py-4 backdrop-blur-sm sm:items-center sm:px-6">
-          <div className="w-full max-h-[82vh] max-w-3xl overflow-hidden rounded-[2rem] border border-white/15 bg-zinc-950/95 shadow-2xl shadow-black/60 backdrop-blur-3xl">
+        <div className="fixed inset-0 z-40 flex items-start justify-center bg-black/55 px-3 pb-4 pt-[17rem] backdrop-blur-sm sm:px-6 sm:pt-[18rem] lg:pt-[16rem]">
+          <div className="venue-directory-panel w-full max-h-[calc(100vh-18.5rem)] max-w-3xl overflow-hidden rounded-[2rem] border border-white/15 bg-zinc-950/95 shadow-2xl shadow-black/60 backdrop-blur-3xl sm:max-h-[calc(100vh-19.5rem)] lg:max-h-[calc(100vh-17.5rem)]">
             <div className="sticky top-0 z-10 border-b border-white/10 bg-zinc-950/90 px-4 py-4 backdrop-blur-2xl sm:px-5">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-[0.28em] text-orange-300">
-                    All venues
+                    Venue guide
                   </p>
                   <h3 className="mt-1 text-xl font-black text-white">
-                    Pick a spot
+                    Find the move
                   </h3>
                   <p className="mt-1 text-xs text-white/45">
-                    {filteredVenues.length} places showing from your current city/filter.
+                    {filteredVenues.length} spots based on your city, search, and filters.
                   </p>
                 </div>
                 <button
@@ -5650,13 +5469,13 @@ export default function Home() {
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search all venues by name, genre, city..."
+                  placeholder="Search spots by name, music, city, age, cover..."
                   className="w-full bg-transparent text-sm text-white outline-none placeholder:text-white/35"
                 />
               </div>
             </div>
 
-            <div className="max-h-[64vh] overflow-y-auto p-3 sm:p-4">
+            <div className="max-h-[calc(100vh-26rem)] overflow-y-auto p-3 sm:max-h-[calc(100vh-27rem)] sm:p-4 lg:max-h-[calc(100vh-25rem)]">
               <div className="grid gap-3 sm:grid-cols-2">
                 {filteredVenues.map((venue) => {
                   const photoUrl = String(
@@ -5685,10 +5504,10 @@ export default function Home() {
                           duration: 850,
                         });
                       }}
-                      className="group overflow-hidden rounded-[1.65rem] border border-white/10 bg-white/[0.06] text-left shadow-xl shadow-black/25 transition hover:-translate-y-0.5 hover:border-orange-300/35 hover:bg-white/[0.09] active:scale-[0.99]"
+                      className="group overflow-hidden rounded-[1.5rem] border border-white/10 bg-zinc-950/80 text-left shadow-xl shadow-black/25 transition hover:-translate-y-0.5 hover:border-white/25 hover:bg-zinc-900/90 active:scale-[0.99]"
                     >
                       <div className="flex gap-3 p-3">
-                        <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-[1.25rem] bg-white/10">
+                        <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-[1.2rem] bg-white/10">
                           {photoUrl ? (
                             <img
                               src={photoUrl}
@@ -5696,49 +5515,53 @@ export default function Home() {
                               className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
                             />
                           ) : (
-                            <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-zinc-800 via-zinc-900 to-black text-2xl">
-                              
+                            <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-zinc-800 via-zinc-900 to-black text-xs font-black uppercase tracking-[0.18em] text-white/25">
+                              Lit757
                             </div>
                           )}
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
-                          <span className="absolute bottom-2 left-2 rounded-full bg-black/75 px-2 py-0.5 text-[10px] font-black text-white backdrop-blur-xl">
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/10 to-transparent" />
+                          <span
+                            className="absolute bottom-2 left-2 rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.14em] backdrop-blur-xl"
+                            style={{
+                              backgroundColor: `${energyColor(venue.energyLevel)}24`,
+                              borderColor: `${energyColor(venue.energyLevel)}70`,
+                              color: "white",
+                            }}
+                          >
                             {statusLabel(venue.status)}
                           </span>
                         </div>
 
-                        <div className="min-w-0 flex-1 py-1">
-                          <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1 py-0.5">
+                          <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
                               <p className="truncate text-base font-black text-white">
                                 {venue.name}
                               </p>
                               <p className="mt-1 truncate text-[11px] font-semibold text-white/45">
-                                {venue.city} • {venue.category || venueType(venue)}
+                                {venue.city} · {venue.category || venueType(venue)}
                               </p>
                             </div>
-                            <span
-                              className="shrink-0 rounded-full border px-2 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-white"
-                              style={{
-                                backgroundColor: `${energyColor(venue.energyLevel)}22`,
-                                borderColor: `${energyColor(venue.energyLevel)}75`,
-                              }}
-                            >
-                              {getVibeIntensity(venue)}
-                            </span>
+                            <div className="shrink-0 rounded-2xl border border-white/10 bg-white/[0.07] px-2.5 py-1.5 text-center">
+                              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-white/80">{statusLabel(venue.status)}</p>
+                              <p className="mt-0.5 text-[8px] font-black uppercase tracking-[0.16em] text-white/35">Now</p>
+                            </div>
                           </div>
 
-                          <p className="mt-2 line-clamp-1 text-xs font-semibold text-white/70">
+                          <p className="mt-2 line-clamp-2 text-xs font-semibold leading-5 text-white/72">
                             {venue.tonightEvent
                               ? venue.tonightEvent.title
-                              : venue.music_genre || "Mixed music"}
+                              : venue.music_genre
+                              ? `${venue.music_genre} · ${activityPhrase(venue)}`
+                              : activityPhrase(venue)}
                           </p>
 
                           <div className="mt-3 flex flex-wrap gap-1.5">
                             <span className="rounded-full bg-white/10 px-2 py-1 text-[10px] font-bold text-white/70">
-                              {energyLabel(venue.energyLevel)}
+                              {activityPhrase(venue)}
                             </span>
                             <span className="rounded-full bg-white/10 px-2 py-1 text-[10px] font-bold text-white/70">
-                              {signalCount} signal{signalCount === 1 ? "" : "s"}
+                              {vibeTrendLabel(venue.vibeTrend)}
                             </span>
                             <span className="rounded-full bg-white/10 px-2 py-1 text-[10px] font-bold text-white/70">
                               {venue.cover || venue.tonightEvent?.cover_price || "Cover varies"}
@@ -5753,7 +5576,7 @@ export default function Home() {
 
               {filteredVenues.length === 0 && (
                 <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5 text-center text-sm text-white/55">
-                  No venues match that search yet.
+                  No spots match that search yet.
                 </div>
               )}
             </div>
@@ -5767,7 +5590,7 @@ export default function Home() {
             <div className="mb-4 flex items-start justify-between gap-4">
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/45">
-                  Ask AI
+                  Ask Lit757
                 </p>
                 <h3 className="mt-2 text-lg font-black text-white">
                   Type your question instead
@@ -5808,7 +5631,7 @@ export default function Home() {
                 disabled={!askText.trim()}
                 className="w-full rounded-3xl bg-white py-3 text-sm font-black text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Ask AI
+                Ask Lit757
               </button>
             </div>
           </div>
@@ -5816,18 +5639,18 @@ export default function Home() {
       )}
 
       {suggestionOpen && selected && (
-        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/60 px-4 py-6 sm:items-center">
-          <div className="w-full max-w-md rounded-[2rem] border border-white/15 bg-zinc-950/95 p-5 shadow-2xl backdrop-blur-3xl">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 px-4 py-4 backdrop-blur-md">
+          <div className="w-full max-w-lg max-h-[calc(100vh-2rem)] overflow-y-auto rounded-[2rem] border border-white/15 bg-zinc-950/95 p-5 shadow-[0_30px_120px_rgba(0,0,0,0.9)] backdrop-blur-3xl">
             <div className="mb-4 flex items-start justify-between gap-4">
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/45">
-                  Suggest Update
+                  Comment
                 </p>
                 <h3 className="mt-2 text-lg font-black text-white">
-                  Help keep the city current
+                  What’s the vibe?
                 </h3>
                 <p className="mt-1 text-xs text-white/50">
-                  Suggest a quick update for {selected.name}.
+                  Add a quick note about {selected.name}.
                 </p>
               </div>
               <button
@@ -5841,31 +5664,31 @@ export default function Home() {
             <div className="space-y-4">
               <div>
                 <label className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/45">
-                  Update type
+                  Type
                 </label>
                 <select
                   value={suggestionType}
                   onChange={(e) => setSuggestionType(e.target.value)}
                   className="mt-2 w-full rounded-3xl border border-white/10 bg-black/80 px-4 py-3 text-sm text-white outline-none"
                 >
-                  <option>Event info</option>
-                  <option>Cover charge</option>
-                  <option>Music/DJ</option>
-                  <option>Line update</option>
-                  <option>Crowd/vibe</option>
+                  <option>Event</option>
+                  <option>Cover</option>
+                  <option>Music</option>
+                  <option>Line</option>
+                  <option>Vibe</option>
                   <option>Other</option>
                 </select>
               </div>
 
               <div>
                 <label className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/45">
-                  Message
+                  Comment
                 </label>
                 <textarea
                   value={suggestionMessage}
                   onChange={(e) => setSuggestionMessage(e.target.value)}
                   rows={4}
-                  placeholder="Share what’s happening now…"
+                  placeholder="Example: line is long, music is good, crowd is active, cover is $10…"
                   className="mt-2 w-full rounded-3xl border border-white/10 bg-black/80 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35"
                 />
               </div>
@@ -5893,7 +5716,7 @@ export default function Home() {
                   </div>
                 )}
                 <p className="mt-2 text-[11px] text-white/40">
-                  MVP limit: images under 8MB, videos under 25MB. Posts show in Recent Updates after submit.
+                  Images under 8MB, videos under 25MB. Optional, but photos make the vibe feel real.
                 </p>
               </div>
 
@@ -5913,7 +5736,7 @@ export default function Home() {
                 disabled={suggestionLoading || !suggestionMessage.trim()}
                 className="w-full rounded-3xl bg-white py-3 text-sm font-black text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {suggestionLoading ? "Sending update..." : "Send update"}
+                {suggestionLoading ? "Posting..." : "Post comment"}
               </button>
             </div>
           </div>
