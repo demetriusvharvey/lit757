@@ -80,6 +80,23 @@ type ActivityToast = {
   createdAt?: string | null;
 };
 
+type LiveTickerItem = {
+  id: string;
+  venue?: VenueWithEvent | null;
+  title: string;
+  detail: string;
+  tone: "hot" | "active" | "watch" | "calm";
+};
+
+type TodayMoveItem = {
+  id: string;
+  label: string;
+  venue: VenueWithEvent;
+  detail: string;
+  score: number;
+  tone: "hot" | "active" | "watch" | "calm";
+};
+
 
 type SupabaseEventRow = {
   id: string;
@@ -533,6 +550,65 @@ function energyLabel(level?: string) {
   if (level === "medium") return "Picking up";
   if (level === "negative") return "Quiet right now";
   return "Low motion";
+}
+
+function tickerToneClasses(tone: LiveTickerItem["tone"], isDay: boolean) {
+  if (tone === "hot") {
+    return isDay
+      ? "bg-red-600 text-white shadow-[0_0_18px_rgba(220,38,38,0.26)]"
+      : "bg-red-500 text-white shadow-[0_0_18px_rgba(239,68,68,0.32)]";
+  }
+
+  if (tone === "active") {
+    return isDay
+      ? "bg-orange-600 text-white shadow-[0_0_18px_rgba(234,88,12,0.24)]"
+      : "bg-orange-500 text-white shadow-[0_0_18px_rgba(251,146,60,0.3)]";
+  }
+
+  if (tone === "watch") {
+    return isDay
+      ? "bg-slate-950 text-white"
+      : "bg-white text-black";
+  }
+
+  return isDay
+    ? "bg-slate-200 text-slate-700"
+    : "bg-white/12 text-white/75";
+}
+
+function tickerInitial(title: string) {
+  const clean = title.trim();
+  return clean ? clean[0].toUpperCase() : "•";
+}
+
+function todayMoveTone(score: number): TodayMoveItem["tone"] {
+  if (score >= 82) return "hot";
+  if (score >= 62) return "active";
+  if (score >= 42) return "watch";
+  return "calm";
+}
+
+function todayMoveScore(venue: VenueWithEvent) {
+  const liveSignals = (venue.voteCount || 0) + (venue.updateCount || 0) + (venue.liveReportCount || 0);
+  const eventBoost = venue.tonightEvent ? 20 : venue.hasUpcomingEvent ? 8 : 0;
+  const score = venue.vibeScore || venue.score || venue.aiScore || 0;
+  const trendBoost =
+    venue.vibeTrend === "surging"
+      ? 22
+      : venue.vibeTrend === "heating"
+      ? 14
+      : venue.vibeTrend === "steady"
+      ? 6
+      : 0;
+
+  return Math.round(score + liveSignals * 11 + eventBoost + trendBoost);
+}
+
+function todayMoveDetail(venue: VenueWithEvent) {
+  if (venue.tonightEvent?.title) return venue.tonightEvent.title;
+  if (venue.aiSummary) return venue.aiSummary;
+  if (venue.vibeTrend && venue.vibeTrend !== "quiet") return vibeTrendLabel(venue.vibeTrend);
+  return energyLabel(venue.energyLevel);
 }
 
 function updateTypeIcon(type?: string) {
@@ -1280,6 +1356,9 @@ export default function Home() {
   const [sheetExpanded, setSheetExpanded] = useState(false);
   const [summary, setSummary] = useState("");
   const [summaryLoading, setSummaryLoading] = useState(true);
+  const [cityPulseSummary, setCityPulseSummary] = useState("");
+  const [cityPulseTopVenues, setCityPulseTopVenues] = useState<any[]>([]);
+  const [cityPulseLoading, setCityPulseLoading] = useState(false);
   const [recommendation, setRecommendation] = useState("");
   const [recommendationVenue, setRecommendationVenue] = useState("");
   const [recommendationReasons, setRecommendationReasons] = useState<string[]>([]);
@@ -1352,6 +1431,48 @@ export default function Home() {
 
     fetchSummary();
   }, []);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function fetchCityPulse() {
+      try {
+        setCityPulseLoading(true);
+
+        const response = await fetch(
+          `/api/city-summary?city=${encodeURIComponent(city)}`
+        );
+
+        if (!response.ok) {
+          throw new Error("City pulse fetch failed");
+        }
+
+        const data = await response.json();
+
+        if (ignore) return;
+
+        setCityPulseSummary(data.summary || "");
+        setCityPulseTopVenues(data.top_venues || []);
+      } catch (error) {
+        console.error("City pulse error:", error);
+
+        if (!ignore) {
+          setCityPulseSummary("");
+          setCityPulseTopVenues([]);
+        }
+      } finally {
+        if (!ignore) {
+          setCityPulseLoading(false);
+        }
+      }
+    }
+
+    fetchCityPulse();
+
+    return () => {
+      ignore = true;
+    };
+  }, [city]);
 
   useEffect(() => {
     function handleOutsideClick(event: MouseEvent) {
@@ -2848,6 +2969,89 @@ export default function Home() {
     if ("vibrate" in navigator) navigator.vibrate(40);
   }
 
+
+  function mapLiveReportOptionToVenueSignal(option: LiveReportOption) {
+    const value = String(option.value || "").toLowerCase();
+    const type = String(option.type || "").toLowerCase();
+
+    if (["packed"].includes(value)) return "packed";
+    if (["great_crowd", "decent", "busy"].includes(value)) return "good";
+    if (["dead", "no_wait"].includes(value)) return "quiet";
+    if (["line_crazy", "long_wait"].includes(value) || type.includes("line") || type.includes("wait")) return "line";
+    if (["selling_fast"].includes(value) || type.includes("tickets")) return "active";
+    if (type.includes("music")) return "music";
+    if (type.includes("cover")) return "cover";
+
+    return "active";
+  }
+
+  function applyOptimisticVenueSignal(option: LiveReportOption) {
+    if (!selected) return;
+
+    const scoreDelta = Math.max(4, Math.round(liveReportValueScore(option.value) * 0.35));
+    const nextScore = clampScore((selected.vibeScore || selected.score || selected.aiScore || 30) + scoreDelta);
+    const nextStatus = scoreToVenueStatus(nextScore);
+    const nextEnergyLevel = scoreToEnergyLevel(nextScore);
+    const nextTrend = scoreToVibeTrend(nextScore, true);
+    const nowIso = new Date().toISOString();
+
+    const patchVenue = (venue: VenueWithEvent): VenueWithEvent => {
+      if (venue.id !== selected.id) return venue;
+
+      return {
+        ...venue,
+        status: nextStatus,
+        vibeScore: nextScore,
+        score: nextScore,
+        aiScore: Math.max(venue.aiScore || 0, nextScore),
+        aiStatus: nextStatus === "lit" ? "Buzzing" : nextStatus === "decent" ? "Picking up" : "Quiet",
+        aiSummary:
+          option.value === "dead"
+            ? "Quiet right now, but that can change later."
+            : option.value === "line_crazy" || option.value === "long_wait"
+            ? "People are seeing movement here right now."
+            : "People are starting to show movement here.",
+        vibeTrend: nextTrend,
+        energyLevel: nextEnergyLevel,
+        liveReportCount: (venue.liveReportCount || 0) + 1,
+        liveReportScore: (venue.liveReportScore || 0) + liveReportValueScore(option.value),
+        lastUpdated: nowIso,
+      };
+    };
+
+    setVenues((prev) => prev.map(patchVenue));
+    setSelected((prev) => (prev ? patchVenue(prev) : prev));
+  }
+
+  async function submitVenueSignal(option: LiveReportOption) {
+    if (!selected) return;
+
+    try {
+      const vibeType = mapLiveReportOptionToVenueSignal(option);
+
+      const response = await fetch("/api/submit-venue-signal", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          venue_id: selected.id,
+          vibe_type: vibeType,
+          comment: option.label,
+          nickname: null,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data?.success) {
+        console.error("Venue signal failed:", data?.error || response.statusText);
+      }
+    } catch (error) {
+      console.error("Venue signal error:", error);
+    }
+  }
+
   async function submitLiveReport(option: LiveReportOption) {
     if (!selected || liveReportLoading) return;
 
@@ -2876,24 +3080,19 @@ export default function Home() {
         throw new Error(data?.error || "Update failed");
       }
 
-      setLiveReportFeedback(`${option.label} added`);
-      await loadVenues();
+      applyOptimisticVenueSignal(option);
+      await submitVenueSignal(option);
 
-      setSelected((prev) =>
-        prev
-          ? {
-              ...prev,
-              liveReportCount: (prev.liveReportCount || 0) + 1,
-              lastUpdated: new Date().toISOString(),
-            }
-          : prev
-      );
+      setLiveReportFeedback(`${option.label} added`);
+      window.setTimeout(() => {
+        loadVenues().catch((error) => console.error("Venue refresh after signal failed:", error));
+      }, 450);
 
       showActivityToast({
         id: `live-report-${selected.id}-${Date.now()}`,
         venueId: selected.id,
         venueName: selected.name,
-        title: `${selected.name} got a update`,
+        title: `${selected.name} got an update`,
         message: `${option.label} was reported just now.`,
         icon: "",
         createdAt: new Date().toISOString(),
@@ -3781,6 +3980,117 @@ export default function Home() {
     : topSpots
   ).slice(0, 3);
 
+  const liveActivityTickerItems = useMemo<LiveTickerItem[]>(() => {
+    const items: LiveTickerItem[] = [];
+    const seen = new Set<string>();
+
+    const addItem = (item: LiveTickerItem) => {
+      const key = item.venue?.id || item.id || item.title;
+      if (seen.has(key)) return;
+      seen.add(key);
+      items.push(item);
+    };
+
+    cityFeed.slice(0, 5).forEach((item) => {
+      const matchedVenue = venues.find(
+        (venue) => venue.id === item.venue_id || venue.name === item.venue_name
+      );
+
+      addItem({
+        id: `feed-${item.id}`,
+        venue: matchedVenue || null,
+        title: item.venue_name || matchedVenue?.name || "Tonight",
+        detail:
+          item.message ||
+          (item.update_type ? `${item.update_type} update just came in` : "Something new just came in"),
+        tone: "active",
+      });
+    });
+
+    hotRightNowSpots.forEach((venue, index) => {
+      const score = getVibeIntensity(venue);
+      const eventTitle = venue.tonightEvent?.title || venue.upcomingEvents?.[0]?.title;
+      const title = venue.name;
+      const detail = eventTitle
+        ? `${eventTitle} tonight`
+        : venue.vibeTrend && venue.vibeTrend !== "quiet"
+        ? vibeTrendLabel(venue.vibeTrend)
+        : venue.aiSummary || energyLabel(venue.energyLevel);
+
+      addItem({
+        id: `venue-${venue.id}`,
+        venue,
+        title,
+        detail,
+        tone: score >= 75 ? "hot" : score >= 55 ? "active" : index === 0 ? "watch" : "calm",
+      });
+    });
+
+    eventSpots.slice(0, 5).forEach((venue) => {
+      const eventTitle = venue.tonightEvent?.title || "Event tonight";
+
+      addItem({
+        id: `event-${venue.id}`,
+        venue,
+        title: venue.name,
+        detail: eventTitle,
+        tone: "watch",
+      });
+    });
+
+    return items.slice(0, 12);
+  }, [cityFeed, venues, hotRightNowSpots, eventSpots]);
+
+  const todayMoves = useMemo<TodayMoveItem[]>(() => {
+    const pickBest = (
+      label: string,
+      candidates: VenueWithEvent[],
+      fallbackDetail?: string
+    ): TodayMoveItem | null => {
+      const ranked = [...candidates]
+        .filter((venue) => venue.lng && venue.lat)
+        .sort((a, b) => todayMoveScore(b) - todayMoveScore(a));
+
+      const venue = ranked[0];
+      if (!venue) return null;
+
+      const score = todayMoveScore(venue);
+
+      return {
+        id: `${label}-${venue.id}`,
+        label,
+        venue,
+        detail: fallbackDetail || todayMoveDetail(venue),
+        score,
+        tone: todayMoveTone(score),
+      };
+    };
+
+    const food = filteredVenues.filter((venue) => getBehaviorCategory(venue) === "restaurant");
+    const nightlife = filteredVenues.filter((venue) => getBehaviorCategory(venue) === "nightlife");
+    const events = filteredVenues.filter((venue) => !!venue.tonightEvent || getBehaviorCategory(venue) === "event");
+    const lowKey = filteredVenues.filter((venue) => {
+      const score = venue.vibeScore || venue.score || venue.aiScore || 0;
+      return score >= 30 && score <= 62 && getBehaviorCategory(venue) !== "event";
+    });
+
+    const moves = [
+      pickBest("Best overall", filteredVenues),
+      pickBest("Food move", food),
+      pickBest("Nightlife", nightlife),
+      pickBest("Event pick", events),
+      pickBest("Low-key", lowKey, "Easy option if you do not want too much chaos"),
+    ].filter(Boolean) as TodayMoveItem[];
+
+    const seen = new Set<string>();
+    return moves.filter((move) => {
+      const key = `${move.label}-${move.venue.id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [filteredVenues]);
+
 
   useEffect(() => {
     if (selected || viewMode !== "map" || trending.length <= 1) return;
@@ -4339,7 +4649,7 @@ export default function Home() {
                     const preference =
                       prompt === "18+ spots"
                         ? "18+"
-                        : prompt === "Cheap cover"
+                        : prompt === "Cheap drinks"
                         ? "cheap"
                         : prompt === "Hookah tonight"
                         ? "hookah"
@@ -4359,6 +4669,81 @@ export default function Home() {
                 ))}
               </div>
             </div>
+
+            {(cityPulseLoading || cityPulseSummary || cityPulseTopVenues.length > 0) && (
+              <div
+                className={`relative overflow-hidden rounded-[1.35rem] border p-4 shadow-2xl backdrop-blur-2xl ${
+                  isDay
+                    ? "border-white/80 bg-white/85 text-slate-950 shadow-slate-900/10"
+                    : "border-white/10 bg-white/[0.055] text-white shadow-black/25"
+                }`}
+              >
+                <div className={`pointer-events-none absolute inset-0 ${isDay ? "bg-gradient-to-br from-orange-100/70 via-white/20 to-red-100/60" : "bg-gradient-to-br from-orange-500/12 via-transparent to-red-500/10"}`} />
+
+                <div className="relative z-10 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 rounded-full bg-orange-400 live-pulse" />
+                    <p className={`text-[9px] font-black uppercase tracking-[0.24em] ${isDay ? "text-slate-500" : "text-white/50"}`}>
+                      {city === "All 757" ? "Tonight in the 757" : `Tonight in ${city}`}
+                    </p>
+                  </div>
+
+                  <span className={`rounded-full border px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.18em] ${isDay ? "border-orange-200 bg-orange-50 text-orange-700" : "border-orange-300/20 bg-orange-500/10 text-orange-100"}`}>
+                    Live pulse
+                  </span>
+                </div>
+
+                <div className="relative z-10 mt-3">
+                  {cityPulseLoading ? (
+                    <div className="space-y-2.5">
+                      <div className={`h-3.5 w-11/12 rounded-full ${isDay ? "bg-slate-200" : "bg-white/10"} animate-pulse`} />
+                      <div className={`h-3.5 w-2/3 rounded-full ${isDay ? "bg-slate-200" : "bg-white/10"} animate-pulse`} />
+                    </div>
+                  ) : (
+                    <>
+                      <p className={`text-[13px] leading-5 sm:text-sm ${isDay ? "text-slate-700" : "text-white/78"}`}>
+                        {cityPulseSummary || "The city is still warming up. Check back as tonight starts moving."}
+                      </p>
+
+                      {cityPulseTopVenues.length > 0 && (
+                        <div className="mt-3 flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+                          {cityPulseTopVenues.slice(0, 5).map((venue) => (
+                            <button
+                              key={venue.id}
+                              type="button"
+                              onClick={() => {
+                                const found = venues.find((item) => item.id === venue.id);
+                                if (!found) return;
+
+                                setSelected(found);
+                                setSheetExpanded(true);
+                                setViewMode("map");
+                                spotlightActivityVenue(found.id);
+
+                                if (map && found.lng && found.lat) {
+                                  map.flyTo({
+                                    center: [found.lng, found.lat],
+                                    zoom: Math.max(map.getZoom(), 14.5),
+                                    duration: 850,
+                                  });
+                                }
+                              }}
+                              className={`shrink-0 rounded-full border px-3 py-1.5 text-[11px] font-black transition active:scale-95 ${
+                                isDay
+                                  ? "border-slate-300/80 bg-white/80 text-slate-700 hover:bg-slate-100"
+                                  : "border-white/10 bg-white/10 text-white/75 hover:bg-white/15 hover:text-white"
+                              }`}
+                            >
+                              {venue.name}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {(recommendationLoading || recommendation) && (
@@ -4541,22 +4926,21 @@ export default function Home() {
         </div>
       </div>
 
-      {hotRightNowSpots.length > 0 && !selected && viewMode === "map" && (
-        <div className="pointer-events-none absolute inset-x-0 top-[342px] z-40 px-3 sm:top-[342px] sm:px-4 lg:left-[330px] lg:right-[260px]">
+      {liveActivityTickerItems.length > 0 && !selected && viewMode === "map" && (
+        <div className="pointer-events-none absolute inset-x-0 top-[478px] z-40 px-3 sm:top-[478px] sm:px-4 lg:left-[300px] lg:right-[240px]">
           <div
             className={`lit-desktop-ticker lit-mobile-ticker pointer-events-auto overflow-hidden rounded-full border shadow-2xl backdrop-blur-2xl ${
               isDay
-                ? "border-white/75 bg-white/88 text-slate-950 shadow-slate-900/10"
-                : "border-orange-300/15 bg-black/72 text-white shadow-orange-500/10"
+                ? "border-white/75 bg-white/90 text-slate-950 shadow-slate-900/10"
+                : "border-orange-300/15 bg-black/75 text-white shadow-orange-500/10"
             }`}
           >
             <div className="flex items-center overflow-hidden">
-              <div className={`z-10 flex shrink-0 items-center gap-2 self-stretch border-r px-3 py-2 ${isDay ? "border-slate-200/70 bg-white/90" : "border-white/10 bg-black/80"}`}>
-                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-orange-500 text-[11px] shadow-[0_0_18px_rgba(251,146,60,0.42)]"></span>
-                <span className={`text-[9px] font-black uppercase tracking-[0.24em] ${isDay ? "text-orange-700" : "text-orange-200"}`}>
-                  Live Radar
-                </span>
+              <div className={`z-10 flex shrink-0 items-center gap-2 self-stretch border-r px-3 py-2 ${isDay ? "border-slate-200/70 bg-white/95" : "border-white/10 bg-black/85"}`}>
                 <span className="h-1.5 w-1.5 rounded-full bg-orange-400 live-pulse" />
+                <span className={`text-[9px] font-black uppercase tracking-[0.24em] ${isDay ? "text-orange-700" : "text-orange-200"}`}>
+                  Tonight
+                </span>
               </div>
 
               <div className="relative min-w-0 flex-1 overflow-hidden py-2">
@@ -4564,46 +4948,36 @@ export default function Home() {
                 <div className={`pointer-events-none absolute right-0 top-0 z-10 h-full w-8 bg-gradient-to-l ${isDay ? "from-white/95" : "from-black/90"} to-transparent`} />
 
                 <div className="lit-desktop-ticker-track lit-mobile-ticker-track flex w-max items-center gap-5 px-4">
-                  {[...hotRightNowSpots, ...hotRightNowSpots, ...hotRightNowSpots, ...hotRightNowSpots].map((venue, index) => {
-                    const originalIndex = index % hotRightNowSpots.length;
-                    const signals = (venue.voteCount || 0) + (venue.updateCount || 0);
-                    const vibeIntensity = getVibeIntensity(venue);
-                    const label = venue.vibeTrend && venue.vibeTrend !== "quiet"
-                      ? vibeTrendLabel(venue.vibeTrend).replace(" ", "").replace(" ", "")
-                      : venue.tonightEvent
-                      ? "Event tonight"
-                      : energyLabel(venue.energyLevel).replace(" ", "").replace(" ", "").replace(" ", "").replace(" ", "");
-                    const leadIcon = originalIndex === 0 ? "" : venue.vibeTrend === "heating" ? "" : venue.tonightEvent ? "" : "";
+                  {[...liveActivityTickerItems, ...liveActivityTickerItems, ...liveActivityTickerItems, ...liveActivityTickerItems].map((item, index) => {
+                    const venue = item.venue || null;
 
                     return (
                       <button
-                        key={`live-radar-ticker-${venue.id}-${index}`}
+                        key={`live-activity-ticker-${item.id}-${index}`}
                         type="button"
+                        disabled={!venue}
                         onClick={() => {
+                          if (!venue) return;
                           setSelected(venue);
                           setSheetExpanded(true);
                           setViewMode("map");
                           spotlightActivityVenue(venue.id);
-                          map?.flyTo({ center: [venue.lng, venue.lat], zoom: Math.max(map.getZoom(), 14), duration: 850 });
+                          if (map && venue.lng && venue.lat) {
+                            map.flyTo({ center: [venue.lng, venue.lat], zoom: Math.max(map.getZoom(), 14), duration: 850 });
+                          }
                         }}
-                        className="flex shrink-0 items-center gap-2 whitespace-nowrap text-left transition active:scale-[0.98]"
+                        className="flex shrink-0 items-center gap-2 whitespace-nowrap text-left transition active:scale-[0.98] disabled:cursor-default"
                       >
-                        <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-black ${
-                          originalIndex === 0
-                            ? "bg-orange-500 text-white shadow-[0_0_18px_rgba(251,146,60,0.38)]"
-                            : isDay
-                            ? "bg-slate-950 text-white"
-                            : "bg-white text-black"
-                        }`}>
-                          {leadIcon}
+                        <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-black ${tickerToneClasses(item.tone, isDay)}`}>
+                          {tickerInitial(item.title)}
                         </span>
-                        <span className="text-[12px] font-black sm:text-[13px]">{venue.name}</span>
+                        <span className="max-w-[150px] truncate text-[12px] font-black sm:max-w-[210px] sm:text-[13px]">
+                          {item.title}
+                        </span>
                         <span className={`${isDay ? "text-slate-500" : "text-white/45"}`}>·</span>
-                        <span className={`text-[11px] font-bold ${isDay ? "text-slate-600" : "text-white/60"}`}>{label}</span>
-                        <span className={`${isDay ? "text-slate-500" : "text-white/45"}`}>·</span>
-                        <span className="text-[11px] font-black text-orange-300">{vibeIntensity} vibe</span>
-                        <span className={`${isDay ? "text-slate-500" : "text-white/45"}`}>·</span>
-                        <span className={`text-[11px] font-bold ${isDay ? "text-slate-500" : "text-white/55"}`}>{signals} check-in{signals === 1 ? "" : "s"}</span>
+                        <span className={`max-w-[220px] truncate text-[11px] font-bold sm:max-w-[320px] ${isDay ? "text-slate-600" : "text-white/65"}`}>
+                          {item.detail}
+                        </span>
                         <span className="text-orange-300/70">•</span>
                       </button>
                     );
@@ -4615,7 +4989,57 @@ export default function Home() {
         </div>
       )}
 
-      <div className="absolute right-3 top-[305px] z-30 flex flex-col items-end gap-2 sm:right-4 sm:top-[285px] sm:gap-3 lg:top-[265px]">
+      {todayMoves.length > 0 && !selected && viewMode === "map" && (
+        <div className="pointer-events-none absolute inset-x-0 top-[390px] z-30 px-3 sm:top-[390px] sm:px-4 lg:left-[300px] lg:right-[240px]">
+          <div className="pointer-events-auto overflow-x-auto rounded-[28px]">
+            <div className="flex w-max min-w-full gap-2 pb-1">
+              {todayMoves.map((move) => (
+                <button
+                  key={move.id}
+                  type="button"
+                  onClick={() => {
+                    setSelected(move.venue);
+                    setSheetExpanded(true);
+                    setViewMode("map");
+                    spotlightActivityVenue(move.venue.id);
+                    if (map && move.venue.lng && move.venue.lat) {
+                      map.flyTo({
+                        center: [move.venue.lng, move.venue.lat],
+                        zoom: Math.max(map.getZoom(), 14),
+                        duration: 850,
+                      });
+                    }
+                  }}
+                  className={`group min-w-[186px] max-w-[220px] rounded-[24px] border p-3 text-left shadow-2xl backdrop-blur-2xl transition hover:-translate-y-0.5 active:scale-[0.98] ${
+                    isDay
+                      ? "border-white/75 bg-white/88 text-slate-950 shadow-slate-900/10"
+                      : "border-white/10 bg-black/62 text-white shadow-black/30"
+                  }`}
+                >
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-[0.18em] ${tickerToneClasses(move.tone, isDay)}`}>
+                      {move.label}
+                    </span>
+                    <span className={`text-[11px] font-black ${isDay ? "text-slate-500" : "text-white/45"}`}>
+                      {move.score}
+                    </span>
+                  </div>
+
+                  <div className="truncate text-sm font-black tracking-tight">
+                    {move.venue.name}
+                  </div>
+
+                  <div className={`mt-1 line-clamp-2 text-[11px] font-semibold leading-snug ${isDay ? "text-slate-600" : "text-white/58"}`}>
+                    {move.detail}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="fixed bottom-12 right-4 z-[99999] flex flex-col items-end gap-1.5 sm:bottom-14 sm:right-5 sm:gap-2">
         <button
           onClick={() => {
             if (!map) return;
@@ -4674,14 +5098,14 @@ export default function Home() {
               { enableHighAccuracy: true, timeout: 12000, maximumAge: 15000 }
             );
           }}
-          className="flex h-11 w-11 items-center justify-center rounded-full bg-black/85 text-white shadow-xl ring-1 ring-white/10 backdrop-blur-xl transition hover:bg-black/95 active:scale-95"
+          className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-black/55 text-white shadow-[0_8px_30px_rgba(0,0,0,0.45)] backdrop-blur-2xl transition hover:bg-black/70 active:scale-95"
           aria-label="Use my location"
           title="Use my location"
         >
           <LocateFixed size={18} />
         </button>
 
-        <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/70 shadow-xl backdrop-blur-xl">
+        <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/55 shadow-[0_8px_30px_rgba(0,0,0,0.45)] backdrop-blur-2xl">
           <button
             onClick={() => smoothZoom("in")}
             className="flex h-10 w-11 items-center justify-center border-b border-white/10 text-lg font-black text-white transition hover:bg-white/10 active:scale-95"
@@ -4703,10 +5127,10 @@ export default function Home() {
 
         <button
           onClick={switchMapMode}
-          className={`flex min-w-[88px] items-center justify-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold shadow-xl backdrop-blur-xl transition ${
+          className={`flex min-w-[88px] items-center justify-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold shadow-[0_8px_30px_rgba(0,0,0,0.38)] backdrop-blur-2xl transition ${
             mapMode === "day"
-              ? "border-sky-300/40 bg-white/80 text-slate-950"
-              : "border-violet-300/20 bg-black/70 text-white"
+              ? "border-sky-300/40 bg-white/75 text-slate-950"
+              : "border-violet-300/20 bg-black/55 text-white"
           }`}
           aria-label="Toggle day night map mode"
         >
@@ -4730,7 +5154,7 @@ export default function Home() {
               );
             }
           }}
-          className={`flex min-w-[88px] items-center justify-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold transition ${
+          className={`flex min-w-[88px] items-center justify-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold shadow-[0_8px_30px_rgba(0,0,0,0.38)] backdrop-blur-2xl transition ${
             heatmapEnabled
               ? "border-orange-400 bg-orange-500/15 text-orange-100"
               : "border-white/10 bg-white/5 text-white/65"
@@ -4745,7 +5169,7 @@ export default function Home() {
 
         <button
           onClick={handleAskVoice}
-          className={`flex h-11 min-w-[88px] items-center justify-center rounded-full border px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/10 ${
+          className={`flex h-11 min-w-[88px] items-center justify-center rounded-full border px-3 py-2 text-sm font-semibold text-white shadow-[0_8px_30px_rgba(0,0,0,0.38)] backdrop-blur-2xl transition hover:bg-white/10 ${
             voiceStatus !== "idle"
               ? "border-emerald-300/40 bg-emerald-500/15 shadow-[0_0_24px_rgba(16,185,129,0.18)]"
               : "border-white/10 bg-white/5"
