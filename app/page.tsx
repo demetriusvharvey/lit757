@@ -451,7 +451,7 @@ export default function Home() {
     mapboxgl.accessToken = token;
     const map = new mapboxgl.Map({
       container: mapContainer,
-      style: "mapbox://styles/mapbox/light-v11",
+      style: "mapbox://styles/mapbox/dark-v11",
       center: HAMPTON_ROADS_CENTER,
       zoom: 9.75,
       minZoom: 9.5,
@@ -478,10 +478,10 @@ export default function Home() {
         filter: ["==", ["get", "isPick"], false],
         paint: {
           "circle-radius": ["interpolate", ["linear"], ["zoom"], 9.5, 2.6, 13, 5.2],
-          "circle-color": "#76736d",
-          "circle-opacity": ["interpolate", ["linear"], ["zoom"], 9.5, 0.28, 12, 0.62],
+          "circle-color": "#d7d4cc",
+          "circle-opacity": ["interpolate", ["linear"], ["zoom"], 9.5, 0.2, 12, 0.5],
           "circle-stroke-width": 1,
-          "circle-stroke-color": "rgba(255,255,255,0.72)",
+          "circle-stroke-color": "rgba(255,255,255,0.26)",
         },
       });
       map.addLayer({
@@ -491,7 +491,7 @@ export default function Home() {
         filter: ["==", ["get", "isPick"], true],
         paint: {
           "circle-radius": ["interpolate", ["linear"], ["zoom"], 9.5, 16, 13, 21],
-          "circle-color": "rgba(255,92,53,0.18)",
+          "circle-color": "rgba(255,92,53,0.34)",
           "circle-blur": 0.35,
         },
       });
@@ -529,7 +529,7 @@ export default function Home() {
           "circle-radius": ["interpolate", ["linear"], ["zoom"], 9.5, 16, 13, 23],
           "circle-color": "rgba(0,0,0,0)",
           "circle-stroke-width": 3,
-          "circle-stroke-color": "#171716",
+          "circle-stroke-color": "#ffffff",
           "circle-opacity": 0.92,
         },
       });
@@ -780,22 +780,22 @@ export default function Home() {
           )}
         </section>
 
-        <section className="relative min-h-[410px] overflow-hidden bg-[#e9e7e1] lg:min-h-0" aria-label="757 venue map">
+        <section className="relative min-h-[410px] overflow-hidden bg-[#111110] lg:min-h-0" aria-label="757 venue map">
           <div className="absolute inset-0">
             <div ref={mapContainerRef} className="h-full w-full" />
           </div>
 
           {mapUnavailable && (
-            <div className="absolute inset-0 flex items-center justify-center bg-[radial-gradient(circle_at_center,#fffdf8_0%,#e8e5de_70%)] px-6 text-center text-[#171716]">
+            <div className="absolute inset-0 flex items-center justify-center bg-[radial-gradient(circle_at_center,#282725_0%,#111110_72%)] px-6 text-center text-white">
               <div>
                 <MapPin size={26} className="mx-auto text-[#ff7a59]" />
                 <p className="mt-3 text-[15px] font-semibold">The 757 map is unavailable.</p>
-                <p className="mt-1 text-[12px] text-black/45">Your three recommendations still work.</p>
+                <p className="mt-1 text-[12px] text-white/45">Your three recommendations still work.</p>
               </div>
             </div>
           )}
 
-          <div className="pointer-events-none absolute left-4 top-4 z-10 flex items-center gap-2 rounded-full border border-black/8 bg-white/82 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-black/55 shadow-sm backdrop-blur-xl sm:left-5 sm:top-5">
+          <div className="pointer-events-none absolute left-4 top-4 z-10 flex items-center gap-2 rounded-full border border-white/10 bg-black/72 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-white/62 shadow-sm backdrop-blur-xl sm:left-5 sm:top-5">
             <span className="h-1.5 w-1.5 rounded-full bg-[#ff5c35]" />
             757 map · Picks 1–3
           </div>
@@ -803,13 +803,13 @@ export default function Home() {
           <button
             type="button"
             onClick={useMyLocation}
-            className="absolute bottom-8 right-4 z-10 flex h-11 w-11 items-center justify-center rounded-full border border-black/10 bg-white/88 text-[#171716] shadow-[0_12px_40px_rgba(0,0,0,0.16)] backdrop-blur-xl transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ff5c35] sm:right-5"
+            className="absolute bottom-8 right-4 z-10 flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-black/72 text-white shadow-[0_12px_40px_rgba(0,0,0,0.3)] backdrop-blur-xl transition hover:bg-black/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ff5c35] sm:right-5"
             aria-label="Center map on my location"
           >
             <LocateFixed size={17} />
           </button>
 
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-white/20 to-transparent lg:hidden" />
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-black/30 to-transparent lg:hidden" />
         </section>
       </div>
     </main>
