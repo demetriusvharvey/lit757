@@ -632,10 +632,12 @@ export default function Home() {
     });
   }
 
-  const eyebrow = data?.context.eyebrow.replace(
-    "Hampton Roads",
-    city === "All 757" ? "Hampton Roads" : city
-  );
+  const eyebrow = appliedQuery
+    ? `Ideas for “${appliedQuery}”`
+    : data?.context.eyebrow.replace(
+        "the 757",
+        city === "All 757" ? "the 757" : city
+      );
 
   return (
     <main className="min-h-dvh bg-[#f7f5ef] text-[#171716] lg:h-dvh lg:overflow-hidden">
@@ -683,17 +685,20 @@ export default function Home() {
                   {data?.context.headline || "Find your thing."}
                 </h1>
                 <p className="mt-1.5 max-w-[390px] text-[12px] leading-5 text-black/48">
-                  {data?.context.description || "Search, explore, or let us choose."}
+                  {data?.context.description || "Type any interest, hobby, or mood. We’ll make the decision."}
                 </p>
 
                 <form onSubmit={submitSearch} className="mt-3 grid grid-cols-[1fr_auto] gap-2">
                   <label className="relative block min-w-0">
-                    <span className="sr-only">Search things to do</span>
+                    <span className="sr-only">Search any interest, hobby, place, or plan</span>
                     <Search size={15} className="pointer-events-none absolute left-4 top-[15px] text-black/34" />
                     <input
                       value={query}
-                      onChange={(event) => setQuery(event.target.value)}
-                      placeholder="Search places or plans"
+                      onChange={(event) => {
+                        setQuery(event.target.value);
+                        if (event.target.value.trim()) setMode("all");
+                      }}
+                      placeholder="Try “date night,” hiking, art…"
                       className="h-12 w-full rounded-full border border-black/[0.09] bg-white/72 pl-10 pr-10 text-[13px] text-black outline-none placeholder:text-black/32 transition focus:border-black/20 focus:ring-2 focus:ring-[#ff5c35]"
                     />
                     {query && (
@@ -762,7 +767,7 @@ export default function Home() {
                     <div className="rounded-[1.6rem] border border-black/[0.08] bg-white/72 p-6 text-center">
                       <p className="text-[15px] font-semibold">No clean matches yet.</p>
                       <p className="mt-2 text-[12px] leading-5 text-black/46">
-                        Clear the search or try another category. We will not invent a weak recommendation.
+                        Try a broader interest or a different word. We will not invent a weak recommendation.
                       </p>
                     </div>
                   )}
