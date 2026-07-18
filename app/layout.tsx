@@ -26,6 +26,11 @@ export const metadata: Metadata = {
   title: "Things To Do 757 — Find something worth doing now",
   description: "Instant, interest-aware recommendations for things to do across Hampton Roads—updated automatically.",
   applicationName: "Things To Do 757",
+  appleWebApp: {
+    capable: true,
+    title: "Things To Do 757",
+    statusBarStyle: "black-translucent",
+  },
   openGraph: {
     title: "Things To Do 757",
     description: "Find something worth doing in the 757—in under 10 seconds.",

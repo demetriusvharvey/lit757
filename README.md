@@ -1,5 +1,13 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Things To Do 757
+
+The mission is simple: help someone find something worth doing in Hampton Roads instantly, at any time of day.
+
+The app combines automatically refreshed events, venue data, verified opening hours, interest-aware ranking, and privacy-preserving nearby activity. Members can save places and opt into true background Web Push alerts when a saved venue heats up or an event is starting soon.
+
+See [Background Web Push setup](docs/web-push-setup.md) for the one-time database step and delivery architecture.
+
 ## Getting Started
 
 First, run the development server:

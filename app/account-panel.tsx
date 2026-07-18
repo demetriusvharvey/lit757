@@ -259,7 +259,7 @@ export default function AccountPanel({
                   enabled={preferences.alerts}
                   onChange={(enabled) => void onAlertsChange(enabled)}
                   label="Saved-place alerts"
-                  detail="Notify me when a saved place has verified activity or an event starting soon."
+                  detail="Alert me when a saved place heats up or an event is starting—even when the app is closed."
                   icon={<Bell size={16} />}
                 />
                 <PreferenceToggle

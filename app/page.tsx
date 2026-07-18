@@ -125,6 +125,15 @@ const MEMBER_PREFERENCES_KEY = "things-to-do-757:member-preferences";
 
 type UserLocation = { latitude: number; longitude: number; accuracy: number };
 
+function urlBase64ToUint8Array(value: string) {
+  const padding = "=".repeat((4 - value.length % 4) % 4);
+  const base64 = (value + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = window.atob(base64);
+  const output = new Uint8Array(raw.length);
+  for (let index = 0; index < raw.length; index += 1) output[index] = raw.charCodeAt(index);
+  return output;
+}
+
 function distanceMiles(
   location: Pick<UserLocation, "latitude" | "longitude">,
   venue: Pick<DiscoveryVenue, "lat" | "lng">
@@ -597,6 +606,77 @@ export default function Home() {
     }
   }, []);
 
+  const subscribeToBackgroundAlerts = useCallback(async (activeSession: Session) => {
+    if (
+      typeof Notification === "undefined" ||
+      !("serviceWorker" in navigator) ||
+      !("PushManager" in window)
+    ) {
+      throw new Error("Background alerts are not available here. On iPhone, add the app to your Home Screen first.");
+    }
+
+    const configurationResponse = await fetch("/api/push/config", { cache: "no-store" });
+    const configuration = await configurationResponse.json() as {
+      configured?: boolean;
+      publicKey?: string | null;
+    };
+    if (!configurationResponse.ok || !configuration.configured || !configuration.publicKey) {
+      throw new Error("Background alerts are still being connected. Try again shortly.");
+    }
+
+    const registration = await navigator.serviceWorker.register("/sw.js");
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(configuration.publicKey),
+      });
+    }
+
+    const response = await fetch("/api/push/subscription", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${activeSession.access_token}`,
+      },
+      body: JSON.stringify(subscription.toJSON()),
+    });
+    const payload = await response.json().catch(() => null) as { error?: string } | null;
+    if (!response.ok) throw new Error(payload?.error || "Could not connect background alerts.");
+  }, []);
+
+  const unsubscribeFromBackgroundAlerts = useCallback(async (activeSession: Session | null) => {
+    if (!("serviceWorker" in navigator)) return;
+    const registration = await navigator.serviceWorker.getRegistration("/");
+    const subscription = await registration?.pushManager.getSubscription();
+    if (!subscription) return;
+
+    if (activeSession?.access_token) {
+      await fetch("/api/push/subscription", {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${activeSession.access_token}`,
+        },
+        body: JSON.stringify({ endpoint: subscription.endpoint }),
+      }).catch(() => undefined);
+    }
+    await subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (
+      !preferences.alerts ||
+      !session ||
+      typeof Notification === "undefined" ||
+      Notification.permission !== "granted"
+    ) return;
+
+    void subscribeToBackgroundAlerts(session).catch((syncError) => {
+      console.error("Could not refresh background alert subscription", syncError);
+    });
+  }, [preferences.alerts, session, subscribeToBackgroundAlerts]);
+
   const reportNearbyPresence = useCallback(async (location: UserLocation) => {
     setUserLocation(location);
     if (!preferences.presence || !session?.access_token) return;
@@ -654,56 +734,6 @@ export default function Home() {
 
     return () => navigator.geolocation.clearWatch(watchId);
   }, [preferences, persistPreferences, reportNearbyPresence, session]);
-
-  useEffect(() => {
-    if (
-      !preferences.alerts ||
-      !session ||
-      !data?.venues.length ||
-      typeof Notification === "undefined" ||
-      Notification.permission !== "granted" ||
-      !("serviceWorker" in navigator)
-    ) return;
-
-    const now = Date.now();
-    const candidate = data.venues.find((venue) => {
-      if (!likedIds.has(venue.id)) return false;
-      if (venue.heat) return true;
-      if (!venue.event?.startTime) return false;
-      const startsIn = new Date(venue.event.startTime).getTime() - now;
-      return startsIn >= 0 && startsIn <= 3 * 60 * 60 * 1000;
-    });
-    if (!candidate) return;
-
-    const alertKey = `${candidate.id}:${candidate.heat?.level || candidate.event?.id || "update"}`;
-    const storageKey = "things-to-do-757:last-alert";
-    let previous = "";
-    try {
-      previous = window.localStorage.getItem(storageKey) || "";
-    } catch {
-      // A duplicate alert is still prevented by the service worker tag.
-    }
-    if (previous === alertKey) return;
-
-    void navigator.serviceWorker.ready.then((registration) =>
-      registration.showNotification(
-        candidate.heat ? "A saved place is moving" : "A saved event is coming up",
-        {
-          body: candidate.heat
-            ? `${candidate.name} has verified nearby activity right now.`
-            : `${candidate.name}: ${candidate.event?.name || "Your saved event"} starts soon.`,
-          tag: alertKey,
-          data: { url: `/?venue=${encodeURIComponent(candidate.id)}` },
-          icon: "/favicon.ico",
-        }
-      )
-    );
-    try {
-      window.localStorage.setItem(storageKey, alertKey);
-    } catch {
-      // The service worker tag remains the fallback de-duplication mechanism.
-    }
-  }, [data?.venues, likedIds, preferences.alerts, session]);
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
@@ -918,6 +948,8 @@ export default function Home() {
   }
 
   async function signOut() {
+    await unsubscribeFromBackgroundAlerts(session);
+    persistPreferences({ ...preferences, alerts: false });
     await supabase.auth.signOut();
     setMemberMessage("");
     setAccountOpen(false);
@@ -925,13 +957,23 @@ export default function Home() {
 
   async function changeAlerts(enabled: boolean) {
     if (!enabled) {
+      await unsubscribeFromBackgroundAlerts(session);
       persistPreferences({ ...preferences, alerts: false });
       setMemberMessage("Saved-place alerts are off.");
       return;
     }
 
-    if (typeof Notification === "undefined" || !("serviceWorker" in navigator)) {
-      setMemberMessage("This browser does not support alerts.");
+    if (!session) {
+      setMemberMessage("Sign in before turning on saved-place alerts.");
+      return;
+    }
+
+    if (
+      typeof Notification === "undefined" ||
+      !("serviceWorker" in navigator) ||
+      !("PushManager" in window)
+    ) {
+      setMemberMessage("Background alerts are not available here. On iPhone, add the app to your Home Screen first.");
       return;
     }
 
@@ -941,9 +983,16 @@ export default function Home() {
       return;
     }
 
-    await navigator.serviceWorker.register("/sw.js");
-    persistPreferences({ ...preferences, alerts: true });
-    setMemberMessage("Alerts are on for saved places and saved events.");
+    try {
+      await subscribeToBackgroundAlerts(session);
+      persistPreferences({ ...preferences, alerts: true });
+      setMemberMessage("Background alerts are on—even when the app is closed.");
+    } catch (pushError) {
+      persistPreferences({ ...preferences, alerts: false });
+      setMemberMessage(
+        pushError instanceof Error ? pushError.message : "Could not connect background alerts."
+      );
+    }
   }
 
   async function changePresence(enabled: boolean) {
