@@ -61,6 +61,43 @@ type GoogleHours = {
 
 type RankedVenue = ReturnType<typeof rankVenue>;
 
+const DISCOVERY_FILTERS = [
+  { id: "all", label: "All" },
+  { id: "open-now", label: "Open now" },
+  { id: "hot-now", label: "Hot now" },
+  { id: "events", label: "Events" },
+  { id: "nightlife", label: "Nightlife" },
+  { id: "food", label: "Food" },
+  { id: "date-night", label: "Date night" },
+  { id: "live-music", label: "Live music" },
+  { id: "family", label: "Family" },
+  { id: "active", label: "Activities" },
+  { id: "outdoors", label: "Outdoors" },
+  { id: "beach-water", label: "On the water" },
+  { id: "arts-culture", label: "Arts + culture" },
+  { id: "games", label: "Games" },
+  { id: "coffee-dessert", label: "Coffee + dessert" },
+  { id: "free-budget", label: "Free + low cost" },
+  { id: "wellness", label: "Wellness" },
+  { id: "shopping", label: "Shopping" },
+] as const;
+
+type DiscoveryFilter = typeof DISCOVERY_FILTERS[number]["id"];
+
+const DISCOVERY_FILTER_IDS = new Set<DiscoveryFilter>(
+  DISCOVERY_FILTERS.map((filter) => filter.id)
+);
+
+function matchesDiscoveryFilter(venue: RankedVenue, filter: DiscoveryFilter) {
+  if (filter === "all") return true;
+  if (filter === "open-now") return venue.openNow === true;
+  if (filter === "hot-now") return venue.nearbyCount >= 2;
+  if (filter === "events") return Boolean(venue.event);
+  if (filter === "nightlife") return venue.kind === "nightlife";
+  if (filter === "food") return venue.kind === "food";
+  return venue.interestTags.includes(filter);
+}
+
 const CITIES = [
   "Norfolk",
   "Virginia Beach",
@@ -1009,9 +1046,13 @@ export async function GET(request: Request) {
   const mode: DiscoveryMode = ["food", "explore", "events"].includes(normalizedMode)
     ? normalizedMode as DiscoveryMode
     : "all";
+  const requestedFilter = url.searchParams.get("filter") || "all";
+  const filter = DISCOVERY_FILTER_IDS.has(requestedFilter as DiscoveryFilter)
+    ? requestedFilter as DiscoveryFilter
+    : "all";
   const requestedCity = url.searchParams.get("city") || "All 757";
   const city = CITIES.includes(requestedCity) ? requestedCity : "All 757";
-  const search = normalize(url.searchParams.get("q"));
+  const search = normalize(url.searchParams.get("q")).slice(0, 120);
   const actualClock = easternNow();
   const previewHourParam = url.searchParams.get("__hour");
   const requestedPreviewHour = Number(previewHourParam);
@@ -1114,7 +1155,7 @@ export async function GET(request: Request) {
     return (likedVenueIds.has(venue.id) ? 6 : 0) + Math.min(10, sharedTags * 2);
   };
   const assignedEvents = assignEventsToVenues(eligibleVenues, safeEvents);
-  const ranked = eligibleVenues
+  const rankedForContext = eligibleVenues
     .map((venue) =>
       rankVenue(
         venue,
@@ -1145,6 +1186,15 @@ export async function GET(request: Request) {
       }
       return right.score - left.score;
     });
+  const filters = DISCOVERY_FILTERS
+    .map((option) => ({
+      ...option,
+      count: rankedForContext.filter((venue) => matchesDiscoveryFilter(venue, option.id)).length,
+    }))
+    .filter((option) => option.id === "all" || option.count > 0);
+  const ranked = filter === "all"
+    ? rankedForContext
+    : rankedForContext.filter((venue) => matchesDiscoveryFilter(venue, filter));
   const picks = chooseDiversePicks(ranked, daypart.key, mode, Boolean(search));
   const freshness = [
     ...((venues || []) as VenueRow[]).map((venue) => venue.enriched_at),
@@ -1186,15 +1236,17 @@ export async function GET(request: Request) {
         ...daypart,
         city,
         mode,
+        filter,
         resultCount: ranked.length,
       },
+      filters,
       freshness: {
         label: freshnessLabel(freshness),
         timestamp: freshness,
         automatic: true,
       },
       picks: picks.map((venue, index) => publicVenue(venue, index)),
-      venues: ranked.slice(0, 180).map((venue) => publicVenue(venue)),
+      venues: ranked.slice(0, 600).map((venue) => publicVenue(venue)),
     },
     { headers: { "Cache-Control": "private, no-store" } }
   );

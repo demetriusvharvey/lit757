@@ -96,8 +96,14 @@ type DiscoveryResponse = {
     description: string;
     city: string;
     mode: DiscoveryMode;
+    filter: string;
     resultCount: number;
   };
+  filters: Array<{
+    id: string;
+    label: string;
+    count: number;
+  }>;
   freshness: {
     label: string;
     timestamp: string | null;
@@ -173,6 +179,12 @@ function detailEyebrow(venue: DiscoveryVenue) {
   if (venue.event) return `${venue.event.timeLabel} · ${venue.city}`;
   if (venue.openNow === true) return `Open now · ${venue.city}`;
   return `${venue.timing} · ${venue.city}`;
+}
+
+function readableVenueType(value: string) {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
 function VenueImage({
@@ -283,6 +295,52 @@ function PickCard({
       </span>
 
       <VenueImage venue={venue} priority={primary} className="h-[92px] rounded-[1.05rem] sm:h-[96px]" />
+    </button>
+  );
+}
+
+function BrowseCard({
+  venue,
+  position,
+  onSelect,
+  distance,
+}: {
+  venue: DiscoveryVenue;
+  position: number;
+  onSelect: (venue: DiscoveryVenue) => void;
+  distance: string | null;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(venue)}
+      className="group grid w-full grid-cols-[1fr_66px] gap-3 rounded-[1.25rem] border border-black/[0.07] bg-white/68 p-2.5 text-left transition hover:border-black/17 hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ff5c35]"
+      aria-label={`Open ${venue.name}, result ${position}`}
+    >
+      <span className="flex min-w-0 flex-col justify-center px-1">
+        <span className="flex min-w-0 items-center gap-2 text-[9px] font-bold uppercase tracking-[0.14em] text-[#c94b2e]">
+          <span>{String(position).padStart(2, "0")}</span>
+          <span className="h-1 w-1 shrink-0 rounded-full bg-black/16" />
+          <span className="truncate">{venue.heat?.label || venue.label}</span>
+          {venue.heat && <Flame size={9} fill="currentColor" className="shrink-0 text-[#ff5c35]" />}
+        </span>
+        <span className="mt-1 block truncate text-[15px] font-semibold leading-none tracking-[-0.035em] text-black/82">
+          {venue.name}
+        </span>
+        <span className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[9px] font-medium text-black/40">
+          <span className="truncate">{readableVenueType(venue.type)}</span>
+          <span className="text-black/16">·</span>
+          <span className="shrink-0">{venue.city}</span>
+          {distance && (
+            <>
+              <span className="text-black/16">·</span>
+              <span className="shrink-0">{distance}</span>
+            </>
+          )}
+          <ArrowRight size={12} className="ml-auto shrink-0 text-black/30 transition-transform group-hover:translate-x-0.5" />
+        </span>
+      </span>
+      <VenueImage venue={venue} className="h-[66px] rounded-[0.95rem]" />
     </button>
   );
 }
@@ -499,6 +557,7 @@ export default function Home() {
   const lastPresenceReportRef = useRef<{ key: string; at: number } | null>(null);
   const [data, setData] = useState<DiscoveryResponse | null>(null);
   const [mode, setMode] = useState<DiscoveryMode>("all");
+  const [filter, setFilter] = useState("all");
   const [city, setCity] = useState("All 757");
   const [query, setQuery] = useState("");
   const [appliedQuery, setAppliedQuery] = useState("");
@@ -529,6 +588,7 @@ export default function Home() {
   const [userLocation, setUserLocation] = useState<UserLocation | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [visibleResultCount, setVisibleResultCount] = useState(9);
   const [error, setError] = useState("");
   const [mapReady, setMapReady] = useState(false);
   const [mapUnavailable] = useState(() => !process.env.NEXT_PUBLIC_MAPBOX_TOKEN);
@@ -582,6 +642,7 @@ export default function Home() {
     try {
       const params = new URLSearchParams({ mode, city });
       if (appliedQuery) params.set("q", appliedQuery);
+      if (filter !== "all") params.set("filter", filter);
       const response = await fetch(`/api/discover?${params.toString()}`, {
         cache: "no-store",
         headers: session?.access_token
@@ -606,7 +667,7 @@ export default function Home() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [mode, city, appliedQuery, session]);
+  }, [mode, city, appliedQuery, filter, session]);
 
   useEffect(() => {
     const task = window.setTimeout(() => void loadDiscovery(), 0);
@@ -901,6 +962,14 @@ export default function Home() {
     };
   }, []);
 
+  const orderedResults = useMemo(() => {
+    if (!data) return [];
+    const pickIds = new Set(data.picks.map((venue) => venue.id));
+    return [...data.picks, ...data.venues.filter((venue) => !pickIds.has(venue.id))];
+  }, [data]);
+  const featuredVenue = orderedResults[0] || null;
+  const browseVenues = orderedResults.slice(1);
+  const visibleBrowseVenues = browseVenues.slice(0, visibleResultCount);
   const visibleVenues = useMemo(() => data?.venues || [], [data?.venues]);
   const pickIds = useMemo(() => new Map((data?.picks || []).map((venue, index) => [venue.id, index])), [data?.picks]);
 
@@ -1129,17 +1198,21 @@ export default function Home() {
       return;
     }
     setMode("all");
+    setFilter("all");
+    setVisibleResultCount(9);
     setQuery(place.name);
     setAppliedQuery(place.name);
   }
 
   function chooseForMe() {
-    const pick = data?.picks[0];
+    const pick = featuredVenue;
     if (pick) setSelected(pick);
   }
 
   function submitSearch(event: FormEvent) {
     event.preventDefault();
+    setFilter("all");
+    setVisibleResultCount(9);
     setAppliedQuery(query.trim());
   }
 
@@ -1226,7 +1299,11 @@ export default function Home() {
                     <span className="sr-only">Choose city</span>
                     <select
                       value={city}
-                      onChange={(event) => setCity(event.target.value)}
+                      onChange={(event) => {
+                        setCity(event.target.value);
+                        setFilter("all");
+                        setVisibleResultCount(9);
+                      }}
                       className="h-10 max-w-[92px] appearance-none rounded-full border border-black/[0.09] bg-white/66 pl-3 pr-7 text-[11px] font-semibold text-black/68 outline-none transition hover:border-black/20 focus:ring-2 focus:ring-[#ff5c35] sm:max-w-[112px] sm:pl-4 sm:pr-8 sm:text-[12px]"
                     >
                       {CITIES.map((item) => <option key={item}>{item}</option>)}
@@ -1275,15 +1352,22 @@ export default function Home() {
                       value={query}
                       onChange={(event) => {
                         setQuery(event.target.value);
+                        setFilter("all");
+                        setVisibleResultCount(9);
                         if (event.target.value.trim()) setMode("all");
                       }}
                       placeholder="Try “date night,” hiking, art…"
+                      maxLength={120}
                       className="h-12 w-full rounded-full border border-black/[0.09] bg-white/72 pl-10 pr-10 text-[13px] text-black outline-none placeholder:text-black/32 transition focus:border-black/20 focus:ring-2 focus:ring-[#ff5c35]"
                     />
                     {query && (
                       <button
                         type="button"
-                        onClick={() => setQuery("")}
+                        onClick={() => {
+                          setQuery("");
+                          setFilter("all");
+                          setVisibleResultCount(9);
+                        }}
                         className="absolute right-2.5 top-2.5 flex h-7 w-7 items-center justify-center rounded-full text-black/34 hover:bg-black/[0.05] hover:text-black"
                         aria-label="Clear search"
                       >
@@ -1309,7 +1393,11 @@ export default function Home() {
                       type="button"
                       role="tab"
                       aria-selected={mode === item.id}
-                      onClick={() => setMode(item.id)}
+                      onClick={() => {
+                        setMode(item.id);
+                        setFilter("all");
+                        setVisibleResultCount(9);
+                      }}
                       className={`h-9 min-w-0 whitespace-nowrap rounded-full px-1 text-[10px] font-semibold leading-none transition sm:px-3 sm:text-[11px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ff5c35] ${
                         mode === item.id
                           ? "bg-[#171716] text-white"
@@ -1319,6 +1407,53 @@ export default function Home() {
                       {item.label}
                     </button>
                   ))}
+                </div>
+
+                <div className="mt-3">
+                  <div className="flex items-center justify-between gap-3 px-0.5">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-black/40">
+                      {data ? `Browse ${data.context.resultCount} places` : "Finding places"}
+                    </p>
+                    {filter !== "all" && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFilter("all");
+                          setVisibleResultCount(9);
+                        }}
+                        className="text-[10px] font-semibold text-[#c94b2e] transition hover:text-[#a83c24] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ff5c35]"
+                      >
+                        Clear filter
+                      </button>
+                    )}
+                  </div>
+                  <div className="no-scrollbar -mx-5 mt-2 flex gap-1.5 overflow-x-auto px-5 pb-1 sm:-mx-6 sm:px-6" aria-label="Filter places">
+                    {data ? data.filters.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          aria-pressed={filter === item.id}
+                          onClick={() => {
+                            setFilter(item.id);
+                            setVisibleResultCount(9);
+                          }}
+                          className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[10px] font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ff5c35] ${
+                            filter === item.id
+                              ? "border-[#171716] bg-[#171716] text-white"
+                              : "border-black/[0.07] bg-white/66 text-black/52 hover:border-black/16 hover:text-black/72"
+                          }`}
+                        >
+                          {item.label}
+                          <span className={filter === item.id ? "text-white/48" : "text-black/28"}>{item.count}</span>
+                        </button>
+                      )) : [62, 86, 74].map((width) => (
+                        <span
+                          key={width}
+                          className="h-8 shrink-0 animate-pulse rounded-full bg-black/[0.055]"
+                          style={{ width }}
+                        />
+                      ))}
+                  </div>
                 </div>
 
                 <div className="mt-3">
@@ -1336,17 +1471,47 @@ export default function Home() {
                         Try again
                       </button>
                     </div>
-                  ) : data?.picks.length ? (
-                    <div className="space-y-2.5">
-                      {data.picks.map((venue, index) => (
-                        <PickCard
-                          key={venue.id}
-                          venue={venue}
-                          rank={index}
-                          onSelect={setSelected}
-                          distance={venueDistance(venue)}
-                        />
-                      ))}
+                  ) : featuredVenue ? (
+                    <div>
+                      <PickCard
+                        venue={featuredVenue}
+                        rank={0}
+                        onSelect={setSelected}
+                        distance={venueDistance(featuredVenue)}
+                      />
+
+                      {visibleBrowseVenues.length > 0 && (
+                        <div className="mt-4">
+                          <div className="mb-2 flex items-center justify-between px-0.5">
+                            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-black/40">
+                              More places
+                            </p>
+                            <span className="text-[10px] font-medium text-black/30">
+                              {Math.min(visibleBrowseVenues.length + 1, orderedResults.length)} of {data?.context.resultCount || orderedResults.length}
+                            </span>
+                          </div>
+                          <div className="space-y-1.5">
+                            {visibleBrowseVenues.map((venue, index) => (
+                              <BrowseCard
+                                key={venue.id}
+                                venue={venue}
+                                position={index + 2}
+                                onSelect={setSelected}
+                                distance={venueDistance(venue)}
+                              />
+                            ))}
+                          </div>
+                          {visibleBrowseVenues.length < browseVenues.length && (
+                            <button
+                              type="button"
+                              onClick={() => setVisibleResultCount((current) => current + 12)}
+                              className="mt-2 flex h-11 w-full items-center justify-center rounded-full border border-black/[0.08] bg-white/56 text-[11px] font-semibold text-black/56 transition hover:border-black/18 hover:bg-white hover:text-black/74 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ff5c35]"
+                            >
+                              Show {Math.min(12, browseVenues.length - visibleBrowseVenues.length)} more
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="rounded-[1.6rem] border border-black/[0.08] bg-white/72 p-6 text-center">
@@ -1363,7 +1528,7 @@ export default function Home() {
                     <Clock3 size={12} />
                     {data?.freshness.label || "Updating now"}
                   </span>
-                  <span>{data ? `${data.context.resultCount} options considered` : "Across the 757"}</span>
+                  <span>{data ? `${data.context.resultCount} matches` : "Across the 757"}</span>
                 </div>
               </div>
             </>
@@ -1387,7 +1552,9 @@ export default function Home() {
 
           <div className="pointer-events-none absolute left-4 top-4 z-10 flex items-center gap-2 rounded-full border border-white/10 bg-black/72 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-white/62 shadow-sm backdrop-blur-xl sm:left-5 sm:top-5">
             <span className="h-1.5 w-1.5 rounded-full bg-[#ff5c35]" />
-            757 map · Right now
+            {filter === "all"
+              ? "757 map · Right now"
+              : `${data?.filters.find((item) => item.id === filter)?.label || "Filtered"} · ${data?.context.resultCount || 0}`}
           </div>
 
           <button
