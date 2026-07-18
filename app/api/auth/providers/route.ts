@@ -13,12 +13,14 @@ export async function GET() {
     return NextResponse.json(
       {
         google: Boolean(settings?.external?.google),
+        facebook: Boolean(settings?.external?.facebook),
         apple: Boolean(settings?.external?.apple),
+        phone: Boolean(settings?.external?.phone),
         email: settings?.external?.email !== false,
       },
       { headers: { "Cache-Control": "private, no-store" } }
     );
   } catch {
-    return NextResponse.json({ google: false, apple: false, email: true });
+    return NextResponse.json({ google: false, facebook: false, apple: false, phone: false, email: true });
   }
 }

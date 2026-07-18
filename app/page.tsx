@@ -505,7 +505,13 @@ export default function Home() {
   const [selected, setSelected] = useState<DiscoveryVenue | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
-  const [providers, setProviders] = useState<AuthProviders>({ google: false, apple: false, email: true });
+  const [providers, setProviders] = useState<AuthProviders>({
+    google: false,
+    facebook: false,
+    apple: false,
+    phone: false,
+    email: true,
+  });
   const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
   const [savedPlaces, setSavedPlaces] = useState<SavedPlace[]>([]);
   const [preferences, setPreferences] = useState<MemberPreferences>(() => {
@@ -950,7 +956,7 @@ export default function Home() {
     window.history.replaceState({}, "", `${url.pathname}${url.search}`);
   }
 
-  async function signInWithProvider(provider: "google" | "apple") {
+  async function signInWithProvider(provider: "google" | "facebook" | "apple") {
     setMemberMessage("");
     const { error: authError } = await supabase.auth.signInWithOAuth({
       provider: provider as Provider,
@@ -968,6 +974,48 @@ export default function Home() {
     setMemberMessage(
       authError ? authError.message : "Check your email. Your private sign-in link is on the way."
     );
+  }
+
+  function normalizePhoneNumber(value: string) {
+    const trimmed = value.trim();
+    const digits = trimmed.replace(/\D/g, "");
+    if (trimmed.startsWith("+") && digits.length >= 8 && digits.length <= 15) return `+${digits}`;
+    if (digits.length === 10) return `+1${digits}`;
+    if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+    return null;
+  }
+
+  async function signInWithPhone(phone: string) {
+    setMemberMessage("");
+    const normalizedPhone = normalizePhoneNumber(phone);
+    if (!normalizedPhone) {
+      setMemberMessage("Enter a full mobile number, including the area code.");
+      return false;
+    }
+
+    const { error: authError } = await supabase.auth.signInWithOtp({ phone: normalizedPhone });
+    setMemberMessage(
+      authError ? authError.message : `We texted a six-digit code to ${normalizedPhone}.`
+    );
+    return !authError;
+  }
+
+  async function verifyPhoneCode(phone: string, code: string) {
+    setMemberMessage("");
+    const normalizedPhone = normalizePhoneNumber(phone);
+    const normalizedCode = code.replace(/\D/g, "");
+    if (!normalizedPhone || normalizedCode.length !== 6) {
+      setMemberMessage("Enter the six-digit code from the text message.");
+      return false;
+    }
+
+    const { error: authError } = await supabase.auth.verifyOtp({
+      phone: normalizedPhone,
+      token: normalizedCode,
+      type: "sms",
+    });
+    setMemberMessage(authError ? authError.message : "");
+    return !authError;
   }
 
   async function signOut() {
@@ -1145,6 +1193,8 @@ export default function Home() {
               onClose={() => setAccountOpen(false)}
               onOAuth={signInWithProvider}
               onEmailSignIn={signInWithEmail}
+              onPhoneSignIn={signInWithPhone}
+              onPhoneVerify={verifyPhoneCode}
               onSignOut={signOut}
               onSelectSaved={selectSavedPlace}
               onAlertsChange={changeAlerts}

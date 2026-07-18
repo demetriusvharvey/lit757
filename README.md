@@ -7,6 +7,7 @@ The mission is simple: help someone find something worth doing in Hampton Roads 
 The app combines automatically refreshed events, venue data, verified opening hours, interest-aware ranking, and privacy-preserving nearby activity. Members can save places and opt into true background Web Push alerts when a saved venue heats up or an event is starting soon.
 
 See [Background Web Push setup](docs/web-push-setup.md) for the one-time database step and delivery architecture.
+See [Sign-in setup](docs/auth-setup.md) to activate Google, Facebook, email, and phone authentication.
 
 ## Getting Started
 
