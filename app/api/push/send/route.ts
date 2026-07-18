@@ -131,8 +131,8 @@ function bestCandidate(
         payload: {
           title: hot ? `Hot right now: ${venue.name}` : `Activity at ${venue.name}`,
           body: hot
-            ? `${nearbyCount} verified members are nearby${venue.city ? ` in ${venue.city}` : ""}.`
-            : `Verified activity is building${venue.city ? ` in ${venue.city}` : ""}.`,
+            ? `People are gathering around this spot${venue.city ? ` in ${venue.city}` : ""}.`
+            : `This spot is starting to pick up${venue.city ? ` in ${venue.city}` : ""}.`,
           tag: `heat-${venueId}`,
           url: `/?venue=${encodeURIComponent(venueId)}&source=push`,
         },

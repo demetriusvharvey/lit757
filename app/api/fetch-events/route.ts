@@ -185,7 +185,7 @@ async function safeInternalFetch(url: string, secret: string) {
 function getTicketStatus(event: TicketmasterEvent) {
   const status = event.dates?.status?.code;
 
-  if (status === "offsale") return "Sold Out";
+  if (status === "offsale") return "Off Sale";
   if (status === "cancelled") return "Cancelled";
   if (status === "postponed") return "Postponed";
   if (status === "onsale") return "Available";

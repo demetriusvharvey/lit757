@@ -552,6 +552,7 @@ function rankVenue(
   clock: ReturnType<typeof easternNow>,
   referenceTime: number,
   nearbyCount = 0,
+  nearbyUpdatedAt: string | null = null,
   personalBoost = 0
 ) {
   const event = bestEventForVenue(events, referenceTime);
@@ -592,9 +593,9 @@ function rankVenue(
   const interestTags = inferInterestTags(venue);
   const eventTime = formatEventTime(event?.start_time);
   const reason = nearbyCount >= 4
-    ? "Verified nearby activity is building right now."
+    ? "People are gathering around this spot right now."
     : nearbyCount >= 2
-      ? "Verified activity is nearby right now."
+      ? "This spot is starting to pick up."
     : event
     ? `${event?.name || "An event"} starts at ${eventTime}.`
     : openNow === true && rating >= 4
@@ -619,6 +620,7 @@ function rankVenue(
     eventHours,
     event,
     nearbyCount,
+    nearbyUpdatedAt,
     interestTags,
     reason,
     timing,
@@ -784,6 +786,144 @@ function eventsNeedRefresh(timestamp?: string | null) {
   return Number.isNaN(value) || Date.now() - value > 2 * 60 * 60 * 1000;
 }
 
+function ticketReason(event: EventRow | null) {
+  if (!event?.ticket_status) return null;
+  const status = normalize(event.ticket_status);
+
+  // Ticketmaster's generic `offsale` status used to be stored as "Sold Out".
+  // That does not prove a sellout, so only treat explicit non-Ticketmaster
+  // statuses as strong demand evidence.
+  if (event.source !== "ticketmaster" && status === "sold out") {
+    return {
+      kind: "tickets" as const,
+      title: "Tickets sold out",
+      detail: "The ticket listing is marked sold out, so expect a real crowd.",
+    };
+  }
+  if (status === "almost sold out") {
+    return {
+      kind: "tickets" as const,
+      title: "Tickets are almost gone",
+      detail: "The latest ticket listing says availability is running low.",
+    };
+  }
+  if (status === "off sale") {
+    return {
+      kind: "tickets" as const,
+      title: "Tickets are off sale",
+      detail: "Online sales have closed, so check the venue before heading out.",
+    };
+  }
+  return null;
+}
+
+function buildWhyNow(venue: RankedVenue) {
+  const reasons: Array<{
+    kind: "crowd" | "event" | "tickets" | "open" | "rating" | "honest";
+    title: string;
+    detail: string;
+  }> = [];
+  const eventTime = formatEventTime(venue.event?.start_time);
+
+  if (venue.nearbyCount >= 4) {
+    reasons.push({
+      kind: "crowd",
+      title: "People are showing up",
+      detail: "Several people have been around this spot in the last 45 minutes.",
+    });
+  } else if (venue.nearbyCount >= 2) {
+    reasons.push({
+      kind: "crowd",
+      title: "It’s starting to pick up",
+      detail: "Fresh activity has appeared around this spot in the last 45 minutes.",
+    });
+  }
+
+  if (venue.event) {
+    const eventTitle = venue.event.name || "An event";
+    const timing = venue.eventHours !== null && venue.eventHours < 0.25
+      ? "Happening now"
+      : venue.eventHours !== null && venue.eventHours <= 1.5
+        ? "Starting soon"
+        : venue.eventHours !== null && venue.eventHours <= 12
+          ? "Later today"
+          : "On the calendar";
+    reasons.push({
+      kind: "event",
+      title: timing,
+      detail: `${eventTitle} · ${eventTime}`,
+    });
+
+    const tickets = ticketReason(venue.event);
+    if (tickets) reasons.push(tickets);
+  }
+
+  if (venue.openNow === true) {
+    reasons.push({
+      kind: "open",
+      title: "Open right now",
+      detail: "You can actually head there now—not plan around a closed door.",
+    });
+  }
+
+  const rating = Number(venue.google_rating || 0);
+  if (rating >= 4.3) {
+    reasons.push({
+      kind: "rating",
+      title: "People already like it",
+      detail: `Rated ${rating.toFixed(1)} on Google.`,
+    });
+  }
+
+  if (!reasons.length) {
+    reasons.push({
+      kind: "honest",
+      title: "Not enough live info yet",
+      detail: "It may still be a good move, but there is no strong crowd or event signal right now.",
+    });
+  }
+
+  const eventName = venue.event?.name || "the scheduled event";
+  const summary = venue.nearbyCount >= 4 && venue.event
+    ? `People are gathering here, and ${eventName} gives them a reason to stay.`
+    : venue.nearbyCount >= 4
+      ? "People are gathering around this spot now—the clearest sign that it has energy."
+      : venue.nearbyCount >= 2 && venue.event
+        ? `This spot is picking up as ${eventName} gets closer.`
+        : venue.nearbyCount >= 2
+          ? "There is fresh movement around this spot, but it is still building."
+          : venue.event
+            ? `${eventName} gives you a clear reason to go${eventTime ? ` at ${eventTime}` : ""}.`
+            : venue.openNow === true && rating >= 4.3
+              ? `It’s open now and rated ${rating.toFixed(1)}—a dependable move if you want to leave soon.`
+              : venue.openNow === true
+                ? "It’s open now, so this is a real option if you want to head out soon."
+                : rating >= 4.3
+                  ? `It is well rated at ${rating.toFixed(1)}, but there is not enough fresh information to call it hot right now.`
+                  : "This could still be worth a look, but there is not enough fresh information to call it hot right now.";
+
+  return {
+    headline: venue.nearbyCount >= 4
+      ? "Why it’s hot right now"
+      : venue.nearbyCount >= 2
+        ? "Why it’s picking up"
+        : venue.event
+          ? "Why go now"
+          : "The honest read",
+    summary,
+    freshness: venue.nearbyCount
+      ? venue.nearbyUpdatedAt
+        ? freshnessLabel(venue.nearbyUpdatedAt).replace(/^Updated/, "Last activity")
+        : "What’s happened in the last 45 minutes"
+      : venue.event
+        ? "Confirmed event details"
+        : venue.openNow === true
+          ? "Current hours and venue details"
+          : "What we can confirm right now",
+    reasons: reasons.slice(0, 4),
+  };
+}
+
 function publicVenue(venue: RankedVenue, index?: number) {
   const photoUrl =
     venue.photo_source === "google_streetview" && venue.google_place_id
@@ -810,14 +950,14 @@ function publicVenue(venue: RankedVenue, index?: number) {
     ? {
         level: "hot" as const,
         label: "Hot right now",
-        detail: "Several verified members are nearby.",
+        detail: "People are gathering around this spot.",
         source: "verified_nearby" as const,
       }
     : venue.nearbyCount >= 2
       ? {
           level: "active" as const,
           label: "Activity nearby",
-          detail: "Verified members are nearby.",
+          detail: "This spot is starting to pick up.",
           source: "verified_nearby" as const,
         }
       : null;
@@ -848,6 +988,7 @@ function publicVenue(venue: RankedVenue, index?: number) {
     score: clamp(venue.score, 0, 100),
     interestTags: venue.interestTags,
     heat,
+    whyNow: buildWhyNow(venue),
     event: venue.event
       ? {
           id: venue.event.id,
@@ -948,11 +1089,19 @@ export async function GET(request: Request) {
       );
     });
   const nearbyMembers = new Map<string, Set<string>>();
+  const nearbyUpdatedAt = new Map<string, string>();
   for (const report of presenceReports || []) {
     if (!report.venue_id || !report.device_id) continue;
     const members = nearbyMembers.get(report.venue_id) || new Set<string>();
     members.add(report.device_id);
     nearbyMembers.set(report.venue_id, members);
+    if (
+      report.created_at &&
+      (!nearbyUpdatedAt.get(report.venue_id) ||
+        report.created_at > nearbyUpdatedAt.get(report.venue_id)!)
+    ) {
+      nearbyUpdatedAt.set(report.venue_id, report.created_at);
+    }
   }
   const likedVenueIds = new Set((likes || []).map((like) => like.venue_id).filter(Boolean));
   const likedTags = new Set(
@@ -974,6 +1123,7 @@ export async function GET(request: Request) {
         clock,
         referenceTime,
         nearbyMembers.get(venue.id)?.size || 0,
+        nearbyUpdatedAt.get(venue.id) || null,
         memberBoost(venue)
       )
     )

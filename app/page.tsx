@@ -72,6 +72,16 @@ type DiscoveryVenue = {
     detail: string;
     source: "verified_nearby";
   } | null;
+  whyNow: {
+    headline: string;
+    summary: string;
+    freshness: string;
+    reasons: Array<{
+      kind: "crowd" | "event" | "tickets" | "open" | "rating" | "honest";
+      title: string;
+      detail: string;
+    }>;
+  };
   event: DiscoveryEvent | null;
 };
 
@@ -290,6 +300,14 @@ function VenueDetail({
   distance: string | null;
   onToggleLike: (venue: DiscoveryVenue) => void;
 }) {
+  const reasonIcon = (kind: DiscoveryVenue["whyNow"]["reasons"][number]["kind"]) => {
+    if (kind === "crowd") return <Flame size={15} fill="currentColor" />;
+    if (kind === "event") return <Clock3 size={15} />;
+    if (kind === "tickets") return <Ticket size={15} />;
+    if (kind === "rating") return <Star size={15} fill="currentColor" />;
+    return <Check size={15} />;
+  };
+
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-[#f7f5ef]">
       <div className="flex h-[72px] shrink-0 items-center justify-between border-b border-black/[0.07] px-5 sm:px-6">
@@ -303,7 +321,7 @@ function VenueDetail({
         </button>
         <div className="flex items-center gap-2">
           <span className="rounded-full bg-[#ece9e1] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-black/52">
-            {venue.heat?.label || venue.confidence}
+            {venue.heat?.label || venue.label}
           </span>
           <button
             type="button"
@@ -331,21 +349,8 @@ function VenueDetail({
           <h2 className="mt-3 text-[36px] font-semibold leading-[0.98] tracking-[-0.055em] text-[#171716]">
             {venue.name}
           </h2>
-          <p className="mt-3 text-[15px] leading-6 text-black/58">{venue.reason}</p>
 
-          {venue.heat && (
-            <div className="mt-5 flex items-start gap-3 rounded-[1.35rem] border border-[#ffb39f] bg-[#fff0e9] p-4">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#ff5c35] text-white">
-                <Flame size={15} fill="currentColor" />
-              </span>
-              <div>
-                <p className="text-[12px] font-semibold text-[#9f351f]">{venue.heat.label}</p>
-                <p className="mt-1 text-[11px] leading-4 text-black/48">{venue.heat.detail} This is location-verified, not a user vote.</p>
-              </div>
-            </div>
-          )}
-
-          <div className="mt-5 flex flex-wrap items-center gap-2 text-[11px] font-medium text-black/54">
+          <div className="mt-4 flex flex-wrap items-center gap-2 text-[11px] font-medium text-black/54">
             <span className="rounded-full bg-black/[0.055] px-3 py-1.5">{venue.type}</span>
             {venue.rating && (
               <span className="inline-flex items-center gap-1 rounded-full bg-black/[0.055] px-3 py-1.5">
@@ -363,27 +368,45 @@ function VenueDetail({
             )}
           </div>
 
-          {venue.event && (
-            <div className="mt-6 rounded-[1.45rem] border border-black/[0.08] bg-white/76 p-4">
-              <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#171716] text-white">
-                  <Ticket size={16} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-black/38">
-                    On the schedule
-                  </p>
-                  <p className="mt-1.5 text-[15px] font-semibold leading-5 tracking-[-0.02em] text-black/80">
-                    {venue.event.name}
-                  </p>
-                  <p className="mt-1 text-[12px] text-black/46">
-                    {venue.event.timeLabel}
-                    {venue.event.ticketStatus ? ` · ${venue.event.ticketStatus}` : ""}
-                  </p>
-                </div>
+          <section className="mt-6 overflow-hidden rounded-[1.55rem] border border-black/[0.08] bg-white/74 shadow-[0_16px_42px_rgba(31,25,18,0.045)]">
+            <div className="px-4 pb-4 pt-4 sm:px-5 sm:pt-5">
+              <div className="flex items-center gap-2">
+                <span
+                  className={`h-2 w-2 rounded-full ${venue.heat ? "bg-[#ff5c35]" : "bg-[#1bad73]"}`}
+                />
+                <h3 className="text-[10px] font-bold uppercase tracking-[0.17em] text-black/44">
+                  {venue.whyNow.headline}
+                </h3>
               </div>
+              <p className="mt-3 text-[16px] font-medium leading-[1.45] tracking-[-0.02em] text-black/76">
+                {venue.whyNow.summary}
+              </p>
             </div>
-          )}
+
+            <div className="divide-y divide-black/[0.065] border-t border-black/[0.065]">
+              {venue.whyNow.reasons.map((reason) => (
+                <div key={`${reason.kind}:${reason.title}`} className="flex items-start gap-3 px-4 py-3.5 sm:px-5">
+                  <span
+                    className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
+                      reason.kind === "crowd"
+                        ? "bg-[#fff0e9] text-[#db4e2c]"
+                        : "bg-black/[0.05] text-black/52"
+                    }`}
+                  >
+                    {reasonIcon(reason.kind)}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-[12px] font-semibold leading-4 text-black/76">{reason.title}</p>
+                    <p className="mt-0.5 text-[11px] leading-[1.45] text-black/44">{reason.detail}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <p className="border-t border-black/[0.065] px-4 py-3 text-[9px] font-semibold uppercase tracking-[0.14em] text-black/30 sm:px-5">
+              {venue.whyNow.freshness}
+            </p>
+          </section>
 
           <div className="mt-6 space-y-3 border-t border-black/[0.08] pt-5 text-[13px] text-black/58">
             {venue.address && (
