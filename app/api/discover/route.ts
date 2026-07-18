@@ -1,5 +1,7 @@
 import { after, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getRequestUser } from "../../../src/lib/server-auth";
+import { inferInterestTags } from "../../../src/lib/interest-tags";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -548,7 +550,9 @@ function rankVenue(
   events: EventRow[],
   daypart: ReturnType<typeof getDaypart>,
   clock: ReturnType<typeof easternNow>,
-  referenceTime: number
+  referenceTime: number,
+  nearbyCount = 0,
+  personalBoost = 0
 ) {
   const event = bestEventForVenue(events, referenceTime);
   const eventHours = hoursUntil(event?.start_time, referenceTime);
@@ -571,6 +575,7 @@ function rankVenue(
   const photoBoost = venue.photo_source === "google_streetview" ? 7 : 0;
   const freshnessHours = venue.enriched_at ? hoursUntil(venue.enriched_at) : null;
   const freshnessBoost = freshnessHours !== null && freshnessHours >= -24 ? 5 : 0;
+  const presenceBoost = Math.min(22, nearbyCount * 4);
   const score = Math.round(
     baseScore +
       eventBoost +
@@ -578,12 +583,19 @@ function rankVenue(
       openBoost +
       photoBoost +
       freshnessBoost +
+      presenceBoost +
+      personalBoost +
       daypartBoost(venue, daypart.key)
   );
   const kind = venueKind(venue);
   const city = venueCity(venue);
+  const interestTags = inferInterestTags(venue);
   const eventTime = formatEventTime(event?.start_time);
-  const reason = event
+  const reason = nearbyCount >= 4
+    ? "Verified nearby activity is building right now."
+    : nearbyCount >= 2
+      ? "Verified activity is nearby right now."
+    : event
     ? `${event?.name || "An event"} starts at ${eventTime}.`
     : openNow === true && rating >= 4
       ? `Open now and rated ${rating.toFixed(1)} by Google.`
@@ -606,6 +618,8 @@ function rankVenue(
     openNow,
     eventHours,
     event,
+    nearbyCount,
+    interestTags,
     reason,
     timing,
   };
@@ -626,6 +640,7 @@ function searchMatchScore(venue: RankedVenue, search: string) {
     venue.dress_code,
     venue.event?.name,
     venue.event?.venue_name,
+    venue.interestTags.join(" "),
   ].filter(Boolean).join(" "));
   const words = haystack.split(" ");
   const queryTokens = search
@@ -791,6 +806,21 @@ function publicVenue(venue: RankedVenue, index?: number) {
         : index === 0
           ? "Best overall"
           : "Worth a look";
+  const heat = venue.nearbyCount >= 4
+    ? {
+        level: "hot" as const,
+        label: "Hot right now",
+        detail: "Several verified members are nearby.",
+        source: "verified_nearby" as const,
+      }
+    : venue.nearbyCount >= 2
+      ? {
+          level: "active" as const,
+          label: "Activity nearby",
+          detail: "Verified members are nearby.",
+          source: "verified_nearby" as const,
+        }
+      : null;
 
   return {
     id: venue.id,
@@ -816,6 +846,8 @@ function publicVenue(venue: RankedVenue, index?: number) {
     openNow: venue.openNow,
     confidence: venue.event ? "Scheduled" : venue.openNow === true ? "Open now" : "Curated pick",
     score: clamp(venue.score, 0, 100),
+    interestTags: venue.interestTags,
+    heat,
     event: venue.event
       ? {
           id: venue.event.id,
@@ -855,8 +887,15 @@ export async function GET(request: Request) {
   const daypart = getDaypart(clock.hour);
   const eventStart = new Date(referenceTime - 2 * 60 * 60 * 1000).toISOString();
   const eventEnd = new Date(referenceTime + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const presenceStart = new Date(referenceTime - 45 * 60 * 1000).toISOString();
+  const member = await getRequestUser(request);
 
-  const [{ data: venues, error: venuesError }, { data: events, error: eventsError }] = await Promise.all([
+  const [
+    { data: venues, error: venuesError },
+    { data: events, error: eventsError },
+    { data: presenceReports, error: presenceError },
+    { data: likes, error: likesError },
+  ] = await Promise.all([
     supabaseAdmin
       .from("venues")
       .select(
@@ -870,6 +909,20 @@ export async function GET(request: Request) {
       .lte("start_time", eventEnd)
       .order("start_time", { ascending: true })
       .limit(700),
+    supabaseAdmin
+      .from("venue_live_reports")
+      .select("venue_id,device_id,created_at")
+      .eq("report_type", "nearby_presence")
+      .gte("created_at", presenceStart)
+      .limit(1000),
+    member
+      ? supabaseAdmin
+          .from("venue_live_reports")
+          .select("venue_id")
+          .eq("device_id", member.id)
+          .eq("report_type", "member_like")
+          .limit(1000)
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
   if (venuesError || eventsError) {
@@ -880,6 +933,8 @@ export async function GET(request: Request) {
   }
 
   const safeEvents = (events || []) as EventRow[];
+  if (presenceError) console.error("Nearby activity unavailable", presenceError.message);
+  if (likesError) console.error("Member preferences unavailable", likesError.message);
   const eligibleVenues = ((venues || []) as VenueRow[]).filter((venue) => {
       const latitude = Number(venue.lat);
       const longitude = Number(venue.lng);
@@ -892,6 +947,23 @@ export async function GET(request: Request) {
         latitude <= 37.38
       );
     });
+  const nearbyMembers = new Map<string, Set<string>>();
+  for (const report of presenceReports || []) {
+    if (!report.venue_id || !report.device_id) continue;
+    const members = nearbyMembers.get(report.venue_id) || new Set<string>();
+    members.add(report.device_id);
+    nearbyMembers.set(report.venue_id, members);
+  }
+  const likedVenueIds = new Set((likes || []).map((like) => like.venue_id).filter(Boolean));
+  const likedTags = new Set(
+    eligibleVenues
+      .filter((venue) => likedVenueIds.has(venue.id))
+      .flatMap((venue) => inferInterestTags(venue))
+  );
+  const memberBoost = (venue: VenueRow) => {
+    const sharedTags = inferInterestTags(venue).filter((tag) => likedTags.has(tag)).length;
+    return (likedVenueIds.has(venue.id) ? 6 : 0) + Math.min(10, sharedTags * 2);
+  };
   const assignedEvents = assignEventsToVenues(eligibleVenues, safeEvents);
   const ranked = eligibleVenues
     .map((venue) =>
@@ -900,7 +972,9 @@ export async function GET(request: Request) {
         assignedEvents.get(venue.id) || [],
         daypart,
         clock,
-        referenceTime
+        referenceTime,
+        nearbyMembers.get(venue.id)?.size || 0,
+        memberBoost(venue)
       )
     )
     .filter((venue) => city === "All 757" || venue.city === city)

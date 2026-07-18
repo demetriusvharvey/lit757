@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import mapboxgl from "mapbox-gl";
+import type { Provider, Session } from "@supabase/supabase-js";
 import "mapbox-gl/dist/mapbox-gl.css";
 import {
   ArrowLeft,
@@ -10,6 +11,8 @@ import {
   ArrowUpRight,
   Check,
   Clock3,
+  Flame,
+  Heart,
   LocateFixed,
   MapPin,
   Navigation,
@@ -17,8 +20,15 @@ import {
   Sparkles,
   Star,
   Ticket,
+  UserRound,
   X,
 } from "lucide-react";
+import { supabase } from "../src/lib/supabase";
+import AccountPanel, {
+  type AuthProviders,
+  type MemberPreferences,
+  type SavedPlace,
+} from "./account-panel";
 
 type DiscoveryMode = "all" | "food" | "explore" | "events";
 
@@ -55,6 +65,13 @@ type DiscoveryVenue = {
   openNow: boolean | null;
   confidence: string;
   score: number;
+  interestTags: string[];
+  heat: {
+    level: "active" | "hot";
+    label: string;
+    detail: string;
+    source: "verified_nearby";
+  } | null;
   event: DiscoveryEvent | null;
 };
 
@@ -103,6 +120,30 @@ const HAMPTON_ROADS_BOUNDS: [[number, number], [number, number]] = [
   [-76.9, 36.42],
   [-75.7, 37.38],
 ];
+
+const MEMBER_PREFERENCES_KEY = "things-to-do-757:member-preferences";
+
+type UserLocation = { latitude: number; longitude: number; accuracy: number };
+
+function distanceMiles(
+  location: Pick<UserLocation, "latitude" | "longitude">,
+  venue: Pick<DiscoveryVenue, "lat" | "lng">
+) {
+  const radiusMiles = 3958.8;
+  const radians = (value: number) => value * Math.PI / 180;
+  const deltaLat = radians(venue.lat - location.latitude);
+  const deltaLng = radians(venue.lng - location.longitude);
+  const value =
+    Math.sin(deltaLat / 2) ** 2 +
+    Math.cos(radians(location.latitude)) * Math.cos(radians(venue.lat)) * Math.sin(deltaLng / 2) ** 2;
+  return radiusMiles * 2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
+}
+
+function distanceLabel(miles: number) {
+  if (miles < 0.1) return "Here";
+  if (miles < 1) return `${miles.toFixed(1)} mi`;
+  return `${Math.round(miles)} mi`;
+}
 
 function directionsUrl(venue: DiscoveryVenue) {
   const destination = venue.address || `${venue.lat},${venue.lng}`;
@@ -155,10 +196,12 @@ function PickCard({
   venue,
   rank,
   onSelect,
+  distance,
 }: {
   venue: DiscoveryVenue;
   rank: number;
   onSelect: (venue: DiscoveryVenue) => void;
+  distance: string | null;
 }) {
   const primary = rank === 0;
 
@@ -181,8 +224,13 @@ function PickCard({
                 primary ? "text-[#c84427]" : "text-[#ca482b]"
               }`}
             >
-              {String(rank + 1).padStart(2, "0")} · {venue.label}
+              {String(rank + 1).padStart(2, "0")} · {venue.heat?.label || venue.label}
             </span>
+            {venue.heat && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-[#ff5c35] px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.12em] text-white">
+                <Flame size={8} fill="currentColor" /> Live
+              </span>
+            )}
           </span>
           <span className="mt-1.5 block truncate text-[18px] font-semibold leading-none tracking-[-0.04em] sm:text-[19px]">
             {venue.name}
@@ -200,6 +248,12 @@ function PickCard({
           <span className={primary ? "text-black/72" : "text-black/68"}>{venue.timing}</span>
           <span className={primary ? "text-black/18" : "text-black/18"}>·</span>
           <span className={primary ? "text-black/42" : "text-black/42"}>{venue.city}</span>
+          {distance && (
+            <>
+              <span className="text-black/18">·</span>
+              <span className="text-black/42">{distance}</span>
+            </>
+          )}
           <ArrowRight
             size={13}
             className={`ml-auto transition-transform group-hover:translate-x-0.5 ${
@@ -217,9 +271,15 @@ function PickCard({
 function VenueDetail({
   venue,
   onClose,
+  liked,
+  distance,
+  onToggleLike,
 }: {
   venue: DiscoveryVenue;
   onClose: () => void;
+  liked: boolean;
+  distance: string | null;
+  onToggleLike: (venue: DiscoveryVenue) => void;
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-[#f7f5ef]">
@@ -232,9 +292,24 @@ function VenueDetail({
           <ArrowLeft size={17} />
           Back to picks
         </button>
-        <span className="rounded-full bg-[#ece9e1] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-black/52">
-          {venue.confidence}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="rounded-full bg-[#ece9e1] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-black/52">
+            {venue.heat?.label || venue.confidence}
+          </span>
+          <button
+            type="button"
+            onClick={() => onToggleLike(venue)}
+            aria-label={liked ? `Remove ${venue.name} from saved places` : `Save ${venue.name}`}
+            aria-pressed={liked}
+            className={`flex h-10 w-10 items-center justify-center rounded-full border transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ff5c35] ${
+              liked
+                ? "border-[#ffad98] bg-[#fff0e9] text-[#dc4c2b]"
+                : "border-black/[0.09] bg-white/72 text-black/42 hover:border-black/20 hover:text-black/70"
+            }`}
+          >
+            <Heart size={16} fill={liked ? "currentColor" : "none"} />
+          </button>
+        </div>
       </div>
 
       <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
@@ -249,6 +324,18 @@ function VenueDetail({
           </h2>
           <p className="mt-3 text-[15px] leading-6 text-black/58">{venue.reason}</p>
 
+          {venue.heat && (
+            <div className="mt-5 flex items-start gap-3 rounded-[1.35rem] border border-[#ffb39f] bg-[#fff0e9] p-4">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#ff5c35] text-white">
+                <Flame size={15} fill="currentColor" />
+              </span>
+              <div>
+                <p className="text-[12px] font-semibold text-[#9f351f]">{venue.heat.label}</p>
+                <p className="mt-1 text-[11px] leading-4 text-black/48">{venue.heat.detail} This is location-verified, not a user vote.</p>
+              </div>
+            </div>
+          )}
+
           <div className="mt-5 flex flex-wrap items-center gap-2 text-[11px] font-medium text-black/54">
             <span className="rounded-full bg-black/[0.055] px-3 py-1.5">{venue.type}</span>
             {venue.rating && (
@@ -261,6 +348,9 @@ function VenueDetail({
             )}
             {venue.cover && venue.cover !== "Unknown" && (
               <span className="rounded-full bg-black/[0.055] px-3 py-1.5">{venue.cover}</span>
+            )}
+            {distance && (
+              <span className="rounded-full bg-black/[0.055] px-3 py-1.5">{distance} away</span>
             )}
           </div>
 
@@ -374,17 +464,73 @@ export default function Home() {
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const userMarkerRef = useRef<mapboxgl.Marker | null>(null);
   const venuesRef = useRef<DiscoveryVenue[]>([]);
+  const lastPresenceReportRef = useRef<{ key: string; at: number } | null>(null);
   const [data, setData] = useState<DiscoveryResponse | null>(null);
   const [mode, setMode] = useState<DiscoveryMode>("all");
   const [city, setCity] = useState("All 757");
   const [query, setQuery] = useState("");
   const [appliedQuery, setAppliedQuery] = useState("");
   const [selected, setSelected] = useState<DiscoveryVenue | null>(null);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [session, setSession] = useState<Session | null>(null);
+  const [providers, setProviders] = useState<AuthProviders>({ google: false, apple: false, email: true });
+  const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
+  const [savedPlaces, setSavedPlaces] = useState<SavedPlace[]>([]);
+  const [preferences, setPreferences] = useState<MemberPreferences>(() => {
+    if (typeof window === "undefined") return { alerts: false, presence: false };
+    try {
+      const stored = window.localStorage.getItem(MEMBER_PREFERENCES_KEY);
+      return stored
+        ? { alerts: false, presence: false, ...JSON.parse(stored) }
+        : { alerts: false, presence: false };
+    } catch {
+      return { alerts: false, presence: false };
+    }
+  });
+  const [memberMessage, setMemberMessage] = useState("");
+  const [userLocation, setUserLocation] = useState<UserLocation | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [mapReady, setMapReady] = useState(false);
   const [mapUnavailable] = useState(() => !process.env.NEXT_PUBLIC_MAPBOX_TOKEN);
+
+  useEffect(() => {
+    void fetch("/api/auth/providers", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((payload) => setProviders(payload as AuthProviders))
+      .catch(() => undefined);
+
+    void supabase.auth.getSession().then(({ data: authData }) => setSession(authData.session));
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      setMemberMessage("");
+    });
+
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  const loadLikes = useCallback(async (activeSession: Session | null) => {
+    if (!activeSession) {
+      setLikedIds(new Set());
+      setSavedPlaces([]);
+      return;
+    }
+
+    const response = await fetch("/api/me/likes", {
+      cache: "no-store",
+      headers: { Authorization: `Bearer ${activeSession.access_token}` },
+    });
+    if (!response.ok) return;
+    const payload = await response.json() as { venueIds: string[]; venues: SavedPlace[] };
+    setLikedIds(new Set(payload.venueIds || []));
+    setSavedPlaces(payload.venues || []);
+  }, []);
+
+  useEffect(() => {
+    const task = window.setTimeout(() => void loadLikes(session), 0);
+    return () => window.clearTimeout(task);
+  }, [session, loadLikes]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setAppliedQuery(query.trim()), 350);
@@ -400,6 +546,9 @@ export default function Home() {
       if (appliedQuery) params.set("q", appliedQuery);
       const response = await fetch(`/api/discover?${params.toString()}`, {
         cache: "no-store",
+        headers: session?.access_token
+          ? { Authorization: `Bearer ${session.access_token}` }
+          : undefined,
       });
       const payload = (await response.json()) as DiscoveryResponse & { error?: string };
       if (!response.ok || !payload.success) {
@@ -419,7 +568,7 @@ export default function Home() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [mode, city, appliedQuery]);
+  }, [mode, city, appliedQuery, session]);
 
   useEffect(() => {
     const task = window.setTimeout(() => void loadDiscovery(), 0);
@@ -438,6 +587,123 @@ export default function Home() {
       document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, [loadDiscovery]);
+
+  const persistPreferences = useCallback((next: MemberPreferences) => {
+    setPreferences(next);
+    try {
+      window.localStorage.setItem(MEMBER_PREFERENCES_KEY, JSON.stringify(next));
+    } catch {
+      // Keep the in-memory preference when storage is unavailable.
+    }
+  }, []);
+
+  const reportNearbyPresence = useCallback(async (location: UserLocation) => {
+    setUserLocation(location);
+    if (!preferences.presence || !session?.access_token) return;
+    if (
+      location.longitude < HAMPTON_ROADS_BOUNDS[0][0] ||
+      location.longitude > HAMPTON_ROADS_BOUNDS[1][0] ||
+      location.latitude < HAMPTON_ROADS_BOUNDS[0][1] ||
+      location.latitude > HAMPTON_ROADS_BOUNDS[1][1]
+    ) return;
+
+    const reportKey = `${location.latitude.toFixed(3)}:${location.longitude.toFixed(3)}`;
+    const previous = lastPresenceReportRef.current;
+    if (previous?.key === reportKey && Date.now() - previous.at < 5 * 60 * 1000) return;
+    lastPresenceReportRef.current = { key: reportKey, at: Date.now() };
+
+    const response = await fetch("/api/presence", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        latitude: location.latitude,
+        longitude: location.longitude,
+        accuracy: location.accuracy,
+      }),
+    });
+
+    if (response.ok) {
+      const payload = await response.json() as { venueName?: string };
+      setMemberMessage(`Nearby activity verified for ${payload.venueName || "this place"}.`);
+      void loadDiscovery(true);
+    }
+  }, [loadDiscovery, preferences.presence, session]);
+
+  useEffect(() => {
+    if (!preferences.presence || !session || !navigator.geolocation) return;
+
+    const watchId = navigator.geolocation.watchPosition(
+      ({ coords }) => {
+        void reportNearbyPresence({
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+          accuracy: coords.accuracy,
+        });
+      },
+      (locationError) => {
+        if (locationError.code === locationError.PERMISSION_DENIED) {
+          persistPreferences({ ...preferences, presence: false });
+          setMemberMessage("Location permission is off. Nearby verification was disabled.");
+        }
+      },
+      { enableHighAccuracy: false, maximumAge: 120_000, timeout: 15_000 }
+    );
+
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [preferences, persistPreferences, reportNearbyPresence, session]);
+
+  useEffect(() => {
+    if (
+      !preferences.alerts ||
+      !session ||
+      !data?.venues.length ||
+      typeof Notification === "undefined" ||
+      Notification.permission !== "granted" ||
+      !("serviceWorker" in navigator)
+    ) return;
+
+    const now = Date.now();
+    const candidate = data.venues.find((venue) => {
+      if (!likedIds.has(venue.id)) return false;
+      if (venue.heat) return true;
+      if (!venue.event?.startTime) return false;
+      const startsIn = new Date(venue.event.startTime).getTime() - now;
+      return startsIn >= 0 && startsIn <= 3 * 60 * 60 * 1000;
+    });
+    if (!candidate) return;
+
+    const alertKey = `${candidate.id}:${candidate.heat?.level || candidate.event?.id || "update"}`;
+    const storageKey = "things-to-do-757:last-alert";
+    let previous = "";
+    try {
+      previous = window.localStorage.getItem(storageKey) || "";
+    } catch {
+      // A duplicate alert is still prevented by the service worker tag.
+    }
+    if (previous === alertKey) return;
+
+    void navigator.serviceWorker.ready.then((registration) =>
+      registration.showNotification(
+        candidate.heat ? "A saved place is moving" : "A saved event is coming up",
+        {
+          body: candidate.heat
+            ? `${candidate.name} has verified nearby activity right now.`
+            : `${candidate.name}: ${candidate.event?.name || "Your saved event"} starts soon.`,
+          tag: alertKey,
+          data: { url: `/?venue=${encodeURIComponent(candidate.id)}` },
+          icon: "/favicon.ico",
+        }
+      )
+    );
+    try {
+      window.localStorage.setItem(storageKey, alertKey);
+    } catch {
+      // The service worker tag remains the fallback de-duplication mechanism.
+    }
+  }, [data?.venues, likedIds, preferences.alerts, session]);
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
@@ -477,9 +743,23 @@ export default function Home() {
         source: "discovery-venues",
         filter: ["==", ["get", "isPick"], false],
         paint: {
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], 9.5, 2.6, 13, 5.2],
-          "circle-color": "#d7d4cc",
-          "circle-opacity": ["interpolate", ["linear"], ["zoom"], 9.5, 0.2, 12, 0.5],
+          "circle-radius": [
+            "interpolate", ["linear"], ["zoom"],
+            9.5, ["match", ["get", "heatLevel"], "hot", 7, "active", 5.5, 2.6],
+            13, ["match", ["get", "heatLevel"], "hot", 11, "active", 8.5, 5.2],
+          ],
+          "circle-color": [
+            "match", ["get", "heatLevel"],
+            "hot", "#ff5c35",
+            "active", "#ff9a58",
+            "#d7d4cc",
+          ],
+          "circle-opacity": [
+            "match", ["get", "heatLevel"],
+            "hot", 0.94,
+            "active", 0.76,
+            0.34,
+          ],
           "circle-stroke-width": 1,
           "circle-stroke-color": "rgba(255,255,255,0.26)",
         },
@@ -491,7 +771,12 @@ export default function Home() {
         filter: ["==", ["get", "isPick"], true],
         paint: {
           "circle-radius": ["interpolate", ["linear"], ["zoom"], 9.5, 16, 13, 21],
-          "circle-color": "rgba(255,92,53,0.34)",
+          "circle-color": [
+            "match", ["get", "heatLevel"],
+            "hot", "rgba(255,92,53,0.58)",
+            "active", "rgba(255,122,80,0.44)",
+            "rgba(255,92,53,0.34)",
+          ],
           "circle-blur": 0.35,
         },
       });
@@ -515,7 +800,7 @@ export default function Home() {
         layout: {
           "text-field": ["get", "pickLabel"],
           "text-size": 11,
-          "text-font": ["DIN Offc Pro Bold", "Arial Unicode MS Bold"],
+          "text-font": ["Open Sans Semibold", "Arial Unicode MS Bold"],
           "text-allow-overlap": true,
         },
         paint: { "text-color": "#ffffff" },
@@ -577,6 +862,7 @@ export default function Home() {
             isPick: pickIndex !== undefined,
             pickLabel: pickIndex !== undefined ? String(pickIndex + 1) : "",
             selected: selected?.id === venue.id,
+            heatLevel: venue.heat?.level || "none",
           },
         };
       }),
@@ -603,6 +889,130 @@ export default function Home() {
     window.history.replaceState({}, "", `${url.pathname}${url.search}`);
   }
 
+  function openAccount() {
+    setSelected(null);
+    setAccountOpen(true);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("venue");
+    window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+  }
+
+  async function signInWithProvider(provider: "google" | "apple") {
+    setMemberMessage("");
+    const { error: authError } = await supabase.auth.signInWithOAuth({
+      provider: provider as Provider,
+      options: { redirectTo: window.location.origin },
+    });
+    if (authError) setMemberMessage(authError.message);
+  }
+
+  async function signInWithEmail(email: string) {
+    setMemberMessage("");
+    const { error: authError } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: window.location.origin },
+    });
+    setMemberMessage(
+      authError ? authError.message : "Check your email. Your private sign-in link is on the way."
+    );
+  }
+
+  async function signOut() {
+    await supabase.auth.signOut();
+    setMemberMessage("");
+    setAccountOpen(false);
+  }
+
+  async function changeAlerts(enabled: boolean) {
+    if (!enabled) {
+      persistPreferences({ ...preferences, alerts: false });
+      setMemberMessage("Saved-place alerts are off.");
+      return;
+    }
+
+    if (typeof Notification === "undefined" || !("serviceWorker" in navigator)) {
+      setMemberMessage("This browser does not support alerts.");
+      return;
+    }
+
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") {
+      setMemberMessage("Notifications were not allowed, so alerts remain off.");
+      return;
+    }
+
+    await navigator.serviceWorker.register("/sw.js");
+    persistPreferences({ ...preferences, alerts: true });
+    setMemberMessage("Alerts are on for saved places and saved events.");
+  }
+
+  async function changePresence(enabled: boolean) {
+    if (!enabled) {
+      persistPreferences({ ...preferences, presence: false });
+      setMemberMessage("Nearby verification is off.");
+      return;
+    }
+    if (!navigator.geolocation) {
+      setMemberMessage("This browser cannot verify nearby activity.");
+      return;
+    }
+
+    persistPreferences({ ...preferences, presence: true });
+    setMemberMessage("Nearby verification is on while the app is open.");
+  }
+
+  async function toggleLike(venue: DiscoveryVenue) {
+    if (!session) {
+      setMemberMessage("Sign in to save this place and shape your recommendations.");
+      openAccount();
+      return;
+    }
+
+    const wasLiked = likedIds.has(venue.id);
+    setLikedIds((current) => {
+      const next = new Set(current);
+      if (wasLiked) next.delete(venue.id);
+      else next.add(venue.id);
+      return next;
+    });
+
+    const response = await fetch("/api/me/likes", {
+      method: wasLiked ? "DELETE" : "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ venueId: venue.id }),
+    });
+
+    if (!response.ok) {
+      setLikedIds((current) => {
+        const next = new Set(current);
+        if (wasLiked) next.add(venue.id);
+        else next.delete(venue.id);
+        return next;
+      });
+      const payload = await response.json().catch(() => null);
+      setMemberMessage(payload?.error || "That place could not be saved yet.");
+      return;
+    }
+
+    await loadLikes(session);
+    void loadDiscovery(true);
+  }
+
+  function selectSavedPlace(place: SavedPlace) {
+    const visible = data?.venues.find((venue) => venue.id === place.id);
+    setAccountOpen(false);
+    if (visible) {
+      setSelected(visible);
+      return;
+    }
+    setMode("all");
+    setQuery(place.name);
+    setAppliedQuery(place.name);
+  }
+
   function chooseForMe() {
     const pick = data?.picks[0];
     if (pick) setSelected(pick);
@@ -624,6 +1034,13 @@ export default function Home() {
       ) return;
 
       const point: [number, number] = [coords.longitude, coords.latitude];
+      const location = {
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+        accuracy: coords.accuracy,
+      };
+      setUserLocation(location);
+      void reportNearbyPresence(location);
       userMarkerRef.current?.remove();
       const marker = document.createElement("div");
       marker.className = "discovery-user-marker";
@@ -631,6 +1048,9 @@ export default function Home() {
       mapRef.current!.flyTo({ center: point, zoom: 13.2, duration: 750 });
     });
   }
+
+  const venueDistance = (venue: DiscoveryVenue) =>
+    userLocation ? distanceLabel(distanceMiles(userLocation, venue)) : null;
 
   const eyebrow = appliedQuery
     ? `Ideas for “${appliedQuery}”`
@@ -643,32 +1063,69 @@ export default function Home() {
     <main className="min-h-dvh bg-[#f7f5ef] text-[#171716] lg:h-dvh lg:overflow-hidden">
       <div className="grid min-h-dvh lg:h-dvh lg:grid-cols-[minmax(390px,460px)_1fr]">
         <section className="relative z-10 flex min-h-dvh min-w-0 flex-col border-black/[0.08] bg-[#f7f5ef] lg:h-dvh lg:min-h-0 lg:border-r">
-          {selected ? (
-            <VenueDetail venue={selected} onClose={closeDetail} />
+          {accountOpen ? (
+            <AccountPanel
+              session={session}
+              providers={providers}
+              savedPlaces={savedPlaces}
+              preferences={preferences}
+              message={memberMessage}
+              onClose={() => setAccountOpen(false)}
+              onOAuth={signInWithProvider}
+              onEmailSignIn={signInWithEmail}
+              onSignOut={signOut}
+              onSelectSaved={selectSavedPlace}
+              onAlertsChange={changeAlerts}
+              onPresenceChange={changePresence}
+            />
+          ) : selected ? (
+            <VenueDetail
+              venue={selected}
+              onClose={closeDetail}
+              liked={likedIds.has(selected.id)}
+              distance={venueDistance(selected)}
+              onToggleLike={(venue) => void toggleLike(venue)}
+            />
           ) : (
             <>
-              <header className="flex h-[72px] shrink-0 items-center justify-between border-b border-black/[0.07] px-5 sm:px-6">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-[12px] bg-[#171716] shadow-sm">
+              <header className="flex h-[72px] shrink-0 items-center justify-between border-b border-black/[0.07] px-4 sm:px-6">
+                <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[11px] bg-[#171716] shadow-sm sm:h-9 sm:w-9 sm:rounded-[12px]">
                     <span className="h-2.5 w-2.5 rounded-full bg-[#ff5c35]" />
                   </div>
-                  <div>
-                    <p className="text-[15px] font-semibold leading-none tracking-[-0.035em]">Things To Do 757</p>
+                  <div className="min-w-0">
+                    <p className="truncate text-[14px] font-semibold leading-none tracking-[-0.035em] sm:text-[15px]">Things To Do 757</p>
                     <p className="mt-1 text-[9px] font-bold uppercase tracking-[0.17em] text-black/35">Any time · All 757</p>
                   </div>
                 </div>
 
-                <label className="relative">
-                  <span className="sr-only">Choose city</span>
-                  <select
-                    value={city}
-                    onChange={(event) => setCity(event.target.value)}
-                    className="h-10 appearance-none rounded-full border border-black/[0.09] bg-white/66 pl-4 pr-9 text-[12px] font-semibold text-black/68 outline-none transition hover:border-black/20 focus:ring-2 focus:ring-[#ff5c35]"
+                <div className="flex items-center gap-2">
+                  <label className="relative">
+                    <span className="sr-only">Choose city</span>
+                    <select
+                      value={city}
+                      onChange={(event) => setCity(event.target.value)}
+                      className="h-10 max-w-[92px] appearance-none rounded-full border border-black/[0.09] bg-white/66 pl-3 pr-7 text-[11px] font-semibold text-black/68 outline-none transition hover:border-black/20 focus:ring-2 focus:ring-[#ff5c35] sm:max-w-[112px] sm:pl-4 sm:pr-8 sm:text-[12px]"
+                    >
+                      {CITIES.map((item) => <option key={item}>{item}</option>)}
+                    </select>
+                    <MapPin size={13} className="pointer-events-none absolute right-3 top-3.5 text-black/34" />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={openAccount}
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-black/[0.09] bg-white/66 text-black/54 transition hover:border-black/20 hover:text-black/74 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ff5c35]"
+                    aria-label={session ? "Open my saved places and alerts" : "Sign in"}
                   >
-                    {CITIES.map((item) => <option key={item}>{item}</option>)}
-                  </select>
-                  <MapPin size={13} className="pointer-events-none absolute right-3.5 top-3.5 text-black/34" />
-                </label>
+                    {session ? (
+                      <span className="text-[12px] font-bold uppercase">
+                        {(session.user.user_metadata?.full_name || session.user.email || "Y").slice(0, 1)}
+                      </span>
+                    ) : (
+                      <UserRound size={16} />
+                    )}
+                  </button>
+                </div>
               </header>
 
               <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-5 pb-8 pt-4 sm:px-6 lg:pb-5">
@@ -760,7 +1217,13 @@ export default function Home() {
                   ) : data?.picks.length ? (
                     <div className="space-y-2.5">
                       {data.picks.map((venue, index) => (
-                        <PickCard key={venue.id} venue={venue} rank={index} onSelect={setSelected} />
+                        <PickCard
+                          key={venue.id}
+                          venue={venue}
+                          rank={index}
+                          onSelect={setSelected}
+                          distance={venueDistance(venue)}
+                        />
                       ))}
                     </div>
                   ) : (

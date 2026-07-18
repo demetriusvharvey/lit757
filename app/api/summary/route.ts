@@ -50,6 +50,7 @@ export async function GET() {
   const { data: votesData, error: votesError } = await supabase
     .from("votes")
     .select("venue_id,vibe,created_at")
+    .in("vibe", ["lit", "decent", "dead", "line_crazy"])
     .gte("created_at", since);
 
   if (votesError) {
