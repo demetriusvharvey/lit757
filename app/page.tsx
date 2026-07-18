@@ -669,31 +669,31 @@ export default function Home() {
                 </label>
               </header>
 
-              <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-5 pb-8 pt-5 sm:px-6 lg:pb-5">
+              <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-5 pb-8 pt-4 sm:px-6 lg:pb-5">
                 <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.17em] text-black/42">
                   <span className="relative flex h-2 w-2">
                     <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-30" />
                     <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
                   </span>
-                  <span>{eyebrow || "Finding the best moves in Hampton Roads"}</span>
+                  <span>{eyebrow || "Your time in the 757"}</span>
                   {refreshing && <span className="text-black/24">· Refreshing</span>}
                 </div>
 
-                <h1 className="mt-3 max-w-[390px] text-[37px] font-semibold leading-[0.96] tracking-[-0.058em] sm:text-[41px]">
-                  {data?.context.headline || "Find something worth doing now."}
+                <h1 className="mt-2 max-w-[390px] text-[32px] font-semibold leading-none tracking-[-0.052em] sm:text-[34px]">
+                  {data?.context.headline || "Find your thing."}
                 </h1>
-                <p className="mt-2 max-w-[390px] text-[12px] leading-5 text-black/48">
-                  {data?.context.description || "Open now, happening soon, and worth going to."}
+                <p className="mt-1.5 max-w-[390px] text-[12px] leading-5 text-black/48">
+                  {data?.context.description || "Search, explore, or let us choose."}
                 </p>
 
-                <form onSubmit={submitSearch} className="mt-4 grid grid-cols-[1fr_auto] gap-2">
+                <form onSubmit={submitSearch} className="mt-3 grid grid-cols-[1fr_auto] gap-2">
                   <label className="relative block min-w-0">
                     <span className="sr-only">Search things to do</span>
                     <Search size={15} className="pointer-events-none absolute left-4 top-[15px] text-black/34" />
                     <input
                       value={query}
                       onChange={(event) => setQuery(event.target.value)}
-                      placeholder="Search anything"
+                      placeholder="Search places or plans"
                       className="h-12 w-full rounded-full border border-black/[0.09] bg-white/72 pl-10 pr-10 text-[13px] text-black outline-none placeholder:text-black/32 transition focus:border-black/20 focus:ring-2 focus:ring-[#ff5c35]"
                     />
                     {query && (
@@ -718,7 +718,7 @@ export default function Home() {
                   </button>
                 </form>
 
-                <div className="mt-2.5 grid grid-cols-4 gap-1" role="tablist" aria-label="Discovery categories">
+                <div className="mt-2 grid grid-cols-4 gap-1" role="tablist" aria-label="Discovery categories">
                   {MODES.map((item) => (
                     <button
                       key={item.id}
@@ -737,7 +737,7 @@ export default function Home() {
                   ))}
                 </div>
 
-                <div className="mt-4">
+                <div className="mt-3">
                   {loading && !data ? (
                     <LoadingPicks />
                   ) : error && !data ? (
@@ -790,14 +790,14 @@ export default function Home() {
               <div>
                 <MapPin size={26} className="mx-auto text-[#ff7a59]" />
                 <p className="mt-3 text-[15px] font-semibold">The 757 map is unavailable.</p>
-                <p className="mt-1 text-[12px] text-white/45">Your three recommendations still work.</p>
+                <p className="mt-1 text-[12px] text-white/45">Your recommendations still work.</p>
               </div>
             </div>
           )}
 
           <div className="pointer-events-none absolute left-4 top-4 z-10 flex items-center gap-2 rounded-full border border-white/10 bg-black/72 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-white/62 shadow-sm backdrop-blur-xl sm:left-5 sm:top-5">
             <span className="h-1.5 w-1.5 rounded-full bg-[#ff5c35]" />
-            757 map · Picks 1–3
+            757 map · Right now
           </div>
 
           <button

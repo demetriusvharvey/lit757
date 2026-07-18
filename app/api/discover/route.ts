@@ -204,37 +204,37 @@ function getDaypart(hour = easternNow().hour) {
   if (hour >= 5 && hour < 11) {
     return {
       key: "morning",
-      eyebrow: "This morning in Hampton Roads",
-      headline: "Three good things to do this morning.",
+      eyebrow: "Your morning in the 757",
+      headline: "Find your thing.",
       timing: "This morning",
-      description: "Coffee, activities, food, and what is worth doing next.",
+      description: "Search, explore, or let us choose.",
     } as const;
   }
   if (hour >= 11 && hour < 16) {
     return {
       key: "afternoon",
-      eyebrow: "This afternoon in Hampton Roads",
-      headline: "Three good things to do right now.",
+      eyebrow: "Your afternoon in the 757",
+      headline: "Find your thing.",
       timing: "This afternoon",
-      description: "Open now, happening soon, and worth leaving the house for.",
+      description: "Search, explore, or let us choose.",
     } as const;
   }
   if (hour >= 16 && hour < 22) {
     return {
       key: "evening",
-      eyebrow: "This evening in Hampton Roads",
-      headline: "Three good things to do this evening.",
+      eyebrow: "Your evening in the 757",
+      headline: "Find your thing.",
       timing: "This evening",
-      description: "Dinner, experiences, and events that fit the hours ahead.",
+      description: "Search, explore, or let us choose.",
     } as const;
   }
 
   return {
     key: "late",
-    eyebrow: "Late night in Hampton Roads",
-    headline: "Three good things still open tonight.",
+    eyebrow: "Your late night in the 757",
+    headline: "Find your thing.",
     timing: "Late tonight",
-    description: "Open late, starting soon, and still worth going to.",
+    description: "Search, explore, or let us choose.",
   } as const;
 }
 
@@ -663,20 +663,12 @@ export async function GET(request: Request) {
       }
     });
   }
-  const resultHeadline =
-    picks.length === 1
-      ? "One good thing to do right now."
-      : picks.length === 2
-        ? "Two good things to do right now."
-        : daypart.headline;
-
   return NextResponse.json(
     {
       success: true,
       generatedAt: new Date().toISOString(),
       context: {
         ...daypart,
-        headline: resultHeadline,
         city,
         mode,
         resultCount: ranked.length,
