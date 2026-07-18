@@ -35,6 +35,7 @@ type VenueRow = {
   website?: string | null;
   hours?: GoogleHours | null;
   enriched_at?: string | null;
+  ai_summary?: string | null;
 };
 
 type EventRow = {
@@ -92,6 +93,211 @@ const GENERIC_MATCH_TOKENS = new Set([
   "venue",
 ]);
 
+const SEARCH_STOP_WORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "any",
+  "around",
+  "at",
+  "do",
+  "doing",
+  "find",
+  "for",
+  "go",
+  "going",
+  "in",
+  "kind",
+  "me",
+  "my",
+  "near",
+  "nearby",
+  "of",
+  "place",
+  "places",
+  "plan",
+  "plans",
+  "some",
+  "something",
+  "the",
+  "thing",
+  "things",
+  "this",
+  "to",
+  "today",
+  "tonight",
+  "type",
+  "want",
+  "with",
+]);
+
+type SearchTheme = {
+  signals: string[];
+  terms: string[];
+  requiredTerms?: string[];
+  kinds: Array<RankedVenue["kind"]>;
+  strictKinds?: boolean;
+};
+
+const SEARCH_THEMES: SearchTheme[] = [
+  {
+    signals: ["date night", "romantic", "romance", "couple", "couples"],
+    terms: ["restaurant", "dining", "wine", "winery", "rooftop", "museum", "arts", "comedy", "theater", "theatre"],
+    kinds: ["food", "activity", "events"],
+  },
+  {
+    signals: ["family", "families", "kid", "kids", "children", "child friendly", "all ages"],
+    terms: ["family", "children", "aquarium", "zoo", "museum", "park", "arcade", "waterpark", "all ages"],
+    kinds: ["activity"],
+  },
+  {
+    signals: ["hike", "hiking", "trail", "trails", "nature walk"],
+    terms: ["hike", "hiking", "trail", "nature", "park", "wildlife", "refuge", "preserve", "garden", "arboretum", "botanical"],
+    requiredTerms: ["hike", "hiking", "trail", "nature", "wildlife", "refuge", "preserve", "arboretum", "botanical", "botanical garden", "state park"],
+    kinds: ["activity"],
+    strictKinds: true,
+  },
+  {
+    signals: ["beach", "beaches", "surf", "ocean", "waterfront"],
+    terms: ["beach", "boardwalk", "surf", "ocean", "waterfront"],
+    kinds: ["activity"],
+  },
+  {
+    signals: ["outdoor", "outdoors", "outside", "nature"],
+    terms: ["outdoor", "nature", "park", "trail", "beach", "garden", "boardwalk", "surf", "farm", "wildlife", "refuge"],
+    kinds: ["activity"],
+  },
+  {
+    signals: ["active", "adventure", "fitness", "sport", "sports", "game", "games"],
+    terms: ["sports", "arcade", "surf", "bowling", "golf", "recreation", "waterpark", "adventure", "game"],
+    kinds: ["activity", "events"],
+  },
+  {
+    signals: ["art", "arts", "culture", "cultural", "history", "historic", "museum", "painting"],
+    terms: ["art", "arts", "gallery", "museum", "historic", "cultural", "theater", "theatre", "opera", "paint"],
+    kinds: ["activity", "events"],
+  },
+  {
+    signals: ["music", "concert", "concerts", "band", "bands", "live music"],
+    terms: ["live music", "music", "concert", "band", "dj", "theater", "theatre", "amphitheater", "pavilion"],
+    kinds: ["events", "nightlife"],
+  },
+  {
+    signals: ["comedy", "comedian", "laugh", "laughs", "improv"],
+    terms: ["comedy", "comedian", "improv"],
+    kinds: ["activity", "events"],
+  },
+  {
+    signals: ["food", "eat", "eating", "dinner", "lunch", "brunch", "breakfast"],
+    terms: ["restaurant", "food", "dining", "kitchen", "brunch", "breakfast"],
+    kinds: ["food"],
+  },
+  {
+    signals: ["coffee", "cafe", "bakery", "dessert"],
+    terms: ["coffee", "cafe", "bakery", "dessert", "creamery"],
+    kinds: ["food"],
+  },
+  {
+    signals: ["drink", "drinks", "cocktail", "cocktails", "beer", "brewery", "wine"],
+    terms: ["bar", "cocktail", "brewery", "wine", "winery", "tap", "rooftop"],
+    kinds: ["food", "nightlife"],
+  },
+  {
+    signals: ["dance", "dancing", "club", "clubs", "nightlife", "late night"],
+    terms: ["dance", "club", "nightlife", "dj", "lounge"],
+    kinds: ["nightlife", "events"],
+  },
+  {
+    signals: ["shop", "shopping", "mall"],
+    terms: ["shopping", "mall", "district"],
+    kinds: ["activity"],
+  },
+  {
+    signals: ["market", "markets", "farmers market", "flea market"],
+    terms: ["market", "farmers market", "flea market", "farm"],
+    kinds: ["activity"],
+  },
+  {
+    signals: ["free", "cheap", "budget", "no cover"],
+    terms: ["free", "no cover", "park", "beach", "market"],
+    kinds: ["activity"],
+  },
+  {
+    signals: ["fun", "entertainment", "experience", "experiences"],
+    terms: ["entertainment", "experience", "arcade", "museum", "park", "comedy", "theater", "theatre"],
+    kinds: ["activity", "events"],
+  },
+  {
+    signals: ["book", "books", "reading", "read", "bookstore", "library"],
+    terms: ["book", "bookstore", "library", "reading"],
+    kinds: ["activity", "events"],
+  },
+  {
+    signals: ["wellness", "relax", "relaxing", "spa", "massage", "yoga"],
+    terms: ["wellness", "spa", "massage", "yoga", "meditation"],
+    kinds: ["activity"],
+  },
+  {
+    signals: ["karaoke", "trivia", "quiz", "open mic"],
+    terms: ["karaoke", "trivia", "quiz", "open mic"],
+    kinds: ["events", "nightlife", "activity"],
+  },
+  {
+    signals: ["golf", "mini golf", "putt putt"],
+    terms: ["golf", "mini golf", "putt putt"],
+    kinds: ["activity"],
+  },
+  {
+    signals: ["bowling", "bowl"],
+    terms: ["bowling", "bowl"],
+    kinds: ["activity"],
+  },
+  {
+    signals: ["escape room", "escape rooms"],
+    terms: ["escape room", "escape rooms"],
+    requiredTerms: ["escape room", "escape rooms"],
+    kinds: ["activity"],
+    strictKinds: true,
+  },
+  {
+    signals: ["kayak", "kayaking", "paddle", "paddling"],
+    terms: ["kayak", "kayaking", "paddle", "paddling"],
+    requiredTerms: ["kayak", "kayaking", "paddle", "paddling"],
+    kinds: ["activity"],
+    strictKinds: true,
+  },
+  {
+    signals: ["boat", "boating", "fishing"],
+    terms: ["boat", "boating", "fishing", "marina"],
+    kinds: ["activity"],
+  },
+  {
+    signals: ["dog", "dogs", "pet friendly"],
+    terms: ["dog", "dogs", "pet friendly", "park", "outdoor"],
+    kinds: ["activity"],
+  },
+  {
+    signals: ["play", "plays", "musical", "musicals", "theater", "theatre", "stage show"],
+    terms: ["play", "musical", "theater", "theatre", "performing arts", "opera"],
+    kinds: ["events", "activity"],
+  },
+  {
+    signals: ["chill", "laid back", "low key", "quiet", "relaxed"],
+    terms: ["lounge", "cafe", "coffee", "tea", "garden", "museum", "brewery", "wine", "rooftop"],
+    kinds: ["food", "activity", "nightlife"],
+  },
+  {
+    signals: ["rainy", "rainy day", "indoors", "indoor"],
+    terms: ["indoor", "museum", "aquarium", "arcade", "bowling", "theater", "theatre", "comedy", "mall"],
+    kinds: ["activity", "events"],
+  },
+  {
+    signals: ["energetic", "exciting", "high energy", "party"],
+    terms: ["dance", "club", "dj", "arcade", "sports", "concert", "live music"],
+    kinds: ["nightlife", "events", "activity"],
+  },
+];
+
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.max(minimum, Math.min(maximum, value));
 }
@@ -105,6 +311,10 @@ function normalize(value?: string | null) {
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function hasNormalizedPhrase(value: string, phrase: string) {
+  return ` ${value} `.includes(` ${phrase} `);
 }
 
 function canonicalVenueName(value?: string | null) {
@@ -207,7 +417,7 @@ function getDaypart(hour = easternNow().hour) {
       eyebrow: "Your morning in the 757",
       headline: "Find your thing.",
       timing: "This morning",
-      description: "Search, explore, or let us choose.",
+      description: "Type any interest, hobby, or mood. We’ll make the decision.",
     } as const;
   }
   if (hour >= 11 && hour < 16) {
@@ -216,7 +426,7 @@ function getDaypart(hour = easternNow().hour) {
       eyebrow: "Your afternoon in the 757",
       headline: "Find your thing.",
       timing: "This afternoon",
-      description: "Search, explore, or let us choose.",
+      description: "Type any interest, hobby, or mood. We’ll make the decision.",
     } as const;
   }
   if (hour >= 16 && hour < 22) {
@@ -225,7 +435,7 @@ function getDaypart(hour = easternNow().hour) {
       eyebrow: "Your evening in the 757",
       headline: "Find your thing.",
       timing: "This evening",
-      description: "Search, explore, or let us choose.",
+      description: "Type any interest, hobby, or mood. We’ll make the decision.",
     } as const;
   }
 
@@ -234,7 +444,7 @@ function getDaypart(hour = easternNow().hour) {
     eyebrow: "Your late night in the 757",
     headline: "Find your thing.",
     timing: "Late tonight",
-    description: "Search, explore, or let us choose.",
+    description: "Type any interest, hobby, or mood. We’ll make the decision.",
   } as const;
 }
 
@@ -401,12 +611,87 @@ function rankVenue(
   };
 }
 
+function searchMatchScore(venue: RankedVenue, search: string) {
+  if (!search) return 0;
+
+  const haystack = normalize([
+    venue.name,
+    venue.city,
+    venue.type,
+    venue.category,
+    venue.ai_summary,
+    venue.music_genre,
+    venue.age_limit,
+    venue.cover,
+    venue.dress_code,
+    venue.event?.name,
+    venue.event?.venue_name,
+  ].filter(Boolean).join(" "));
+  const words = haystack.split(" ");
+  const queryTokens = search
+    .split(" ")
+    .filter((token) => token.length >= 2 && !SEARCH_STOP_WORDS.has(token));
+  const tokenMatches = queryTokens.filter((token) =>
+    words.some((word) =>
+      word === token ||
+      (token.length >= 5 && word.length >= 5 && word.startsWith(token)) ||
+      (word.length >= 5 && token.length >= 5 && token.startsWith(word))
+    )
+  ).length;
+  const exactPhrase = hasNormalizedPhrase(haystack, search);
+  const activeThemes = SEARCH_THEMES.filter((theme) =>
+    theme.signals.some((signal) => hasNormalizedPhrase(search, signal))
+  );
+  const isFarmMarketSearch = ["farmers market", "farmers markets", "flea market"].some(
+    (phrase) => hasNormalizedPhrase(search, phrase)
+  );
+  const minimumTokenMatches = Math.max(1, Math.ceil(queryTokens.length * 0.6));
+
+  if (
+    isFarmMarketSearch &&
+    !["farmers market", "flea market"].some((term) => hasNormalizedPhrase(haystack, term))
+  ) return 0;
+
+  if (
+    !exactPhrase &&
+    activeThemes.length === 0 &&
+    tokenMatches < minimumTokenMatches
+  ) return 0;
+
+  let score = exactPhrase ? 90 : tokenMatches * 18;
+  let matchedTheme = false;
+
+  for (const theme of activeThemes) {
+    if (
+      theme.requiredTerms &&
+      !theme.requiredTerms.some((term) => hasNormalizedPhrase(haystack, term))
+    ) continue;
+    if (theme.strictKinds && !theme.kinds.includes(venue.kind)) continue;
+
+    const termMatches = theme.terms.filter((term) => hasNormalizedPhrase(haystack, term)).length;
+    if (termMatches === 0) continue;
+
+    matchedTheme = true;
+    if (theme.kinds.includes(venue.kind)) score += 18;
+    score += Math.min(36, termMatches * 9);
+  }
+
+  if (activeThemes.length > 0 && !exactPhrase && !matchedTheme) return 0;
+
+  return score;
+}
+
 function chooseDiversePicks(
   ranked: RankedVenue[],
   daypart: ReturnType<typeof getDaypart>["key"],
   mode: DiscoveryMode,
   hasSearch: boolean
 ) {
+  // Search results are already ordered by intent relevance, then live quality.
+  // Re-scoring them here would allow a generic high-ranked venue to replace
+  // the thing the person actually asked for.
+  if (hasSearch) return ranked.slice(0, 3);
+
   const remaining = [...ranked];
   const chosen: RankedVenue[] = [];
 
@@ -555,9 +840,11 @@ export async function GET(request: Request) {
   const city = CITIES.includes(requestedCity) ? requestedCity : "All 757";
   const search = normalize(url.searchParams.get("q"));
   const actualClock = easternNow();
-  const requestedPreviewHour = Number(url.searchParams.get("__hour"));
+  const previewHourParam = url.searchParams.get("__hour");
+  const requestedPreviewHour = Number(previewHourParam);
   const previewHour =
     process.env.NODE_ENV === "development" &&
+    previewHourParam !== null &&
     Number.isInteger(requestedPreviewHour) &&
     requestedPreviewHour >= 0 &&
     requestedPreviewHour <= 23
@@ -573,7 +860,7 @@ export async function GET(request: Request) {
     supabaseAdmin
       .from("venues")
       .select(
-        "id,name,city,address,lat,lng,type,category,music_genre,age_limit,cover,parking,dress_code,ai_score,google_rating,google_place_id,photo_source,phone,website,hours,enriched_at"
+        "id,name,city,address,lat,lng,type,category,music_genre,age_limit,cover,parking,dress_code,ai_score,ai_summary,google_rating,google_place_id,photo_source,phone,website,hours,enriched_at"
       )
       .limit(700),
     supabaseAdmin
@@ -618,18 +905,22 @@ export async function GET(request: Request) {
     )
     .filter((venue) => city === "All 757" || venue.city === city)
     .filter((venue) => {
+      // Interest search is global. Category tabs only narrow the unsearched feed.
+      if (search) return true;
       if (mode === "events") return Boolean(venue.event);
       if (mode === "food") return venue.kind === "food";
       if (mode === "explore") return venue.kind === "activity";
       return true;
     })
-    .filter((venue) => {
-      if (!search) return true;
-      return normalize(
-        `${venue.name} ${venue.city} ${venue.type} ${venue.category} ${venue.event?.name || ""}`
-      ).includes(search);
-    })
-    .sort((left, right) => right.score - left.score);
+    .filter((venue) => !search || venue.openNow !== false || Boolean(venue.event))
+    .filter((venue) => !search || searchMatchScore(venue, search) > 0)
+    .sort((left, right) => {
+      if (search) {
+        const searchDifference = searchMatchScore(right, search) - searchMatchScore(left, search);
+        if (searchDifference) return searchDifference;
+      }
+      return right.score - left.score;
+    });
   const picks = chooseDiversePicks(ranked, daypart.key, mode, Boolean(search));
   const freshness = [
     ...((venues || []) as VenueRow[]).map((venue) => venue.enriched_at),

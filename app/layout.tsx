@@ -24,7 +24,7 @@ const siteUrl = configuredHost.startsWith("http")
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: "Things To Do 757 — Find something worth doing now",
-  description: "Three clear, time-aware recommendations for things to do across Hampton Roads—updated automatically.",
+  description: "Instant, interest-aware recommendations for things to do across Hampton Roads—updated automatically.",
   applicationName: "Things To Do 757",
   openGraph: {
     title: "Things To Do 757",
