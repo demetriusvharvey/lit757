@@ -1,5 +1,7 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- Legacy venue rows are schemaless Supabase payloads. */
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { isCronAuthorized } from "../../../../src/lib/cron-auth";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -75,7 +77,11 @@ function calculateGhostScore(venue: any) {
   };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  if (!isCronAuthorized(request)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const { data: venues, error } = await supabase.from("venues").select("*");
 
   if (error) {

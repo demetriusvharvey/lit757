@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- Google Places payloads are normalized at runtime. */
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -67,6 +68,18 @@ function categoryFromQuery(query: string) {
   if (q.includes("nightlife")) return "Nightlife";
 
   return "Venue";
+}
+
+function cityFromAddress(address: string | null | undefined, fallback: string) {
+  const match = String(address || "").match(
+    /,\s*(Norfolk|Virginia Beach|Chesapeake|Portsmouth|Suffolk|Hampton|Newport News)\s*,\s*VA\b/i
+  );
+
+  if (!match?.[1]) return fallback;
+
+  return match[1]
+    .toLowerCase()
+    .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
 async function getPlaceDetails(placeId: string) {
@@ -139,6 +152,10 @@ export async function GET() {
         }
 
         const details = await getPlaceDetails(place.id);
+        const resolvedCity = cityFromAddress(
+          details.formattedAddress || place.formattedAddress,
+          city
+        );
 
         const name =
           details.displayName?.text || place.displayName?.text;
@@ -160,17 +177,16 @@ export async function GET() {
           continue;
         }
 
-        let photoUrl = null;
-
-        if (details.photos?.[0]?.name) {
-          photoUrl = `https://places.googleapis.com/v1/${details.photos[0].name}/media?maxWidthPx=1600&key=${GOOGLE_KEY}`;
-        }
+        const resolvedPlaceId = details.id || place.id;
+        const photoUrl = details.photos?.length && resolvedPlaceId
+          ? `/api/venue-photo?placeId=${encodeURIComponent(resolvedPlaceId)}&slot=0`
+          : null;
 
         const { data: existingByName } = await supabaseAdmin
           .from("venues")
           .select("id,name")
           .ilike("name", name)
-          .eq("city", city)
+          .eq("city", resolvedCity)
           .maybeSingle();
 
         if (existingByName) {
@@ -186,7 +202,7 @@ export async function GET() {
         const { error: insertError } =
           await supabaseAdmin.from("venues").insert({
             name,
-            city,
+            city: resolvedCity,
             address:
               details.formattedAddress ||
               place.formattedAddress ||
@@ -198,8 +214,7 @@ export async function GET() {
             category,
             type: category,
 
-            google_place_id:
-              details.id || place.id,
+            google_place_id: resolvedPlaceId,
 
             phone:
               details.nationalPhoneNumber ||
@@ -229,7 +244,7 @@ export async function GET() {
         results.push({
           search: searchText,
           venue: name,
-          city,
+          city: resolvedCity,
           category,
           status: insertError ? "error" : "inserted",
           error: insertError?.message || null,

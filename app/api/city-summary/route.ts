@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- This compatibility endpoint shapes legacy venue payloads. */
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -10,28 +11,29 @@ function normalizeCity(value?: string | null) {
   return String(value || "").trim();
 }
 
+function cityFromAddress(address?: string | null, fallback?: string | null) {
+  const match = String(address || "").match(
+    /,\s*(Norfolk|Virginia Beach|Chesapeake|Portsmouth|Suffolk|Hampton|Newport News)\s*,\s*VA\b/i
+  );
+
+  if (!match?.[1]) return normalizeCity(fallback) || "757";
+  return match[1].toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 function isToday(dateValue?: string | null) {
   if (!dateValue) return false;
 
   const date = new Date(dateValue);
   if (Number.isNaN(date.getTime())) return false;
 
-  const now = new Date();
+  const dateKey = date.toLocaleDateString("en-CA", {
+    timeZone: "America/New_York",
+  });
+  const todayKey = new Date().toLocaleDateString("en-CA", {
+    timeZone: "America/New_York",
+  });
 
-  return (
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth() &&
-    date.getDate() === now.getDate()
-  );
-}
-
-function hoursSince(dateValue?: string | null) {
-  if (!dateValue) return null;
-
-  const date = new Date(dateValue);
-  if (Number.isNaN(date.getTime())) return null;
-
-  return (Date.now() - date.getTime()) / (1000 * 60 * 60);
+  return dateKey === todayKey;
 }
 
 function getVenueNameList(venues: any[], max = 3) {
@@ -80,8 +82,6 @@ function buildSummary(args: {
   city: string;
   topVenues: any[];
   hotVenues: any[];
-  quietVenues: any[];
-  freshSignals: any[];
   todayEvents: any[];
   cityLeaders: ReturnType<typeof getCityGroup>;
 }) {
@@ -89,63 +89,55 @@ function buildSummary(args: {
     city,
     topVenues,
     hotVenues,
-    quietVenues,
-    freshSignals,
     todayEvents,
     cityLeaders,
   } = args;
 
   const topNames = getVenueNameList(topVenues, 3);
   const hotNames = getVenueNameList(hotVenues, 3);
-  const quietName = quietVenues[0]?.name;
   const leadCity = cityLeaders[0]?.city;
-
-  const signalLine =
-    freshSignals.length > 0
-      ? "Fresh movement is starting to come in from people out tonight."
-      : "The night is still early, so the read is mostly based on events, venue history, and current momentum.";
+  const leadNames = getVenueNameList(
+    [...(cityLeaders[0]?.venues || [])].sort(
+      (a, b) => Number(b.ai_score || 0) - Number(a.ai_score || 0)
+    ),
+    3
+  );
+  const area = city === "All 757" ? "across the 757" : `in ${city}`;
+  const modelLine = "The forecast updates automatically from schedules, venue patterns, ratings, and time of day.";
 
   if (city !== "All 757") {
     if (hotVenues.length > 0) {
-      return `${city} has some movement tonight. ${hotNames || topNames} ${
-        hotVenues.length === 1 ? "is" : "are"
-      } leading the board right now. ${signalLine}`;
+      return `${hotNames || topNames} ${
+        hotVenues.length === 1 ? "leads" : "lead"
+      } tonight's ${city} forecast. ${modelLine}`;
     }
 
     if (todayEvents.length > 0) {
-      return `${city} has events on the calendar tonight, but the energy still looks early. ${
-        topNames || "A few spots"
-      } ${
-        topNames ? "are worth watching" : "may pick up later"
-      }. ${signalLine}`;
+      return `${todayEvents.length} event${todayEvents.length === 1 ? " is" : "s are"} scheduled ${area} today. ${
+        topNames || "The event venues"
+      } ${topNames ? "rank highest for tonight" : "will anchor tonight's picks"}. ${modelLine}`;
     }
 
-    return `${city} looks calm right now. ${topNames || "A few spots"} ${
-      topNames ? "are still worth keeping an eye on" : "may heat up later"
-    }. ${signalLine}`;
+    return `${topNames || "A few local spots"} ${
+      topNames ? "rank highest" : "are being ranked"
+    } for ${city} tonight. ${modelLine}`;
   }
 
   if (leadCity && hotVenues.length > 0) {
-    return `${leadCity} has the strongest movement tonight. ${
-      hotNames || topNames
-    } ${hotVenues.length === 1 ? "is" : "are"} leading right now. ${
-      quietName ? `${quietName} looks quieter for the moment.` : ""
-    } ${signalLine}`;
+    return `${leadCity} leads tonight's automatic forecast. ${
+      leadNames || hotNames || topNames
+    } ${hotVenues.length === 1 ? "is" : "are"} among the strongest moves. ${modelLine}`;
   }
 
   if (todayEvents.length > 0) {
-    return `Tonight has activity across the 757, but it is still warming up. ${
-      topNames || "The event spots"
-    } ${
-      topNames ? "are the first places to watch" : "should lead the early movement"
-    }. ${signalLine}`;
+    return `${todayEvents.length} event${todayEvents.length === 1 ? " is" : "s are"} scheduled ${area} today. ${
+      topNames || "The event venues"
+    } ${topNames ? "lead tonight's shortlist" : "anchor the forecast"}. ${modelLine}`;
   }
 
-  return `The 757 looks calm right now, but the map is ready to shift as people start moving. ${
-    topNames || "A few spots"
-  } ${
-    topNames ? "are worth watching first" : "should surface once activity starts"
-  }. ${signalLine}`;
+  return `${topNames || "The 757's venues"} ${
+    topNames ? "lead tonight's shortlist" : "are being ranked for tonight"
+  }. ${modelLine}`;
 }
 
 export async function GET(req: Request) {
@@ -153,17 +145,13 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const city = url.searchParams.get("city") || "All 757";
 
-    let venueQuery = supabaseAdmin
+    const venueQuery = supabaseAdmin
       .from("venues")
       .select(
-        "id,name,city,type,category,ai_score,ai_status,ai_summary,photo_url,google_rating,enriched_at"
+        "id,name,city,address,type,category,ai_score,ai_status,ai_summary,photo_url,google_rating,enriched_at"
       )
       .order("ai_score", { ascending: false })
-      .limit(250);
-
-    if (city !== "All 757") {
-      venueQuery = venueQuery.eq("city", city);
-    }
+      .limit(600);
 
     const { data: venues, error: venuesError } = await venueQuery;
 
@@ -176,9 +164,13 @@ export async function GET(req: Request) {
 
     const { data: events, error: eventsError } = await supabaseAdmin
       .from("events")
-      .select("id,name,venue_name,start_time,source,source_url")
+      .select("id,name,venue_name,start_time,source,source_url,created_at")
+      .gte(
+        "start_time",
+        new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString()
+      )
       .order("start_time", { ascending: true })
-      .limit(200);
+      .limit(500);
 
     if (eventsError) {
       return NextResponse.json(
@@ -187,42 +179,27 @@ export async function GET(req: Request) {
       );
     }
 
-    const { data: signals, error: signalsError } = await supabaseAdmin
-      .from("venue_signals")
-      .select("id,venue_id,vibe_type,comment,created_at")
-      .gte(
-        "created_at",
-        new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString()
-      )
-      .limit(200);
-
-    if (signalsError) {
-      return NextResponse.json(
-        { success: false, error: signalsError.message },
-        { status: 500 }
-      );
-    }
-
-    const safeVenues = venues || [];
+    const safeVenues = (venues || [])
+      .map((venue) => ({
+        ...venue,
+        city: cityFromAddress(venue.address, venue.city),
+        automatic_score: Number(venue.ai_score || 0),
+      }))
+      .filter((venue) => city === "All 757" || venue.city === city);
     const safeEvents = events || [];
-    const safeSignals = signals || [];
 
     const topVenues = safeVenues
       .filter((venue) => Number(venue.ai_score || 0) > 0)
+      .sort(
+        (a, b) =>
+          Number(b.ai_score || 0) - Number(a.ai_score || 0)
+      )
       .slice(0, 8);
 
     const hotVenues = safeVenues
       .filter((venue) => Number(venue.ai_score || 0) >= 55)
+      .sort((a, b) => Number(b.ai_score || 0) - Number(a.ai_score || 0))
       .slice(0, 8);
-
-    const quietVenues = safeVenues
-      .filter((venue) => Number(venue.ai_score || 0) <= 30)
-      .slice(0, 8);
-
-    const freshSignals = safeSignals.filter((signal) => {
-      const h = hoursSince(signal.created_at);
-      return h !== null && h <= 6;
-    });
 
     const todayEvents = safeEvents.filter((event) => isToday(event.start_time));
 
@@ -232,8 +209,6 @@ export async function GET(req: Request) {
       city,
       topVenues,
       hotVenues,
-      quietVenues,
-      freshSignals,
       todayEvents,
       cityLeaders,
     });
@@ -265,7 +240,20 @@ export async function GET(req: Request) {
         start_time: event.start_time,
         source_url: event.source_url,
       })),
-      fresh_signals: freshSignals.length,
+      forecast_model: {
+        automatic: true,
+        inputs: ["event schedules", "venue intelligence", "ratings", "venue type", "time of day"],
+      },
+      data_freshness: {
+        events_last_synced_at:
+          safeEvents
+            .map((event) => event.created_at)
+            .filter(Boolean)
+            .sort()
+            .at(-1) || null,
+        venue_photos: safeVenues.filter((venue) => Boolean(venue.photo_url)).length,
+        venues: safeVenues.length,
+      },
       city_leaders: cityLeaders.slice(0, 5).map((item) => ({
         city: item.city,
         weight: Math.round(item.weight),

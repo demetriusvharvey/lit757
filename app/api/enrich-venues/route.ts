@@ -1,7 +1,20 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- Google Places returns provider-defined JSON fields. */
 import { NextResponse } from "next/server";
 import { supabase } from "../../../src/lib/supabase";
 
 const GOOGLE_KEY = process.env.GOOGLE_PLACES_API_KEY;
+
+function cityFromAddress(address: string | null | undefined, fallback: string | null) {
+  const match = String(address || "").match(
+    /,\s*(Norfolk|Virginia Beach|Chesapeake|Portsmouth|Suffolk|Hampton|Newport News)\s*,\s*VA\b/i
+  );
+
+  if (!match?.[1]) return fallback;
+
+  return match[1]
+    .toLowerCase()
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
 
 export async function GET() {
   try {
@@ -75,11 +88,9 @@ export async function GET() {
 
         const details = await detailsRes.json();
 
-        let photoUrl = null;
-
-        if (details.photos?.[0]?.name) {
-          photoUrl = `https://places.googleapis.com/v1/${details.photos[0].name}/media?maxWidthPx=1600&key=${GOOGLE_KEY}`;
-        }
+        const photoUrl = details.photos?.length && details.id
+          ? `/api/venue-photo?placeId=${encodeURIComponent(details.id)}&slot=0`
+          : null;
 
         const { error: updateError } = await supabase
           .from("venues")
@@ -87,6 +98,10 @@ export async function GET() {
             google_place_id: details.id,
             address:
               details.formattedAddress || venue.address || null,
+            city: cityFromAddress(
+              details.formattedAddress || venue.address,
+              venue.city || null
+            ),
             phone:
               details.nationalPhoneNumber ||
               details.internationalPhoneNumber ||
@@ -94,6 +109,7 @@ export async function GET() {
             website: details.websiteUri || null,
             google_rating: details.rating || null,
             photo_url: photoUrl,
+            photo_source: photoUrl ? "google" : null,
             hours: details.regularOpeningHours || null,
             google_types: details.types || [],
             enriched_at: new Date().toISOString(),

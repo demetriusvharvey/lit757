@@ -1,5 +1,7 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- Eventbrite payloads vary by source and expansion. */
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { isCronAuthorized } from "../../../src/lib/cron-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -11,10 +13,7 @@ const supabase = createClient(
 const EVENTBRITE_API_BASE = "https://www.eventbriteapi.com/v3";
 
 export async function GET(req: Request) {
-  const requestUrl = new URL(req.url);
-  const secret = requestUrl.searchParams.get("secret");
-
-  if (secret !== process.env.CRON_SECRET) {
+  if (!isCronAuthorized(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

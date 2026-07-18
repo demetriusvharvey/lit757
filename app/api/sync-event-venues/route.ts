@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- Legacy geocoder records are normalized at runtime. */
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 

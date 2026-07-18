@@ -124,7 +124,6 @@ Return only the summary sentence.`;
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
     return NextResponse.json(
       { summary: "Unable to generate nightlife summary." },
       { status: 500 }
