@@ -20,7 +20,7 @@ import {
   X,
 } from "lucide-react";
 
-type DiscoveryMode = "all" | "food" | "nightlife" | "events";
+type DiscoveryMode = "all" | "food" | "explore" | "events";
 
 type DiscoveryEvent = {
   id: string;
@@ -40,7 +40,7 @@ type DiscoveryVenue = {
   lng: number;
   type: string;
   category: string;
-  kind: "food" | "nightlife" | "events" | "other";
+  kind: "food" | "nightlife" | "activity" | "events" | "other";
   rating: number | null;
   ageLimit: string | null;
   cover: string | null;
@@ -66,6 +66,7 @@ type DiscoveryResponse = {
     eyebrow: string;
     headline: string;
     timing: string;
+    description: string;
     city: string;
     mode: DiscoveryMode;
     resultCount: number;
@@ -91,9 +92,9 @@ const CITIES = [
 ];
 
 const MODES: Array<{ id: DiscoveryMode; label: string }> = [
-  { id: "all", label: "Top picks" },
-  { id: "food", label: "Food" },
-  { id: "nightlife", label: "Nightlife" },
+  { id: "all", label: "For now" },
+  { id: "food", label: "Eat" },
+  { id: "explore", label: "Explore" },
   { id: "events", label: "Events" },
 ];
 
@@ -167,7 +168,7 @@ function PickCard({
       onClick={() => onSelect(venue)}
       className={`group grid w-full grid-cols-[1fr_80px] gap-3 rounded-[1.45rem] border p-2.5 text-left transition duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ff5c35] sm:grid-cols-[1fr_88px] ${
         primary
-          ? "border-[#171716] bg-[#171716] text-white shadow-[0_22px_60px_rgba(17,17,16,0.16)] hover:-translate-y-0.5"
+          ? "border-[#ffb49f] bg-[#fff0e8] text-[#171716] shadow-[0_22px_60px_rgba(255,92,53,0.13)] hover:-translate-y-0.5 hover:border-[#ff9b82]"
           : "border-black/[0.08] bg-white/78 text-[#171716] hover:border-black/20 hover:bg-white"
       }`}
       aria-label={`Open ${venue.name}, pick ${rank + 1}`}
@@ -177,7 +178,7 @@ function PickCard({
           <span className="flex items-center gap-2">
             <span
               className={`text-[10px] font-bold uppercase tracking-[0.16em] ${
-                primary ? "text-[#ff9b82]" : "text-[#ca482b]"
+                primary ? "text-[#c84427]" : "text-[#ca482b]"
               }`}
             >
               {String(rank + 1).padStart(2, "0")} · {venue.label}
@@ -188,7 +189,7 @@ function PickCard({
           </span>
           <span
             className={`mt-1.5 line-clamp-1 text-[11px] leading-[1.4] ${
-              primary ? "text-white/62" : "text-black/54"
+              primary ? "text-black/58" : "text-black/54"
             }`}
           >
             {venue.reason}
@@ -196,13 +197,13 @@ function PickCard({
         </span>
 
         <span className="mt-2 flex items-center gap-2 text-[10px] font-medium">
-          <span className={primary ? "text-white/82" : "text-black/68"}>{venue.timing}</span>
-          <span className={primary ? "text-white/24" : "text-black/18"}>·</span>
-          <span className={primary ? "text-white/45" : "text-black/42"}>{venue.city}</span>
+          <span className={primary ? "text-black/72" : "text-black/68"}>{venue.timing}</span>
+          <span className={primary ? "text-black/18" : "text-black/18"}>·</span>
+          <span className={primary ? "text-black/42" : "text-black/42"}>{venue.city}</span>
           <ArrowRight
             size={13}
             className={`ml-auto transition-transform group-hover:translate-x-0.5 ${
-              primary ? "text-white/58" : "text-black/38"
+              primary ? "text-black/42" : "text-black/38"
             }`}
           />
         </span>
@@ -450,7 +451,7 @@ export default function Home() {
     mapboxgl.accessToken = token;
     const map = new mapboxgl.Map({
       container: mapContainer,
-      style: "mapbox://styles/mapbox/dark-v11",
+      style: "mapbox://styles/mapbox/light-v11",
       center: HAMPTON_ROADS_CENTER,
       zoom: 9.75,
       minZoom: 9.5,
@@ -477,10 +478,10 @@ export default function Home() {
         filter: ["==", ["get", "isPick"], false],
         paint: {
           "circle-radius": ["interpolate", ["linear"], ["zoom"], 9.5, 2.6, 13, 5.2],
-          "circle-color": "#a8a39b",
-          "circle-opacity": ["interpolate", ["linear"], ["zoom"], 9.5, 0.24, 12, 0.58],
+          "circle-color": "#76736d",
+          "circle-opacity": ["interpolate", ["linear"], ["zoom"], 9.5, 0.28, 12, 0.62],
           "circle-stroke-width": 1,
-          "circle-stroke-color": "rgba(255,255,255,0.28)",
+          "circle-stroke-color": "rgba(255,255,255,0.72)",
         },
       });
       map.addLayer({
@@ -528,7 +529,7 @@ export default function Home() {
           "circle-radius": ["interpolate", ["linear"], ["zoom"], 9.5, 16, 13, 23],
           "circle-color": "rgba(0,0,0,0)",
           "circle-stroke-width": 3,
-          "circle-stroke-color": "#ffffff",
+          "circle-stroke-color": "#171716",
           "circle-opacity": 0.92,
         },
       });
@@ -651,7 +652,7 @@ export default function Home() {
                   </div>
                   <div>
                     <p className="text-[15px] font-semibold leading-none tracking-[-0.035em]">Things To Do 757</p>
-                    <p className="mt-1 text-[9px] font-bold uppercase tracking-[0.17em] text-black/35">Hampton Roads</p>
+                    <p className="mt-1 text-[9px] font-bold uppercase tracking-[0.17em] text-black/35">Any time · All 757</p>
                   </div>
                 </div>
 
@@ -682,7 +683,7 @@ export default function Home() {
                   {data?.context.headline || "Find something worth doing now."}
                 </h1>
                 <p className="mt-2 max-w-[390px] text-[12px] leading-5 text-black/48">
-                  The best scheduled and open options across the 757.
+                  {data?.context.description || "Open now, happening soon, and worth going to."}
                 </p>
 
                 <form onSubmit={submitSearch} className="mt-4 grid grid-cols-[1fr_auto] gap-2">
@@ -692,7 +693,7 @@ export default function Home() {
                     <input
                       value={query}
                       onChange={(event) => setQuery(event.target.value)}
-                      placeholder="Search ideas"
+                      placeholder="Search anything"
                       className="h-12 w-full rounded-full border border-black/[0.09] bg-white/72 pl-10 pr-10 text-[13px] text-black outline-none placeholder:text-black/32 transition focus:border-black/20 focus:ring-2 focus:ring-[#ff5c35]"
                     />
                     {query && (
@@ -779,22 +780,22 @@ export default function Home() {
           )}
         </section>
 
-        <section className="relative min-h-[410px] overflow-hidden bg-[#1b1b1a] lg:min-h-0" aria-label="757 venue map">
+        <section className="relative min-h-[410px] overflow-hidden bg-[#e9e7e1] lg:min-h-0" aria-label="757 venue map">
           <div className="absolute inset-0">
             <div ref={mapContainerRef} className="h-full w-full" />
           </div>
 
           {mapUnavailable && (
-            <div className="absolute inset-0 flex items-center justify-center bg-[radial-gradient(circle_at_center,#302f2c_0%,#191918_65%)] px-6 text-center text-white">
+            <div className="absolute inset-0 flex items-center justify-center bg-[radial-gradient(circle_at_center,#fffdf8_0%,#e8e5de_70%)] px-6 text-center text-[#171716]">
               <div>
                 <MapPin size={26} className="mx-auto text-[#ff7a59]" />
                 <p className="mt-3 text-[15px] font-semibold">The 757 map is unavailable.</p>
-                <p className="mt-1 text-[12px] text-white/45">Your three recommendations still work.</p>
+                <p className="mt-1 text-[12px] text-black/45">Your three recommendations still work.</p>
               </div>
             </div>
           )}
 
-          <div className="pointer-events-none absolute left-4 top-4 z-10 flex items-center gap-2 rounded-full border border-white/10 bg-black/54 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-white/62 backdrop-blur-xl sm:left-5 sm:top-5">
+          <div className="pointer-events-none absolute left-4 top-4 z-10 flex items-center gap-2 rounded-full border border-black/8 bg-white/82 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-black/55 shadow-sm backdrop-blur-xl sm:left-5 sm:top-5">
             <span className="h-1.5 w-1.5 rounded-full bg-[#ff5c35]" />
             757 map · Picks 1–3
           </div>
@@ -802,13 +803,13 @@ export default function Home() {
           <button
             type="button"
             onClick={useMyLocation}
-            className="absolute bottom-8 right-4 z-10 flex h-11 w-11 items-center justify-center rounded-full border border-white/12 bg-black/64 text-white shadow-[0_12px_40px_rgba(0,0,0,0.35)] backdrop-blur-xl transition hover:bg-black/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ff5c35] sm:right-5"
+            className="absolute bottom-8 right-4 z-10 flex h-11 w-11 items-center justify-center rounded-full border border-black/10 bg-white/88 text-[#171716] shadow-[0_12px_40px_rgba(0,0,0,0.16)] backdrop-blur-xl transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ff5c35] sm:right-5"
             aria-label="Center map on my location"
           >
             <LocateFixed size={17} />
           </button>
 
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-black/12 to-transparent lg:hidden" />
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-white/20 to-transparent lg:hidden" />
         </section>
       </div>
     </main>

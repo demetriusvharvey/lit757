@@ -11,7 +11,7 @@ const supabaseAdmin = createClient(
 
 let lastRefreshAttemptAt = 0;
 
-type DiscoveryMode = "all" | "food" | "nightlife" | "events";
+type DiscoveryMode = "all" | "food" | "explore" | "events";
 
 type VenueRow = {
   id: string;
@@ -176,12 +176,11 @@ function easternNow() {
   };
 }
 
-function isVenueOpen(hours?: GoogleHours | null) {
+function isVenueOpen(hours?: GoogleHours | null, clock = easternNow()) {
   const periods = hours?.periods;
   if (!Array.isArray(periods) || periods.length === 0) return null;
 
-  const now = easternNow();
-  const currentMinutes = now.hour * 60 + now.minute;
+  const currentMinutes = clock.hour * 60 + clock.minute;
 
   return periods.some((period) => {
     const openDay = Number(period.open?.day);
@@ -191,48 +190,51 @@ function isVenueOpen(hours?: GoogleHours | null) {
 
     if (!Number.isFinite(openDay) || !Number.isFinite(closeDay)) return false;
     if (openDay === closeDay) {
-      return now.day === openDay && currentMinutes >= openMinutes && currentMinutes < closeMinutes;
+      return clock.day === openDay && currentMinutes >= openMinutes && currentMinutes < closeMinutes;
     }
 
     return (
-      (now.day === openDay && currentMinutes >= openMinutes) ||
-      (now.day === closeDay && currentMinutes < closeMinutes)
+      (clock.day === openDay && currentMinutes >= openMinutes) ||
+      (clock.day === closeDay && currentMinutes < closeMinutes)
     );
   });
 }
 
-function getDaypart() {
-  const { hour } = easternNow();
+function getDaypart(hour = easternNow().hour) {
   if (hour >= 5 && hour < 11) {
     return {
       key: "morning",
       eyebrow: "This morning in Hampton Roads",
-      headline: "Three good ways to start the day.",
+      headline: "Three good things to do this morning.",
       timing: "This morning",
+      description: "Coffee, activities, food, and what is worth doing next.",
     } as const;
   }
   if (hour >= 11 && hour < 16) {
     return {
       key: "afternoon",
       eyebrow: "This afternoon in Hampton Roads",
-      headline: "Three good moves for right now.",
+      headline: "Three good things to do right now.",
       timing: "This afternoon",
+      description: "Open now, happening soon, and worth leaving the house for.",
     } as const;
   }
   if (hour >= 16 && hour < 22) {
     return {
       key: "evening",
-      eyebrow: "Tonight in Hampton Roads",
-      headline: "Three good moves. Pick one.",
-      timing: "Tonight",
+      eyebrow: "This evening in Hampton Roads",
+      headline: "Three good things to do this evening.",
+      timing: "This evening",
+      description: "Dinner, experiences, and events that fit the hours ahead.",
     } as const;
   }
 
   return {
     key: "late",
     eyebrow: "Late night in Hampton Roads",
-    headline: "Still deciding? Start here.",
+    headline: "Three good things still open tonight.",
     timing: "Late tonight",
+    description: "Open late, starting soon, and still worth going to.",
   } as const;
 }
 
@@ -242,6 +244,11 @@ function categoryText(venue: VenueRow) {
 
 function venueKind(venue: VenueRow) {
   const text = categoryText(venue);
+  const name = normalize(venue.name);
+  if (
+    /aquarium|arcade|arts|beach|boardwalk|casino|comedy|district|entertainment|farm|gallery|historic|indoor|movie|museum|nature|opera|outdoor|paint|park|performing|shopping|social area|surf park|theater|theatre|theme park|waterpark|zoo/.test(text) ||
+    /aquarium|botanical|childrens museum|hermitage museum|living museum|nauticus|surf park|water country|waterpark|virginia zoo/.test(name)
+  ) return "activity";
   if (/restaurant|food|cafe|coffee|brunch|brewery|dining|kitchen/.test(text)) return "food";
   if (/club|nightlife|bar|lounge|hookah|dj|dance/.test(text)) return "nightlife";
   if (/concert|theater|theatre|music|arena|pavilion|event/.test(text)) return "events";
@@ -252,15 +259,20 @@ function daypartBoost(venue: VenueRow, daypart: ReturnType<typeof getDaypart>["k
   const text = categoryText(venue);
 
   if (daypart === "morning") {
-    if (/brunch|breakfast|coffee|cafe|bakery|park|museum|beach/.test(text)) return 26;
-    if (/club|nightlife|hookah/.test(text)) return -22;
+    if (/brunch|breakfast|coffee|cafe|bakery/.test(text)) return 38;
+    if (/aquarium|beach|boardwalk|garden|market|museum|nature|outdoor|park|zoo/.test(text)) return 32;
+    if (/restaurant|food|dining/.test(text)) return 12;
+    if (/club|nightlife|hookah|lounge|dj/.test(text)) return -38;
+    if (/bar|concert|live music/.test(text)) return -18;
   }
   if (daypart === "afternoon") {
-    if (/brewery|restaurant|cafe|park|museum|beach|market|attraction/.test(text)) return 20;
-    if (/nightclub|club/.test(text)) return -12;
+    if (/aquarium|arcade|arts|beach|boardwalk|district|entertainment|gallery|garden|historic|market|museum|nature|outdoor|park|shopping|surf|theater|theme|waterpark|zoo/.test(text)) return 34;
+    if (/brewery|restaurant|cafe|coffee|food|dining/.test(text)) return 20;
+    if (/nightclub|club|nightlife|hookah|lounge|dj/.test(text)) return -28;
   }
   if (daypart === "evening") {
-    if (/restaurant|bar|lounge|music|concert|brewery|event/.test(text)) return 18;
+    if (/restaurant|bar|lounge|music|concert|brewery|event|entertainment|theater|district/.test(text)) return 18;
+    if (/museum|park|garden/.test(text)) return 4;
   }
   if (daypart === "late") {
     if (/club|nightlife|bar|lounge|hookah|dj/.test(text)) return 24;
@@ -282,10 +294,10 @@ function formatEventTime(value?: string | null) {
   });
 }
 
-function hoursUntil(value?: string | null) {
+function hoursUntil(value?: string | null, referenceTime = Date.now()) {
   if (!value) return null;
   const timestamp = new Date(value).getTime();
-  return Number.isNaN(timestamp) ? null : (timestamp - Date.now()) / 3_600_000;
+  return Number.isNaN(timestamp) ? null : (timestamp - referenceTime) / 3_600_000;
 }
 
 function assignEventsToVenues(venues: VenueRow[], events: EventRow[]) {
@@ -311,35 +323,41 @@ function assignEventsToVenues(venues: VenueRow[], events: EventRow[]) {
   return assignments;
 }
 
-function bestEventForVenue(events: EventRow[]) {
+function bestEventForVenue(events: EventRow[], referenceTime: number) {
   return events
-    .filter((event) => hoursUntil(event.start_time) !== null)
+    .filter((event) => hoursUntil(event.start_time, referenceTime) !== null)
     .sort((left, right) => {
-      const leftHours = Math.max(-2, hoursUntil(left.start_time) || 999);
-      const rightHours = Math.max(-2, hoursUntil(right.start_time) || 999);
+      const leftHours = Math.max(-2, hoursUntil(left.start_time, referenceTime) || 999);
+      const rightHours = Math.max(-2, hoursUntil(right.start_time, referenceTime) || 999);
       return leftHours - rightHours;
     })[0] || null;
 }
 
-function rankVenue(venue: VenueRow, events: EventRow[], daypart: ReturnType<typeof getDaypart>) {
-  const event = bestEventForVenue(events);
-  const eventHours = hoursUntil(event?.start_time);
-  const openNow = isVenueOpen(venue.hours);
+function rankVenue(
+  venue: VenueRow,
+  events: EventRow[],
+  daypart: ReturnType<typeof getDaypart>,
+  clock: ReturnType<typeof easternNow>,
+  referenceTime: number
+) {
+  const event = bestEventForVenue(events, referenceTime);
+  const eventHours = hoursUntil(event?.start_time, referenceTime);
+  const openNow = isVenueOpen(venue.hours, clock);
   const rating = Number(venue.google_rating || 0);
   const baseScore = clamp(Number(venue.ai_score || 28), 0, 100) * 0.44;
-  const eventBoost = eventHours === null
+  const eventBoost = eventHours === null || eventHours < -2
     ? 0
-    : eventHours >= -2 && eventHours <= 1.5
-      ? 46
-      : eventHours <= 6
-        ? 38
-        : eventHours <= 14
-          ? 27
-          : eventHours <= 72
-            ? 10
-            : 0;
+    : daypart.key === "morning"
+      ? eventHours <= 1.5 ? 34 : eventHours <= 5 ? 20 : eventHours <= 10 ? 5 : 0
+      : daypart.key === "afternoon"
+        ? eventHours <= 1.5 ? 40 : eventHours <= 6 ? 30 : eventHours <= 10 ? 16 : eventHours <= 72 ? 4 : 0
+        : daypart.key === "evening"
+          ? eventHours <= 1.5 ? 46 : eventHours <= 6 ? 38 : eventHours <= 12 ? 22 : eventHours <= 72 ? 6 : 0
+          : eventHours <= 1.5 ? 46 : eventHours <= 4 ? 34 : eventHours <= 10 ? 8 : 0;
   const ratingBoost = rating >= 3.5 ? (rating - 3.4) * 9 : 0;
-  const openBoost = openNow === true ? 12 : openNow === false && !event ? -16 : 0;
+  const openBoost = openNow === true
+    ? daypart.key === "morning" || daypart.key === "afternoon" ? 22 : 14
+    : openNow === false && !event ? -22 : 0;
   const photoBoost = venue.photo_source === "google_streetview" ? 7 : 0;
   const freshnessHours = venue.enriched_at ? hoursUntil(venue.enriched_at) : null;
   const freshnessBoost = freshnessHours !== null && freshnessHours >= -24 ? 5 : 0;
@@ -376,29 +394,76 @@ function rankVenue(venue: VenueRow, events: EventRow[], daypart: ReturnType<type
     kind,
     score,
     openNow,
+    eventHours,
     event,
     reason,
     timing,
   };
 }
 
-function chooseDiversePicks(ranked: RankedVenue[]) {
+function chooseDiversePicks(
+  ranked: RankedVenue[],
+  daypart: ReturnType<typeof getDaypart>["key"],
+  mode: DiscoveryMode,
+  hasSearch: boolean
+) {
   const remaining = [...ranked];
   const chosen: RankedVenue[] = [];
 
-  while (chosen.length < 3 && remaining.length > 0) {
-    const bestIndex = remaining.reduce((winningIndex, venue, index) => {
-      const adjusted = venue.score -
-        chosen.filter((pick) => pick.city === venue.city).length * 8 -
-        chosen.filter((pick) => pick.kind === venue.kind).length * 10;
-      const winning = remaining[winningIndex];
-      const winningAdjusted = winning.score -
-        chosen.filter((pick) => pick.city === winning.city).length * 8 -
-        chosen.filter((pick) => pick.kind === winning.kind).length * 10;
-      return adjusted > winningAdjusted ? index : winningIndex;
-    }, 0);
+  const takeBest = (predicate: (venue: RankedVenue) => boolean) => {
+    const candidates = remaining
+      .map((venue, index) => ({
+        index,
+        venue,
+        adjusted:
+          venue.score -
+          chosen.filter((pick) => pick.city === venue.city).length * 8 -
+          chosen.filter((pick) => pick.kind === venue.kind).length * 10,
+      }))
+      .filter(({ venue }) => predicate(venue))
+      .sort((left, right) => right.adjusted - left.adjusted);
+    const best = candidates[0];
+    if (!best) return false;
+    chosen.push(remaining.splice(best.index, 1)[0]);
+    return true;
+  };
 
-    chosen.push(remaining.splice(bestIndex, 1)[0]);
+  const eventWithin = (venue: RankedVenue, hours: number) =>
+    Boolean(
+      venue.event &&
+      venue.eventHours !== null &&
+      venue.eventHours >= -2 &&
+      venue.eventHours <= hours
+    );
+
+  if (mode === "all" && !hasSearch) {
+    if (daypart === "morning") {
+      takeBest((venue) => venue.openNow === true && venue.kind === "food");
+      takeBest((venue) => venue.openNow !== false && venue.kind === "activity");
+      takeBest((venue) => eventWithin(venue, 5) || (venue.openNow === true && venue.kind === "food"));
+    } else if (daypart === "afternoon") {
+      if (!takeBest((venue) => venue.openNow === true && venue.kind === "activity")) {
+        takeBest((venue) => venue.openNow === true && venue.kind !== "nightlife");
+      }
+      takeBest((venue) => eventWithin(venue, 8));
+      takeBest((venue) => venue.openNow === true && !venue.event);
+    } else if (daypart === "evening") {
+      takeBest((venue) => eventWithin(venue, 4));
+      takeBest((venue) => venue.openNow === true && venue.kind === "food" && !venue.event);
+      takeBest((venue) => eventWithin(venue, 8) || (venue.openNow === true && venue.kind === "activity"));
+    } else {
+      takeBest((venue) => venue.openNow === true && venue.kind === "nightlife");
+      takeBest((venue) => venue.openNow === true && venue.kind === "food" && !venue.event);
+      takeBest((venue) => eventWithin(venue, 3));
+    }
+  } else if (mode === "explore" && !hasSearch) {
+    takeBest((venue) => venue.kind === "activity" && venue.openNow === true);
+    takeBest((venue) => venue.kind === "activity" && venue.openNow === true);
+    takeBest((venue) => venue.kind === "activity");
+  }
+
+  while (chosen.length < 3 && remaining.length > 0) {
+    takeBest(() => true);
   }
 
   return chosen;
@@ -425,13 +490,19 @@ function publicVenue(venue: RankedVenue, index?: number) {
       ? `/api/venue-photo?placeId=${encodeURIComponent(venue.google_place_id)}`
       : null;
   const label = venue.event
-    ? hoursUntil(venue.event.start_time) !== null && (hoursUntil(venue.event.start_time) || 99) <= 1.5
+    ? venue.eventHours !== null && venue.eventHours <= 1.5
       ? "Starting soon"
-      : "Event pick"
+      : venue.eventHours !== null && venue.eventHours <= 12
+        ? "Later today"
+        : "Coming up"
+    : venue.openNow === true
+      ? "Open now"
     : venue.kind === "food"
       ? "Food + drinks"
+      : venue.kind === "activity"
+        ? "Explore"
       : venue.kind === "nightlife"
-        ? "Nightlife"
+        ? "Night out"
         : index === 0
           ? "Best overall"
           : "Worth a look";
@@ -476,15 +547,27 @@ function publicVenue(venue: RankedVenue, index?: number) {
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const requestedMode = url.searchParams.get("mode") || "all";
-  const mode: DiscoveryMode = ["food", "nightlife", "events"].includes(requestedMode)
-    ? requestedMode as DiscoveryMode
+  const normalizedMode = requestedMode === "nightlife" ? "explore" : requestedMode;
+  const mode: DiscoveryMode = ["food", "explore", "events"].includes(normalizedMode)
+    ? normalizedMode as DiscoveryMode
     : "all";
   const requestedCity = url.searchParams.get("city") || "All 757";
   const city = CITIES.includes(requestedCity) ? requestedCity : "All 757";
   const search = normalize(url.searchParams.get("q"));
-  const daypart = getDaypart();
-  const eventStart = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
-  const eventEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const actualClock = easternNow();
+  const requestedPreviewHour = Number(url.searchParams.get("__hour"));
+  const previewHour =
+    process.env.NODE_ENV === "development" &&
+    Number.isInteger(requestedPreviewHour) &&
+    requestedPreviewHour >= 0 &&
+    requestedPreviewHour <= 23
+      ? requestedPreviewHour
+      : actualClock.hour;
+  const clock = { ...actualClock, hour: previewHour };
+  const referenceTime = Date.now() + (previewHour - actualClock.hour) * 60 * 60 * 1000;
+  const daypart = getDaypart(clock.hour);
+  const eventStart = new Date(referenceTime - 2 * 60 * 60 * 1000).toISOString();
+  const eventEnd = new Date(referenceTime + 7 * 24 * 60 * 60 * 1000).toISOString();
 
   const [{ data: venues, error: venuesError }, { data: events, error: eventsError }] = await Promise.all([
     supabaseAdmin
@@ -524,12 +607,20 @@ export async function GET(request: Request) {
     });
   const assignedEvents = assignEventsToVenues(eligibleVenues, safeEvents);
   const ranked = eligibleVenues
-    .map((venue) => rankVenue(venue, assignedEvents.get(venue.id) || [], daypart))
+    .map((venue) =>
+      rankVenue(
+        venue,
+        assignedEvents.get(venue.id) || [],
+        daypart,
+        clock,
+        referenceTime
+      )
+    )
     .filter((venue) => city === "All 757" || venue.city === city)
     .filter((venue) => {
       if (mode === "events") return Boolean(venue.event);
       if (mode === "food") return venue.kind === "food";
-      if (mode === "nightlife") return venue.kind === "nightlife";
+      if (mode === "explore") return venue.kind === "activity";
       return true;
     })
     .filter((venue) => {
@@ -539,7 +630,7 @@ export async function GET(request: Request) {
       ).includes(search);
     })
     .sort((left, right) => right.score - left.score);
-  const picks = chooseDiversePicks(ranked.slice(0, 60));
+  const picks = chooseDiversePicks(ranked, daypart.key, mode, Boolean(search));
   const freshness = [
     ...((venues || []) as VenueRow[]).map((venue) => venue.enriched_at),
     ...safeEvents.map((event) => event.created_at),
@@ -574,9 +665,9 @@ export async function GET(request: Request) {
   }
   const resultHeadline =
     picks.length === 1
-      ? "One good move for right now."
+      ? "One good thing to do right now."
       : picks.length === 2
-        ? "Two good moves for right now."
+        ? "Two good things to do right now."
         : daypart.headline;
 
   return NextResponse.json(

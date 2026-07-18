@@ -19,6 +19,12 @@ type VenueRow = {
   lng?: number | null;
   google_place_id?: string | null;
   photo_source?: string | null;
+  google_rating?: number | null;
+  hours?: Record<string, unknown> | null;
+  phone?: string | null;
+  website?: string | null;
+  google_types?: string[] | null;
+  enriched_at?: string | null;
 };
 
 type GooglePlace = {
@@ -29,6 +35,13 @@ type GooglePlace = {
     latitude?: number;
     longitude?: number;
   };
+  rating?: number;
+  regularOpeningHours?: Record<string, unknown>;
+  nationalPhoneNumber?: string;
+  internationalPhoneNumber?: string;
+  websiteUri?: string;
+  types?: string[];
+  primaryType?: string;
 };
 
 const NAME_STOP_WORDS = new Set([
@@ -163,7 +176,8 @@ async function getPlaceDetails(placeId: string, apiKey: string) {
     {
       headers: {
         "X-Goog-Api-Key": apiKey,
-        "X-Goog-FieldMask": "id,displayName,formattedAddress,location",
+        "X-Goog-FieldMask":
+          "id,displayName,formattedAddress,location,rating,regularOpeningHours,nationalPhoneNumber,internationalPhoneNumber,websiteUri,types,primaryType",
       },
       cache: "no-store",
     }
@@ -203,7 +217,7 @@ async function findGooglePlace(venue: VenueRow, apiKey: string) {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": apiKey,
         "X-Goog-FieldMask":
-          "places.id,places.displayName,places.formattedAddress,places.location",
+          "places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.regularOpeningHours,places.nationalPhoneNumber,places.internationalPhoneNumber,places.websiteUri,places.types,places.primaryType",
       },
       body: JSON.stringify(body),
       cache: "no-store",
@@ -250,7 +264,11 @@ async function refreshVenue(venue: VenueRow, apiKey: string) {
   if (!place?.id) {
     await supabaseAdmin
       .from("venues")
-      .update({ photo_url: null, photo_source: "storefront_unavailable" })
+      .update({
+        photo_url: null,
+        photo_source: "storefront_unavailable",
+        enriched_at: new Date().toISOString(),
+      })
       .eq("id", venue.id);
 
     return { venue: venue.name, status: "no_verified_business_match" };
@@ -271,6 +289,16 @@ async function refreshVenue(venue: VenueRow, apiKey: string) {
     photo_source: storefrontAvailable
       ? "google_streetview"
       : "storefront_unavailable",
+    google_rating: place.rating ?? venue.google_rating ?? null,
+    hours: place.regularOpeningHours ?? venue.hours ?? null,
+    phone:
+      place.nationalPhoneNumber ||
+      place.internationalPhoneNumber ||
+      venue.phone ||
+      null,
+    website: place.websiteUri || venue.website || null,
+    google_types: place.types || venue.google_types || [],
+    enriched_at: new Date().toISOString(),
   };
   const { error } = await supabaseAdmin
     .from("venues")
@@ -310,18 +338,14 @@ export async function GET(request: Request) {
   const venueId = url.searchParams.get("venueId");
   let query = supabaseAdmin
     .from("venues")
-    .select("id,name,city,address,lat,lng,google_place_id,photo_source")
-    .order("name", { ascending: true })
+    .select("id,name,city,address,lat,lng,google_place_id,photo_source,google_rating,hours,phone,website,google_types,enriched_at")
+    .order("enriched_at", { ascending: true, nullsFirst: true })
     .limit(limit);
 
   if (venueId) {
     query = query.eq("id", venueId);
   } else if (retryUnavailable) {
     query = query.eq("photo_source", "storefront_unavailable");
-  } else {
-    query = query.or(
-      "photo_source.is.null,photo_source.eq.google,photo_source.eq.foursquare"
-    );
   }
 
   const { data: venues, error } = await query;
