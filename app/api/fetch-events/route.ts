@@ -52,6 +52,11 @@ export async function GET(req: Request) {
       secret
     );
 
+    const dataQualityResult = await safeInternalFetch(
+      `${baseUrl}/api/data-quality`,
+      secret
+    );
+
     return NextResponse.json({
       success: true,
       synced_at: new Date().toISOString(),
@@ -59,6 +64,7 @@ export async function GET(req: Request) {
       eventbrite_api: eventbriteApiResult,
       eventbrite_scrape: eventbriteScrapeResult,
       venue_scores: venueScoreResult,
+      data_quality: dataQualityResult,
     }, {
       headers: { "Cache-Control": "no-store" },
     });
