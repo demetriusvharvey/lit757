@@ -1,10 +1,45 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { isCronAuthorized } from "../../../src/lib/cron-auth";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
+
+type VenueRow = {
+  id: string;
+  name: string;
+  category?: string | null;
+  type?: string | null;
+  google_types?: string[] | null;
+  google_rating?: number | null;
+  photo_url?: string | null;
+  phone?: string | null;
+  website?: string | null;
+};
+
+type EventRow = {
+  name?: string | null;
+  title?: string | null;
+  venue_name?: string | null;
+  venue?: string | null;
+  location?: string | null;
+  start_time?: string | null;
+  date?: string | null;
+  starts_at?: string | null;
+};
+
+type IntelligenceResult = {
+  venue: string;
+  score: number;
+  status: string;
+  matched_events: number;
+  tonight_events: number;
+  model: "automatic";
+  updated: boolean;
+  error: string | null;
+};
 
 function clampScore(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
@@ -18,16 +53,6 @@ function hoursUntil(dateValue?: string | null) {
   if (Number.isNaN(date.getTime())) return null;
 
   return (date.getTime() - Date.now()) / (1000 * 60 * 60);
-}
-
-function hoursSince(dateValue?: string | null) {
-  if (!dateValue) return null;
-
-  const date = new Date(dateValue);
-
-  if (Number.isNaN(date.getTime())) return null;
-
-  return (Date.now() - date.getTime()) / (1000 * 60 * 60);
 }
 
 function isTonight(dateValue?: string | null) {
@@ -49,45 +74,104 @@ function isTonight(dateValue?: string | null) {
 function normalize(value?: string | null) {
   return String(value || "")
     .toLowerCase()
+    .normalize("NFKD")
+    .replace(/\p{Diacritic}/gu, "")
     .replace(/&/g, " and ")
     .replace(/[^a-z0-9\s]/g, " ")
-    .replace(
-      /\b(the|a|an|bar|grill|restaurant|lounge|club|venue|va|virginia)\b/g,
-      " "
-    )
     .replace(/\s+/g, " ")
     .trim();
 }
 
-function eventMatchesVenue(event: any, venue: any) {
-  const eventVenue = normalize(
+function canonicalVenueName(value?: string | null) {
+  return normalize(value).replace(/^the\s+/, "");
+}
+
+const GENERIC_VENUE_MATCH_TOKENS = new Set([
+  "arena",
+  "brewery",
+  "brewing",
+  "bar",
+  "cafe",
+  "center",
+  "club",
+  "coffee",
+  "deli",
+  "grill",
+  "hall",
+  "kitchen",
+  "lounge",
+  "pavilion",
+  "pub",
+  "restaurant",
+  "rooftop",
+  "the",
+  "venue",
+]);
+
+function eventVenueMatchScore(event: EventRow, venue: VenueRow) {
+  const eventVenue = canonicalVenueName(
     event.venue_name || event.venue || event.location
   );
 
-  const venueName = normalize(venue.name);
+  const venueName = canonicalVenueName(venue.name);
 
-  if (!eventVenue || !venueName) return false;
-  if (eventVenue === venueName) return true;
-  if (eventVenue.includes(venueName) || venueName.includes(eventVenue)) {
-    return true;
+  if (!eventVenue || !venueName) return 0;
+  if (eventVenue === venueName) return 1;
+  const shorterName = eventVenue.length <= venueName.length ? eventVenue : venueName;
+  if (
+    shorterName.length >= 6 &&
+    shorterName.split(" ").length >= 2 &&
+    (eventVenue.includes(venueName) || venueName.includes(eventVenue))
+  ) {
+    return 0.94;
   }
 
   const eventTokens = new Set(
-    eventVenue.split(" ").filter((x: string) => x.length >= 3)
+    eventVenue
+      .split(" ")
+      .filter(
+        (x: string) => x.length >= 3 && !GENERIC_VENUE_MATCH_TOKENS.has(x)
+      )
   );
 
   const venueTokens = venueName
     .split(" ")
-    .filter((x: string) => x.length >= 3);
+    .filter(
+      (x: string) => x.length >= 3 && !GENERIC_VENUE_MATCH_TOKENS.has(x)
+    );
 
   const hits = venueTokens.filter((token: string) =>
     eventTokens.has(token)
   ).length;
 
-  return hits / Math.max(venueTokens.length, eventTokens.size) >= 0.55;
+  const coverage = hits / Math.max(venueTokens.length, eventTokens.size);
+  return hits >= 2 && coverage >= 0.55 ? Math.min(0.89, coverage) : 0;
 }
 
-function getCategoryBoost(venue: any) {
+function assignEventsToVenues(venues: VenueRow[], events: EventRow[]) {
+  const assignments = new Map<string, EventRow[]>();
+
+  for (const event of events) {
+    const best = venues
+      .map((venue) => ({ venue, match: eventVenueMatchScore(event, venue) }))
+      .filter(({ match }) => match >= 0.55)
+      .sort(
+        (left, right) =>
+          right.match - left.match ||
+          Number(right.venue.google_rating || 0) - Number(left.venue.google_rating || 0)
+      )[0];
+
+    if (!best) continue;
+    assignments.set(best.venue.id, [
+      ...(assignments.get(best.venue.id) || []),
+      event,
+    ]);
+  }
+
+  return assignments;
+}
+
+function getCategoryBoost(venue: VenueRow) {
   const text =
     `${venue.category || ""} ${venue.type || ""} ${
       venue.google_types?.join(" ") || ""
@@ -103,109 +187,41 @@ function getCategoryBoost(venue: any) {
   return 5;
 }
 
-function getSignalBoost(signals: any[]) {
-  let boost = 0;
-
-  const recentSignals = signals.filter((signal) => {
-    const h = hoursSince(signal.created_at);
-    return h !== null && h <= 12;
-  });
-
-  const veryFreshSignals = signals.filter((signal) => {
-    const h = hoursSince(signal.created_at);
-    return h !== null && h <= 3;
-  });
-
-  const activeSignals = recentSignals.filter((signal) =>
-    ["active", "packed", "good", "line", "music"].includes(signal.vibe_type)
-  );
-
-  const quietSignals = recentSignals.filter((signal) =>
-    ["quiet"].includes(signal.vibe_type)
-  );
-
-  boost += Math.min(25, activeSignals.length * 6);
-  boost += Math.min(15, veryFreshSignals.length * 4);
-
-  if (quietSignals.length >= 2 && activeSignals.length === 0) {
-    boost -= 18;
-  } else {
-    boost -= Math.min(10, quietSignals.length * 4);
-  }
-
-  return boost;
-}
-
-function getSignalTone(signals: any[]) {
-  const recentSignals = signals.filter((signal) => {
-    const h = hoursSince(signal.created_at);
-    return h !== null && h <= 12;
-  });
-
-  const counts = recentSignals.reduce<Record<string, number>>((acc, signal) => {
-    acc[signal.vibe_type] = (acc[signal.vibe_type] || 0) + 1;
-    return acc;
-  }, {});
-
-  const activeTotal =
-    (counts.active || 0) +
-    (counts.packed || 0) +
-    (counts.good || 0) +
-    (counts.line || 0) +
-    (counts.music || 0);
-
-  const quietTotal = counts.quiet || 0;
-
-  if (activeTotal >= 5) return "people are clearly feeling it";
-  if (activeTotal >= 2) return "people are starting to speak on it";
-  if (quietTotal >= 2 && activeTotal === 0) return "people are calling it slow";
-  if (recentSignals.length > 0) return "people are checking in";
-
-  return null;
-}
-
 function buildSummary(
-  venue: any,
-  matchedEvents: any[],
-  signals: any[],
+  matchedEvents: EventRow[],
   score: number
 ) {
   const tonightEvents = matchedEvents.filter((event) =>
     isTonight(event.start_time || event.date || event.starts_at)
   );
 
-  const signalTone = getSignalTone(signals);
-
-  if (signalTone) {
-    if (score >= 75) return `This spot is heating up — ${signalTone}.`;
-    if (score >= 55) return `This spot has momentum tonight — ${signalTone}.`;
-    if (score >= 35) return `Worth keeping an eye on — ${signalTone}.`;
-    return `Still early here, but ${signalTone}.`;
-  }
-
   if (tonightEvents.length > 0) {
     const event = tonightEvents[0];
     const title = event.title || event.name || "an event";
 
     if (score >= 75) {
-      return `${title} has this spot looking like one of the stronger moves tonight.`;
+      return `${title} makes this one of tonight's strongest scheduled options.`;
     }
 
     if (score >= 55) {
-      return `${title} gives this spot a reason to keep an eye on tonight.`;
+      return `${title} puts this spot on tonight's shortlist.`;
     }
 
-    return `${title} is on the calendar tonight, but the vibe still looks early.`;
+    return `${title} is confirmed on the calendar tonight.`;
   }
 
-  if (score >= 75) return "This spot is looking active tonight.";
-  if (score >= 55) return "This spot has some momentum tonight.";
-  if (score >= 35) return "Worth watching if you are nearby.";
+  if (score >= 75) return "A highly rated option backed by current venue data.";
+  if (score >= 55) return "A strong option based on ratings, venue details, and time of day.";
+  if (score >= 35) return "A known local option with enough data to recommend.";
 
-  return "Quiet right now, but that can change later.";
+  return "Still gathering enough current data to recommend this confidently.";
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  if (!isCronAuthorized(request)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const { data: venues, error: venuesError } = await supabaseAdmin
       .from("venues")
@@ -230,34 +246,17 @@ export async function GET() {
       );
     }
 
-    const { data: signals, error: signalsError } = await supabaseAdmin
-      .from("venue_signals")
-      .select("*")
-      .gte(
-        "created_at",
-        new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
-      );
-
-    if (signalsError) {
-      return NextResponse.json(
-        { success: false, error: signalsError.message },
-        { status: 500 }
-      );
-    }
-
-    const results: any[] = [];
+    const eventAssignments = assignEventsToVenues(
+      (venues || []) as VenueRow[],
+      (events || []) as EventRow[]
+    );
+    const results: IntelligenceResult[] = [];
 
     for (const venue of venues || []) {
-      const matchedEvents = (events || []).filter((event) =>
-        eventMatchesVenue(event, venue)
-      );
+      const matchedEvents = eventAssignments.get(venue.id) || [];
 
       const tonightEvents = matchedEvents.filter((event) =>
         isTonight(event.start_time || event.date || event.starts_at)
-      );
-
-      const venueSignals = (signals || []).filter(
-        (signal) => signal.venue_id === venue.id
       );
 
       let score = 15;
@@ -282,24 +281,19 @@ export async function GET() {
         else if (h !== null && h > 6 && h <= 12) score += 10;
       }
 
-      const signalBoost = getSignalBoost(venueSignals);
-      score += signalBoost;
-
       const finalScore = clampScore(score);
 
       const status =
         finalScore >= 75
-          ? "Buzzing"
+          ? "Top option"
           : finalScore >= 55
-          ? "Picking up"
+          ? "Strong option"
           : finalScore >= 35
-          ? "Worth watching"
-          : "Quiet";
+          ? "Known option"
+          : "Needs more data";
 
       const summary = buildSummary(
-        venue,
         matchedEvents,
-        venueSignals,
         finalScore
       );
 
@@ -320,8 +314,7 @@ export async function GET() {
         status,
         matched_events: matchedEvents.length,
         tonight_events: tonightEvents.length,
-        signals_24h: venueSignals.length,
-        signal_boost: signalBoost,
+        model: "automatic",
         updated: !updateError,
         error: updateError?.message || null,
       });
@@ -332,9 +325,12 @@ export async function GET() {
       venues_processed: results.length,
       results,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     return NextResponse.json(
-      { success: false, error: error.message },
+      {
+        success: false,
+        error: error instanceof Error ? error.message : "Venue intelligence failed",
+      },
       { status: 500 }
     );
   }

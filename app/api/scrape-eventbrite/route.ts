@@ -1,5 +1,7 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- Scraped JSON-LD and Next payloads have no stable schema. */
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { isCronAuthorized } from "../../../src/lib/cron-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +20,8 @@ const EVENTBRITE_CITY_URLS = [
   "https://www.eventbrite.com/d/va--norfolk/events/",
   "https://www.eventbrite.com/d/va--virginia-beach/events/",
   "https://www.eventbrite.com/d/va--chesapeake/events/",
+  "https://www.eventbrite.com/d/va--portsmouth/events/",
+  "https://www.eventbrite.com/d/va--suffolk/events/",
   "https://www.eventbrite.com/d/va--hampton/events/",
   "https://www.eventbrite.com/d/va--newport-news/events/",
 ];
@@ -51,9 +55,7 @@ const NIGHTLIFE_KEYWORDS = [
 export async function GET(req: Request) {
   try {
     const requestUrl = new URL(req.url);
-    const secret = requestUrl.searchParams.get("secret");
-
-    if (secret !== process.env.CRON_SECRET) {
+    if (!isCronAuthorized(req)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -197,11 +199,13 @@ function extractJsonLdEvents(html: string): ScrapedEvent[] {
 
         if (!name || !sourceUrl) continue;
 
+        const cardTimeLabel = extractEventCardTime(html, id);
+
         events.push({
           source_event_id: `eventbrite_${id}`,
           name,
           venue_name: getLocationName(node.location),
-          start_time: toIsoOrNull(text(node.startDate)),
+          start_time: toEventDateIso(text(node.startDate), cardTimeLabel),
           end_time: toIsoOrNull(text(node.endDate)),
           source: "eventbrite",
           ticket_status: inferTicketStatus(`${name} ${text(node.offers?.availability)}`),
@@ -328,7 +332,23 @@ function flattenJsonLd(input: any): any[] {
   if (!input) return [];
   if (Array.isArray(input)) return input.flatMap(flattenJsonLd);
   if (input["@graph"]) return flattenJsonLd(input["@graph"]);
+  if (input.itemListElement) return flattenJsonLd(input.itemListElement);
+  if (input.item) return flattenJsonLd(input.item);
   return [input];
+}
+
+function extractEventCardTime(html: string, eventId: string) {
+  if (!eventId) return "";
+
+  const markerIndex = html.indexOf(`data-event-id="${eventId}"`);
+  if (markerIndex < 0) return "";
+
+  const cardHtml = html.slice(markerIndex, markerIndex + 10000);
+  const timeMatch = cardHtml.match(
+    /<p[^>]*>([^<]*\b\d{1,2}:\d{2}\s*(?:AM|PM)\b[^<]*)<\/p>/i
+  );
+
+  return timeMatch?.[1] ? stripHtml(timeMatch[1]).trim() : "";
 }
 
 function walk(value: any, cb: (value: any) => void) {
@@ -371,6 +391,8 @@ function inferCityVenueName(pageUrl: string) {
   if (pageUrl.includes("virginia-beach")) return "Virginia Beach Event";
   if (pageUrl.includes("norfolk")) return "Norfolk Event";
   if (pageUrl.includes("chesapeake")) return "Chesapeake Event";
+  if (pageUrl.includes("portsmouth")) return "Portsmouth Event";
+  if (pageUrl.includes("suffolk")) return "Suffolk Event";
   if (pageUrl.includes("hampton")) return "Hampton Event";
   if (pageUrl.includes("newport-news")) return "Newport News Event";
   return "Eventbrite Event";
@@ -411,6 +433,41 @@ function toIsoOrNull(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
   return date.toISOString();
+}
+
+function toEventDateIso(dateValue: string, timeLabel: string) {
+  if (!dateValue) return null;
+
+  const dateOnlyMatch = dateValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const timeMatch = timeLabel.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+
+  if (!dateOnlyMatch || !timeMatch) return toIsoOrNull(dateValue);
+
+  const [, yearText, monthText, dayText] = dateOnlyMatch;
+  let hour = Number(timeMatch[1]) % 12;
+  const minute = Number(timeMatch[2]);
+  if (timeMatch[3].toUpperCase() === "PM") hour += 12;
+
+  const reference = new Date(`${yearText}-${monthText}-${dayText}T12:00:00Z`);
+  const timeZoneName = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    timeZoneName: "shortOffset",
+  })
+    .formatToParts(reference)
+    .find((part) => part.type === "timeZoneName")?.value;
+  const offsetMatch = timeZoneName?.match(/GMT([+-]\d{1,2})(?::(\d{2}))?/i);
+  const offsetMinutes = offsetMatch
+    ? Number(offsetMatch[1]) * 60 + Math.sign(Number(offsetMatch[1])) * Number(offsetMatch[2] || 0)
+    : -4 * 60;
+  const localAsUtc = Date.UTC(
+    Number(yearText),
+    Number(monthText) - 1,
+    Number(dayText),
+    hour,
+    minute
+  );
+
+  return new Date(localAsUtc - offsetMinutes * 60 * 1000).toISOString();
 }
 
 function text(value: any) {

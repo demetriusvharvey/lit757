@@ -1,26 +1,118 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f7f5ef;
+  --foreground: #171716;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-inter);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-inter), Inter, Helvetica, Arial, sans-serif;
+  font-synthesis: none;
+  letter-spacing: -0.01em;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--background);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+a,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.mapboxgl-map {
+  font-family: var(--font-inter), Inter, Helvetica, Arial, sans-serif;
+}
+
+.mapboxgl-ctrl-top-right {
+  right: 12px;
+  top: 58px;
+}
+
+.mapboxgl-ctrl-group {
+  overflow: hidden;
+  border: 1px solid rgba(17, 17, 16, 0.1);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 16px 48px rgba(35, 31, 26, 0.16);
+  backdrop-filter: blur(18px);
+}
+
+.mapboxgl-ctrl-group button {
+  height: 38px;
+  width: 40px;
+  border-color: rgba(17, 17, 16, 0.08);
+}
+
+.mapboxgl-ctrl-group button + button {
+  border-top: 1px solid rgba(17, 17, 16, 0.08);
+}
+
+.mapboxgl-ctrl-group button:hover {
+  background-color: rgba(17, 17, 16, 0.05);
+}
+
+.mapboxgl-ctrl-icon {
+  opacity: 0.62;
+}
+
+.mapboxgl-ctrl-attrib {
+  border-radius: 10px 0 0 0;
+  background: rgba(255, 255, 255, 0.82) !important;
+  color: rgba(17, 17, 16, 0.52);
+  backdrop-filter: blur(12px);
+}
+
+.mapboxgl-ctrl-attrib a {
+  color: rgba(17, 17, 16, 0.62);
+}
+
+.discovery-user-marker {
+  height: 16px;
+  width: 16px;
+  border: 3px solid white;
+  border-radius: 999px;
+  background: #2563eb;
+  box-shadow: 0 0 0 8px rgba(37, 99, 235, 0.2), 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

@@ -27,10 +27,13 @@ export default function AdminPage() {
   const [feedback, setFeedback] = useState<string>("");
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const key = params.get("key");
-    setAuthorized(key === "lit757admin");
-    setCheckedAuth(true);
+    const task = window.setTimeout(() => {
+      const params = new URLSearchParams(window.location.search);
+      const key = params.get("key");
+      setAuthorized(key === "lit757admin");
+      setCheckedAuth(true);
+    }, 0);
+    return () => window.clearTimeout(task);
   }, []);
 
   useEffect(() => {

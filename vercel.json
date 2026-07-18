@@ -1,8 +1,12 @@
 {
   "crons": [
     {
-      "path": "/api/fetch-events?secret=supersecret123",
-      "schedule": "0 10 * * *"
+      "path": "/api/fetch-events",
+      "schedule": "0 21 * * *"
+    },
+    {
+      "path": "/api/refresh-venue-photos",
+      "schedule": "30 10 * * *"
     }
   ]
 }
