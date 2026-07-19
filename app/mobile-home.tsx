@@ -1,15 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import "./mobile-home.css";
-import { Bell, Bookmark, CalendarDays, ChevronRight, Compass, Heart, Map, Music2, Search, ShoppingBag, Sparkles, TreePine, Utensils, Wine, X } from "lucide-react";
+import { Bell, Bookmark, CalendarDays, ChevronRight, Compass, Heart, Map, Music2, Search, Send, ShoppingBag, Sparkles, TreePine, Utensils, Wine, X } from "lucide-react";
 
 type Venue = { id:string; name:string; city?:string; kind?:string; type?:string; lat:number; lng:number; photoUrl?:string|null; reason?:string; openNow?:boolean|null; event?:{name?:string|null;ticketUrl?:string|null;url?:string|null}|null; activity?:{score:number;label:string;trendLabel:string} };
 type Payload = { venues?:Venue[]; picks?:Venue[] };
 
 const cats = [["All",Compass],["Food",Utensils],["Drinks",Wine],["Nightlife",Music2],["Events",CalendarDays],["Outdoors",TreePine],["Shopping",ShoppingBag]] as const;
+const prompts=["Date night under $100","Live music tonight","Something fun with kids","Drinks then dancing"];
 const score = (v:Venue) => v.activity?.score ?? 70;
 const validVenue = (v:Venue) => Number.isFinite(v.lat) && Number.isFinite(v.lng) && v.lat !== 0 && v.lng !== 0;
 const categoryFor=(v:Venue)=>{
@@ -28,6 +29,12 @@ export default function MobileHome(){
   const [venues,setVenues]=useState<Venue[]>([]);
   const [active,setActive]=useState("All");
   const [selected,setSelected]=useState<Venue|null>(null);
+  const [plannerOpen,setPlannerOpen]=useState(false);
+  const [plannerQuery,setPlannerQuery]=useState("");
+  const [plannerTitle,setPlannerTitle]=useState("");
+  const [plannerResults,setPlannerResults]=useState<Venue[]>([]);
+  const [plannerLoading,setPlannerLoading]=useState(false);
+  const [plannerError,setPlannerError]=useState("");
   const mapEl=useRef<HTMLDivElement|null>(null);
   const mapRef=useRef<mapboxgl.Map|null>(null);
 
@@ -66,26 +73,17 @@ export default function MobileHome(){
       }
       if(!pinSource){
         map.addSource("mobile-venues",{type:"geojson",data:geojson,cluster:true,clusterMaxZoom:12,clusterRadius:90});
-        map.addLayer({id:"mobile-clusters",type:"circle",source:"mobile-venues",filter:["has","point_count"],minzoom:9.2,paint:{
-          "circle-color":["step",["get","point_count"],"#f2c94c",20,"#ff8b34",55,"#ff554a"],
-          "circle-radius":["step",["get","point_count"],10,20,13,55,16],
-          "circle-stroke-width":1.5,"circle-stroke-color":"rgba(255,255,255,.82)","circle-opacity":.88
-        }});
+        map.addLayer({id:"mobile-clusters",type:"circle",source:"mobile-venues",filter:["has","point_count"],minzoom:9.2,paint:{"circle-color":["step",["get","point_count"],"#f2c94c",20,"#ff8b34",55,"#ff554a"],"circle-radius":["step",["get","point_count"],10,20,13,55,16],"circle-stroke-width":1.5,"circle-stroke-color":"rgba(255,255,255,.82)","circle-opacity":.88}});
         map.addLayer({id:"mobile-cluster-count",type:"symbol",source:"mobile-venues",filter:["has","point_count"],minzoom:9.2,layout:{"text-field":["get","point_count_abbreviated"],"text-size":9},paint:{"text-color":"#081016"}});
-        map.addLayer({id:"mobile-venue-pins",type:"circle",source:"mobile-venues",filter:["!",["has","point_count"]],minzoom:11.3,paint:{
-          "circle-radius":["interpolate",["linear"],["zoom"],11.3,3.5,14,6.5,16,8],
-          "circle-color":["step",["get","score"],"#43d879",45,"#f2c94c",65,"#ff8b34",82,"#ff554a"],
-          "circle-stroke-width":["interpolate",["linear"],["zoom"],11.3,.8,14,1.5],"circle-stroke-color":"rgba(255,255,255,.86)","circle-opacity":.94
-        }});
+        map.addLayer({id:"mobile-venue-pins",type:"circle",source:"mobile-venues",filter:["!",["has","point_count"]],minzoom:11.3,paint:{"circle-radius":["interpolate",["linear"],["zoom"],11.3,3.5,14,6.5,16,8],"circle-color":["step",["get","score"],"#43d879",45,"#f2c94c",65,"#ff8b34",82,"#ff554a"],"circle-stroke-width":["interpolate",["linear"],["zoom"],11.3,.8,14,1.5],"circle-stroke-color":"rgba(255,255,255,.86)","circle-opacity":.94}});
         map.addLayer({id:"mobile-venue-score",type:"symbol",source:"mobile-venues",filter:["!",["has","point_count"]],minzoom:14.2,layout:{"text-field":["to-string",["get","score"]],"text-size":7.5},paint:{"text-color":"#ffffff"}});
-
         map.on("click","mobile-clusters",e=>{
           const feature=map.queryRenderedFeatures(e.point,{layers:["mobile-clusters"]})[0];
           const clusterId=feature?.properties?.cluster_id;
           const source=map.getSource("mobile-venues") as mapboxgl.GeoJSONSource;
           if(clusterId===undefined)return;
           source.getClusterExpansionZoom(clusterId,(error,zoom)=>{
-            if(error||zoom===undefined)return;
+            if(error||zoom==null)return;
             map.easeTo({center:(feature.geometry as GeoJSON.Point).coordinates as [number,number],zoom});
           });
         });
@@ -95,10 +93,7 @@ export default function MobileHome(){
           const venue=mapped[index];
           if(venue){setSelected(venue);map.easeTo({center:[venue.lng,venue.lat],zoom:Math.max(map.getZoom(),13),duration:550});}
         });
-        ["mobile-clusters","mobile-venue-pins"].forEach(layer=>{
-          map.on("mouseenter",layer,()=>{map.getCanvas().style.cursor="pointer"});
-          map.on("mouseleave",layer,()=>{map.getCanvas().style.cursor=""});
-        });
+        ["mobile-clusters","mobile-venue-pins"].forEach(layer=>{map.on("mouseenter",layer,()=>{map.getCanvas().style.cursor="pointer"});map.on("mouseleave",layer,()=>{map.getCanvas().style.cursor=""});});
       }
       if(mapped.length){
         const bounds=new mapboxgl.LngLatBounds();mapped.forEach(v=>bounds.extend([v.lng,v.lat]));
@@ -110,6 +105,23 @@ export default function MobileHome(){
     map.loaded()?render():map.once("load",render);
   },[mapped]);
 
+  async function runPlanner(query:string){
+    const clean=query.trim();if(!clean)return;
+    setPlannerQuery(clean);setPlannerLoading(true);setPlannerError("");setPlannerTitle(clean);
+    try{
+      const response=await fetch(`/api/discover?city=All%20757&mode=all&q=${encodeURIComponent(clean)}`,{cache:"no-store"});
+      const payload=await response.json() as Payload&{error?:string};
+      if(!response.ok)throw new Error(payload.error||"Could not build that plan");
+      const results=(payload.picks||payload.venues||[]).slice(0,3);
+      setPlannerResults(results);
+      if(results.length){setVenues(results);setActive("All");}
+      else setPlannerError("No strong matches yet. Try a broader request.");
+    }catch(error){setPlannerError(error instanceof Error?error.message:"Could not build that plan");}
+    finally{setPlannerLoading(false);}
+  }
+  function submitPlanner(event:FormEvent){event.preventDefault();void runPlanner(plannerQuery);}
+  function closePlanner(){setPlannerOpen(false);setPlannerError("");}
+
   const activePlaces=filtered.filter(v=>score(v)>=52&&v.openNow!==false).length;
   const rising=filtered.filter(v=>v.activity?.trendLabel?.toLowerCase().includes("busier")).length;
   const pulseText=active==="All"?`${activePlaces} active places across Hampton Roads`:`${activePlaces} active ${active.toLowerCase()} spots right now`;
@@ -120,9 +132,10 @@ export default function MobileHome(){
       <section className="mobile-native-pulse"><div className="pulse-kicker"><b/> LIVE NOW <span>Updated just now</span></div><h1>{active==="All"?"What’s happening around you":"What’s happening in "+active}</h1><div className="pulse-summary"><strong>{pulseText}</strong>{rising>0&&<span>🔥 {rising} heating up</span>}</div></section>
       <section className="mobile-native-map"><div ref={mapEl} className="mobile-native-mapbox"/><div className="map-key"><span><i className="quiet"/>Quiet</span><span><i className="moderate"/>Moderate</span><span><i className="busy"/>Busy</span><span><i className="hot"/>Very busy</span></div>{selected&&<article className="map-preview"><button className="map-preview-close" onClick={()=>setSelected(null)} aria-label="Close preview"><X/></button><div className="map-preview-photo">{selected.photoUrl?<img src={selected.photoUrl} alt=""/>:selected.name.slice(0,1)}</div><div><span className="map-preview-score">{score(selected)}</span><strong>{selected.name}</strong><small>{selected.activity?.trendLabel||"Steady"} · {selected.activity?.label||"Active now"}</small><p>{selected.event?.name?`🎟 ${selected.event.name}`:selected.reason||"Popular nearby right now"}</p></div><ChevronRight/></article>}</section>
       <nav className="mobile-category-rail">{cats.map(([label,Icon])=><button key={label} className={active===label?"active":""} onClick={()=>setActive(label)}><span><Icon/></span><small>{label}</small></button>)}</nav>
+      <button className="mobile-plan-card" onClick={()=>setPlannerOpen(true)}><span className="plan-orb"><Sparkles/></span><span><strong>Ask AI</strong><small>Tell us the vibe. We’ll plan the move.</small></span><b>Plan now <ChevronRight/></b></button>
       <section className="mobile-native-feed"><div className="feed-title"><h2>{active==="All"?"Live Activity Feed":active} <span>{filtered.length}</span></h2><button onClick={()=>setActive("All")}>All places <ChevronRight/></button></div><div className="feed-list">{filtered.map((v,i)=><article className="feed-row" key={v.id} onClick={()=>{setSelected(v);if(validVenue(v))mapRef.current?.easeTo({center:[v.lng,v.lat],zoom:13,duration:550})}}><div className="feed-photo">{v.photoUrl?<img src={v.photoUrl} alt=""/>:v.name.slice(0,1)}</div><div className={`feed-score s${i%4}`}>{score(v)}</div><div className="feed-copy"><strong>{v.name}</strong><span><b>{v.activity?.trendLabel||"Steady"}</b> · {v.activity?.label||"Active now"}</span><small>{v.event?.name?`🎟 ${v.event.name}`:`☆ ${v.reason||"Popular nearby right now"}`}</small></div><div className="feed-meta"><span>{i===0?"Just now":`${Math.min(59,i*2+1)}m ago`}</span><ChevronRight/><Heart/></div></article>)}</div></section>
-      <button className="mobile-plan-card"><span className="plan-orb"><Sparkles/></span><span><strong>Plan my night</strong><small>AI-powered recommendations<br/>built around you</small></span><b>Get started <ChevronRight/></b></button>
     </main>
-    <nav className="mobile-native-bottom"><button className="active"><span><Compass/></span><small>Explore</small></button><button><span><Map/></span><small>Map</small></button><button><span><Heart/></span><small>Favorites</small></button><button><span><Bell/><i/></span><small>Alerts</small></button><button><span><CalendarDays/></span><small>Plans</small></button></nav>
+    <nav className="mobile-native-bottom"><button className="active"><span><Compass/></span><small>Explore</small></button><button><span><Map/></span><small>Map</small></button><button><span><Heart/></span><small>Favorites</small></button><button><span><Bell/><i/></span><small>Alerts</small></button><button onClick={()=>setPlannerOpen(true)}><span><Sparkles/></span><small>Ask AI</small></button></nav>
+    {plannerOpen&&<div className="planner-backdrop" onClick={closePlanner}><section className="planner-sheet" onClick={event=>event.stopPropagation()}><div className="planner-handle"/><div className="planner-head"><div><span>ASK AI</span><h2>What kind of move?</h2><p>Describe the vibe, budget, people, or timing.</p></div><button onClick={closePlanner} aria-label="Close Ask AI"><X/></button></div><div className="planner-prompts">{prompts.map(prompt=><button key={prompt} onClick={()=>void runPlanner(prompt)}>{prompt}</button>)}</div><form onSubmit={submitPlanner} className="planner-form"><input value={plannerQuery} onChange={event=>setPlannerQuery(event.target.value)} placeholder="Try “chill date night near Norfolk”" aria-label="Ask AI what to plan"/><button disabled={plannerLoading||!plannerQuery.trim()} aria-label="Build my plan">{plannerLoading?<span className="planner-spinner"/>:<Send/>}</button></form>{plannerError&&<p className="planner-error">{plannerError}</p>}{plannerResults.length>0&&<div className="planner-results"><div className="planner-result-title"><span>YOUR PLAN</span><strong>{plannerTitle}</strong></div>{plannerResults.map((venue,index)=><button key={venue.id} onClick={()=>{setSelected(venue);closePlanner();if(validVenue(venue))mapRef.current?.easeTo({center:[venue.lng,venue.lat],zoom:13,duration:550})}}><i>{index+1}</i><span><strong>{venue.name}</strong><small>{venue.event?.name||venue.reason||venue.city||"Recommended for your plan"}</small></span><ChevronRight/></button>)}</div>}</section></div>}
   </div>;
 }
