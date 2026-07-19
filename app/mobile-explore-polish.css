@@ -1,0 +1,81 @@
+@media (max-width:1023px){
+  .mobile-native-scroll{
+    display:flex!important;
+    flex-direction:column!important;
+  }
+
+  .mobile-native-pulse{order:1!important}
+
+  /* Keep Ask AI directly below the hero without letting it dominate. */
+  .mobile-plan-card{
+    order:2!important;
+    grid-template-columns:38px minmax(0,1fr) auto!important;
+    gap:9px!important;
+    margin:8px 0 10px!important;
+    padding:9px 11px!important;
+    border-radius:15px!important;
+    box-shadow:none!important;
+  }
+  .mobile-plan-card .plan-orb{width:36px!important;height:36px!important}
+  .mobile-plan-card .plan-orb svg{width:18px!important;height:18px!important}
+  .mobile-plan-card strong{font-size:13px!important}
+  .mobile-plan-card small{font-size:9px!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important}
+  .mobile-plan-card>b{padding:8px 11px!important;font-size:10px!important}
+  .mobile-plan-card>b svg{width:13px!important}
+
+  /* Remove the clipped horizontal ticker that was showing beneath Ask AI. */
+  .mobile-native-pulse + div{display:none!important}
+
+  .mobile-category-rail{order:3!important;margin-top:0!important}
+
+  .mobile-native-map{
+    order:4!important;
+    position:relative!important;
+    height:370px!important;
+    margin-top:0!important;
+    overflow:hidden!important;
+  }
+
+  /* Subtle scroll cue: the map stays central, but users know live updates continue below. */
+  .mobile-native-map::before{
+    content:"🔥  Live updates below  ↓";
+    position:absolute;
+    left:50%;
+    bottom:12px;
+    z-index:8;
+    transform:translateX(-50%);
+    padding:8px 12px;
+    border:1px solid rgba(255,255,255,.16);
+    border-radius:999px;
+    background:rgba(5,8,12,.86);
+    color:#f3f5f7;
+    font-size:10px;
+    font-weight:800;
+    letter-spacing:.01em;
+    white-space:nowrap;
+    pointer-events:none;
+    box-shadow:0 8px 24px rgba(0,0,0,.28);
+    backdrop-filter:blur(14px);
+    animation:buzz-scroll-cue 3.8s ease-in-out infinite;
+  }
+
+  #buzz-feed-home-mount{
+    order:5!important;
+    margin-top:0!important;
+    position:relative!important;
+    z-index:2!important;
+  }
+
+  /* Explore is map + Buzz, not an endless duplicate venue directory. */
+  .mobile-native-feed{display:none!important}
+
+  @keyframes buzz-scroll-cue{
+    0%,72%,100%{transform:translate(-50%,0);opacity:.88}
+    82%{transform:translate(-50%,3px);opacity:1}
+    90%{transform:translate(-50%,0);opacity:.92}
+  }
+}
+
+@media (prefers-reduced-motion:reduce){
+  .mobile-native-map::before{animation:none!important}
+}
