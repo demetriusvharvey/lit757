@@ -22,22 +22,34 @@ const siteUrl = configuredHost.startsWith("http")
   ? configuredHost
   : `https://${configuredHost}`;
 
+const socialTitle = "Find the Most Active Places in the 757";
+const socialDescription =
+  "Live-ranked restaurants, nightlife, events and things to do across Hampton Roads.";
+
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
-  title: "Things To Do 757 — Find something worth doing now",
-  description: "Instant, interest-aware recommendations for things to do across Hampton Roads—updated automatically.",
+  title: `${socialTitle} | Things To Do 757`,
+  description: socialDescription,
   applicationName: "Things To Do 757",
   openGraph: {
-    title: "Things To Do 757",
-    description: "Find something worth doing in the 757—in under 10 seconds.",
+    title: socialTitle,
+    description: socialDescription,
     type: "website",
-    images: [{ url: "/og.png", width: 1200, height: 630, alt: "Things To Do 757" }],
+    siteName: "Things To Do 757",
+    images: [
+      {
+        url: "/opengraph-image",
+        width: 1200,
+        height: 630,
+        alt: "Find the most active places in the 757",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Things To Do 757",
-    description: "Find something worth doing in the 757—in under 10 seconds.",
-    images: ["/og.png"],
+    title: socialTitle,
+    description: socialDescription,
+    images: ["/opengraph-image"],
   },
 };
 
