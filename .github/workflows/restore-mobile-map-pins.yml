@@ -1,0 +1,38 @@
+name: Restore mobile map pins
+
+on:
+  push:
+    paths:
+      - .github/workflows/restore-mobile-map-pins.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Keep venue activity dots visible at every zoom
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("app/mobile-home.tsx")
+          text = path.read_text()
+
+          old_features = 'const liveFeatures:GeoJSON.Feature<GeoJSON.Point>[]=mapped.filter(v=>liveScore(v)>=58&&v.openNow!==false).map((v,index)=>({type:"Feature",geometry:{type:"Point",coordinates:coords(v)},properties:{id:v.id,index,name:v.name,score:liveScore(v)}}));'
+          new_features = 'const liveFeatures:GeoJSON.Feature<GeoJSON.Point>[]=mapped.filter(v=>v.openNow!==false).map((v,index)=>({type:"Feature",geometry:{type:"Point",coordinates:coords(v)},properties:{id:v.id,index,name:v.name,score:score(v)}}));'
+          if old_features not in text:
+              raise SystemExit("Expected live feature builder not found")
+          text = text.replace(old_features, new_features)
+
+          text = text.replace('source:"mobile-live-dots",maxzoom:11.2,paint:', 'source:"mobile-live-dots",maxzoom:17,paint:')
+          path.write_text(text)
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/mobile-home.tsx
+          git commit -m "fix: keep mobile venue pins visible and tappable"
+          git push
