@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { getRequestUser } from "../../../../src/lib/supabase-admin";
+import { getRequestUser } from "../../../../src/lib/server-auth";
 
 const OWNER_EMAIL = "demetriusvharvey@gmail.com";
 
@@ -14,7 +14,12 @@ export async function POST(request: Request) {
     { auth: { persistSession: false, autoRefreshToken: false } }
   );
 
-  const displayName = String(user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split("@")[0] || "New member");
+  const displayName = String(
+    user.user_metadata?.full_name ||
+      user.user_metadata?.name ||
+      user.email?.split("@")[0] ||
+      "New member"
+  );
   const provider = String(user.app_metadata?.provider || "email");
 
   const { data: existing } = await admin
@@ -27,19 +32,25 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, alreadyNotified: true });
   }
 
-  await admin.from("member_profiles").upsert({
-    user_id: user.id,
-    display_name: displayName,
-    points: 25,
-    reputation_level: "New Member",
-  }, { onConflict: "user_id" });
+  await admin.from("member_profiles").upsert(
+    {
+      user_id: user.id,
+      display_name: displayName,
+      points: 25,
+      reputation_level: "New Member",
+    },
+    { onConflict: "user_id" }
+  );
 
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
-    return NextResponse.json({
-      success: false,
-      error: "RESEND_API_KEY is not configured",
-    }, { status: 503 });
+    return NextResponse.json(
+      {
+        success: false,
+        error: "RESEND_API_KEY is not configured",
+      },
+      { status: 503 }
+    );
   }
 
   const sent = await fetch("https://api.resend.com/emails", {
@@ -75,5 +86,5 @@ function escapeHtml(value: string) {
     ">": "&gt;",
     "'": "&#39;",
     '"': "&quot;",
-  }[character] || character));
+  })[character] || character);
 }
