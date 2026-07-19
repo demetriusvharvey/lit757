@@ -67,7 +67,7 @@ export default function MobileHome(){
     const map=mapRef.current;if(!map)return;
     const render=()=>{
       const allFeatures:GeoJSON.Feature<GeoJSON.Point>[]=mapped.map((v,index)=>({type:"Feature",geometry:{type:"Point",coordinates:coords(v)},properties:{id:v.id,index,name:v.name,score:score(v),category:categoryFor(v)}}));
-      const liveFeatures:GeoJSON.Feature<GeoJSON.Point>[]=mapped.filter(v=>liveScore(v)>=58&&v.openNow!==false).map((v,index)=>({type:"Feature",geometry:{type:"Point",coordinates:coords(v)},properties:{id:v.id,index,name:v.name,score:liveScore(v)}}));
+      const liveFeatures:GeoJSON.Feature<GeoJSON.Point>[]=mapped.filter(v=>v.openNow!==false).map((v,index)=>({type:"Feature",geometry:{type:"Point",coordinates:coords(v)},properties:{id:v.id,index,name:v.name,score:score(v)}}));
       const allData:GeoJSON.FeatureCollection<GeoJSON.Point>={type:"FeatureCollection",features:allFeatures};
       const liveData:GeoJSON.FeatureCollection<GeoJSON.Point>={type:"FeatureCollection",features:liveFeatures};
       const liveSource=map.getSource("mobile-live-dots") as mapboxgl.GeoJSONSource|undefined;
@@ -76,8 +76,8 @@ export default function MobileHome(){
       if(!liveSource){
         map.addSource("mobile-live-dots",{type:"geojson",data:liveData});
         const activityColor:any=["interpolate",["linear"],["get","score"],58,"#9bd94a",68,"#f3c94b",78,"#ff9a3d",88,"#ff554a"];
-        map.addLayer({id:"mobile-live-halo",type:"circle",source:"mobile-live-dots",maxzoom:11.2,paint:{"circle-radius":["interpolate",["linear"],["get","score"],58,6,78,11,100,18],"circle-color":activityColor,"circle-opacity":["interpolate",["linear"],["get","score"],58,.06,78,.16,100,.28],"circle-blur":.82}});
-        map.addLayer({id:"mobile-live-dot",type:"circle",source:"mobile-live-dots",maxzoom:11.2,paint:{"circle-radius":["interpolate",["linear"],["get","score"],58,2.4,78,4,100,6],"circle-color":activityColor,"circle-opacity":.97,"circle-stroke-width":["interpolate",["linear"],["get","score"],58,0,84,1,100,1.8],"circle-stroke-color":"rgba(255,255,255,.92)"}});
+        map.addLayer({id:"mobile-live-halo",type:"circle",source:"mobile-live-dots",maxzoom:17,paint:{"circle-radius":["interpolate",["linear"],["get","score"],58,6,78,11,100,18],"circle-color":activityColor,"circle-opacity":["interpolate",["linear"],["get","score"],58,.06,78,.16,100,.28],"circle-blur":.82}});
+        map.addLayer({id:"mobile-live-dot",type:"circle",source:"mobile-live-dots",maxzoom:17,paint:{"circle-radius":["interpolate",["linear"],["get","score"],58,2.4,78,4,100,6],"circle-color":activityColor,"circle-opacity":.97,"circle-stroke-width":["interpolate",["linear"],["get","score"],58,0,84,1,100,1.8],"circle-stroke-color":"rgba(255,255,255,.92)"}});
       }
       if(!venueSource){
         map.addSource("mobile-venues",{type:"geojson",data:allData,cluster:true,clusterMaxZoom:12.5,clusterRadius:82});
