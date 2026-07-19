@@ -1,18 +1,8 @@
 import type { Metadata } from "next";
 import { Inter, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import DiscoveryEnhancer from "./discovery-enhancer";
-import AuthLifecycle from "./auth-lifecycle";
-import EventEngagementEnhancer from "./event-engagement-enhancer";
-import AuthChoiceEnhancer from "./auth-choice-enhancer";
-import ActivityStatusEnhancer from "./activity-status-enhancer";
-import ActivityInsightsEnhancer from "./activity-insights-enhancer";
-import VenueDecisionEnhancer from "./venue-decision-enhancer";
-import LivePulseEnhancer from "./live-pulse-enhancer";
-import LiveExperienceEnhancer from "./live-experience-enhancer";
-import NightPlannerEnhancer from "./night-planner-enhancer";
-import SmartAlertsEnhancer from "./smart-alerts-enhancer";
 import MobileHome from "./mobile-home";
+import LegacyEnhancers from "./legacy-enhancers";
 
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"], display: "swap" });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
@@ -70,17 +60,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <script dangerouslySetInnerHTML={{ __html: rankedFeedBootstrap }} />
         <MobileHome />
         <div className="legacy-app-shell">{children}</div>
-        <DiscoveryEnhancer />
-        <EventEngagementEnhancer />
-        <ActivityStatusEnhancer />
-        <ActivityInsightsEnhancer />
-        <VenueDecisionEnhancer />
-        <LivePulseEnhancer />
-        <LiveExperienceEnhancer />
-        <NightPlannerEnhancer />
-        <SmartAlertsEnhancer />
-        <AuthChoiceEnhancer />
-        <AuthLifecycle />
+        <LegacyEnhancers />
       </body>
     </html>
   );
