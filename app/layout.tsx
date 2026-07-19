@@ -4,6 +4,7 @@ import "./globals.css";
 import DiscoveryEnhancer from "./discovery-enhancer";
 import AuthLifecycle from "./auth-lifecycle";
 import EventEngagementEnhancer from "./event-engagement-enhancer";
+import AuthChoiceEnhancer from "./auth-choice-enhancer";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -96,6 +97,7 @@ export default function RootLayout({
         {children}
         <DiscoveryEnhancer />
         <EventEngagementEnhancer />
+        <AuthChoiceEnhancer />
         <AuthLifecycle />
       </body>
     </html>
