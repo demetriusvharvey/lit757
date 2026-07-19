@@ -79,6 +79,14 @@ export default function MobileAppShellEnhancer() {
         const brand = header.querySelector("p");
         if (brand) brand.textContent = "757 THINGS TO DO";
 
+        const legacyHeading = Array.from(content.querySelectorAll("h1")).find((node) => !node.closest("[data-mobile-pulse-card]"));
+        const legacyEyebrow = legacyHeading?.previousElementSibling as HTMLElement | null;
+        const legacyDescription = legacyHeading?.nextElementSibling as HTMLElement | null;
+        const legacySearch = legacyDescription?.nextElementSibling as HTMLElement | null;
+        [legacyEyebrow, legacyHeading, legacyDescription, legacySearch].forEach((node) => {
+          if (node) node.dataset.mobileLegacyHero = "true";
+        });
+
         const oldPulse = content.querySelector("[data-mobile-pulse-card]");
         oldPulse?.remove();
         if (latest.length) content.prepend(makePulseCard(latest));
@@ -88,6 +96,12 @@ export default function MobileAppShellEnhancer() {
           const pulse = content.querySelector("[data-mobile-pulse-card]");
           if (tabs) tabs.insertAdjacentElement("beforebegin", map);
           else pulse?.insertAdjacentElement("afterend", map);
+        }
+
+        const liveFeed = content.querySelector("[data-live-feed]");
+        const planner = content.querySelector("[data-night-planner]");
+        if (liveFeed && planner && planner.compareDocumentPosition(liveFeed) & Node.DOCUMENT_POSITION_FOLLOWING) {
+          liveFeed.insertAdjacentElement("afterend", planner);
         }
 
         if (!main.querySelector("[data-mobile-bottom-nav]")) main.appendChild(makeBottomNav());
