@@ -53,10 +53,12 @@ export default function MobileHome(){
   const scrollRef=useRef<HTMLElement|null>(null);
   const feedRef=useRef<HTMLElement|null>(null);
   const mapRef=useRef<mapboxgl.Map|null>(null);
+  const mappedRef=useRef<Venue[]>([]);
 
   useEffect(()=>{try{setFavoriteIds(new Set(JSON.parse(localStorage.getItem(FAVORITES_KEY)||"[]") as string[]));setAlertsEnabled(localStorage.getItem(ALERTS_KEY)==="true");setVenueAlerts(JSON.parse(localStorage.getItem(VENUE_ALERTS_KEY)||"[]") as VenueAlert[]);setLocation(localStorage.getItem(LOCATION_KEY)||"Hampton Roads");}catch{}fetch("/api/discover?city=All%20757&mode=all",{cache:"no-store"}).then(r=>r.json()).then((p:Payload)=>setVenues(p.venues||p.picks||[])).catch(()=>undefined);},[]);
   const filtered=useMemo(()=>[...venues].filter(v=>active==="All"||categoryFor(v)===active).sort((a,b)=>score(b)-score(a)),[venues,active]);
   const mapped=useMemo(()=>filtered.filter(validVenue),[filtered]);
+  mappedRef.current=mapped;
   const favorites=useMemo(()=>venues.filter(v=>favoriteIds.has(v.id)),[venues,favoriteIds]);
   const hottest=filtered[0];
   const ticker=useMemo(()=>filtered.slice(0,4).map((v,i)=>i===0?`🔥 ${v.name} is ${statusFor(v).toLowerCase()}`:`${i===1?"↗":"•"} ${v.name} ${trendPercent(v)}% busier`),[filtered]);
@@ -86,7 +88,7 @@ export default function MobileHome(){
         map.addLayer({id:"mobile-venue-pins",type:"circle",source:"mobile-venues",filter:["!",["has","point_count"]],minzoom:11.3,paint:{"circle-radius":["interpolate",["linear"],["zoom"],11.3,4,14,6.5,16,8],"circle-color":["interpolate",["linear"],["get","score"],0,"#5f6670",45,"#43d879",58,"#9bd94a",68,"#f3c94b",78,"#ff9a3d",88,"#ff554a"],"circle-stroke-width":["interpolate",["linear"],["get","score"],0,0,75,.8,90,1.5],"circle-stroke-color":"rgba(255,255,255,.9)","circle-opacity":.96}});
         map.addLayer({id:"mobile-venue-score",type:"symbol",source:"mobile-venues",filter:["!",["has","point_count"]],minzoom:14.2,layout:{"text-field":["to-string",["get","score"]],"text-size":7.5},paint:{"text-color":"#fff"}});
         map.on("click","mobile-clusters",e=>{const feature=map.queryRenderedFeatures(e.point,{layers:["mobile-clusters"]})[0];const clusterId=feature?.properties?.cluster_id;if(clusterId===undefined)return;const source=map.getSource("mobile-venues") as mapboxgl.GeoJSONSource;source.getClusterExpansionZoom(clusterId,(error,zoom)=>{if(error||zoom==null)return;map.easeTo({center:(feature.geometry as GeoJSON.Point).coordinates as [number,number],zoom});});});
-        const openMapVenue=(feature?:mapboxgl.MapboxGeoJSONFeature)=>{const venueId=String(feature?.properties?.id||"");const venue=mapped.find(item=>String(item.id)===venueId);if(!venue)return;setSelected(venue);setDetailsOpen(true);map.easeTo({center:coords(venue),zoom:Math.max(map.getZoom(),13),duration:550});};
+        const openMapVenue=(feature?:mapboxgl.MapboxGeoJSONFeature)=>{const venueId=String(feature?.properties?.id||"");const venue=mappedRef.current.find(item=>String(item.id)===venueId);if(!venue)return;setSelected(venue);setDetailsOpen(true);map.easeTo({center:coords(venue),zoom:Math.max(map.getZoom(),13),duration:550});};
 map.on("click","mobile-live-dot",e=>openMapVenue(e.features?.[0]));
 map.on("click","mobile-venue-pins",e=>openMapVenue(e.features?.[0]));
 ["mobile-live-dot","mobile-venue-pins"].forEach(layer=>{map.on("mouseenter",layer,()=>{map.getCanvas().style.cursor="pointer";});map.on("mouseleave",layer,()=>{map.getCanvas().style.cursor="";});});
