@@ -294,7 +294,7 @@ function PickCard({
         </span>
       </span>
 
-      <VenueImage venue={venue} priority={primary} className="h-[92px] rounded-[1.05rem] sm:h-[96px]" />
+      <VenueImage venue={venue} priority={primary} className="h-[82px] rounded-[1.05rem] sm:h-[96px]" />
     </button>
   );
 }
@@ -835,12 +835,13 @@ export default function Home() {
     }
 
     mapboxgl.accessToken = token;
+    const compactMap = window.matchMedia("(max-width: 1023px)").matches;
     const map = new mapboxgl.Map({
       container: mapContainer,
       style: "mapbox://styles/mapbox/dark-v11",
       center: HAMPTON_ROADS_CENTER,
-      zoom: 9.75,
-      minZoom: 9.5,
+      zoom: compactMap ? 8.2 : 9.75,
+      minZoom: compactMap ? 7.8 : 9.5,
       maxZoom: 17,
       maxBounds: HAMPTON_ROADS_BOUNDS,
       renderWorldCopies: false,
@@ -853,6 +854,12 @@ export default function Home() {
 
     map.on("load", () => {
       map.resize();
+      if (compactMap) {
+        map.fitBounds(HAMPTON_ROADS_BOUNDS, {
+          padding: { top: 50, right: 18, bottom: 24, left: 18 },
+          duration: 0,
+        });
+      }
       map.addSource("discovery-venues", {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
@@ -1253,9 +1260,9 @@ export default function Home() {
       );
 
   return (
-    <main className="min-h-dvh bg-[#f7f5ef] text-[#171716] lg:h-dvh lg:overflow-hidden">
-      <div className="grid min-h-dvh lg:h-dvh lg:grid-cols-[minmax(390px,460px)_1fr]">
-        <section className="relative z-10 flex min-h-dvh min-w-0 flex-col border-black/[0.08] bg-[#f7f5ef] lg:h-dvh lg:min-h-0 lg:border-r">
+    <main className="h-dvh overflow-hidden bg-[#f7f5ef] text-[#171716]">
+      <div className="grid h-dvh grid-rows-[minmax(0,52dvh)_minmax(0,48dvh)] lg:grid-cols-[minmax(390px,460px)_1fr] lg:grid-rows-1">
+        <section className="relative z-10 flex h-full min-h-0 min-w-0 flex-col border-black/[0.08] bg-[#f7f5ef] lg:border-r">
           {accountOpen ? (
             <AccountPanel
               session={session}
@@ -1283,7 +1290,7 @@ export default function Home() {
             />
           ) : (
             <>
-              <header className="flex h-[72px] shrink-0 items-center justify-between border-b border-black/[0.07] px-4 sm:px-6">
+              <header className="flex h-[60px] shrink-0 items-center justify-between border-b border-black/[0.07] px-4 sm:h-[72px] sm:px-6">
                 <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
                   <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[11px] bg-[#171716] shadow-sm sm:h-9 sm:w-9 sm:rounded-[12px]">
                     <span className="h-2.5 w-2.5 rounded-full bg-[#ff5c35]" />
@@ -1327,8 +1334,8 @@ export default function Home() {
                 </div>
               </header>
 
-              <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-5 pb-8 pt-4 sm:px-6 lg:pb-5">
-                <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.17em] text-black/42">
+              <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-4 pb-5 pt-3 sm:px-6 sm:pb-8 sm:pt-4 lg:pb-5">
+                <div className="flex items-center gap-2 text-[9px] font-bold uppercase tracking-[0.17em] text-black/42 sm:text-[10px]">
                   <span className="relative flex h-2 w-2">
                     <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-30" />
                     <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
@@ -1337,17 +1344,17 @@ export default function Home() {
                   {refreshing && <span className="text-black/24">· Refreshing</span>}
                 </div>
 
-                <h1 className="mt-2 max-w-[390px] text-[32px] font-semibold leading-none tracking-[-0.052em] sm:text-[34px]">
+                <h1 className="mt-1.5 max-w-[390px] text-[28px] font-semibold leading-none tracking-[-0.052em] sm:mt-2 sm:text-[34px]">
                   {data?.context.headline || "Find your thing."}
                 </h1>
-                <p className="mt-1.5 max-w-[390px] text-[12px] leading-5 text-black/48">
+                <p className="mt-1 max-w-[390px] text-[11px] leading-4 text-black/48 sm:mt-1.5 sm:text-[12px] sm:leading-5">
                   {data?.context.description || "Type any interest, hobby, or mood. We’ll make the decision."}
                 </p>
 
-                <form onSubmit={submitSearch} className="mt-3 grid grid-cols-[1fr_auto] gap-2">
+                <form onSubmit={submitSearch} className="mt-2 grid grid-cols-[1fr_auto] gap-2 sm:mt-3">
                   <label className="relative block min-w-0">
                     <span className="sr-only">Search any interest, hobby, place, or plan</span>
-                    <Search size={15} className="pointer-events-none absolute left-4 top-[15px] text-black/34" />
+                    <Search size={15} className="pointer-events-none absolute left-4 top-[14px] text-black/34 sm:top-[15px]" />
                     <input
                       value={query}
                       onChange={(event) => {
@@ -1358,7 +1365,7 @@ export default function Home() {
                       }}
                       placeholder="Try “date night,” hiking, art…"
                       maxLength={120}
-                      className="h-12 w-full rounded-full border border-black/[0.09] bg-white/72 pl-10 pr-10 text-[13px] text-black outline-none placeholder:text-black/32 transition focus:border-black/20 focus:ring-2 focus:ring-[#ff5c35]"
+                      className="h-11 w-full rounded-full border border-black/[0.09] bg-white/72 pl-10 pr-10 text-[12px] text-black outline-none placeholder:text-black/32 transition focus:border-black/20 focus:ring-2 focus:ring-[#ff5c35] sm:h-12 sm:text-[13px]"
                     />
                     {query && (
                       <button
@@ -1368,7 +1375,7 @@ export default function Home() {
                           setFilter("all");
                           setVisibleResultCount(9);
                         }}
-                        className="absolute right-2.5 top-2.5 flex h-7 w-7 items-center justify-center rounded-full text-black/34 hover:bg-black/[0.05] hover:text-black"
+                        className="absolute right-2.5 top-2 flex h-7 w-7 items-center justify-center rounded-full text-black/34 hover:bg-black/[0.05] hover:text-black sm:top-2.5"
                         aria-label="Clear search"
                       >
                         <X size={14} />
@@ -1379,7 +1386,7 @@ export default function Home() {
                     type="button"
                     onClick={chooseForMe}
                     disabled={!data?.picks.length}
-                    className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-[#ff5c35] px-4 text-[12px] font-semibold text-white shadow-[0_12px_30px_rgba(255,92,53,0.22)] transition hover:bg-[#eb4f2b] disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-black"
+                    className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-[#ff5c35] px-3.5 text-[11px] font-semibold text-white shadow-[0_12px_30px_rgba(255,92,53,0.22)] transition hover:bg-[#eb4f2b] disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-black sm:h-12 sm:px-4 sm:text-[12px]"
                   >
                     <Sparkles size={15} />
                     Pick for me
@@ -1398,7 +1405,7 @@ export default function Home() {
                         setFilter("all");
                         setVisibleResultCount(9);
                       }}
-                      className={`h-9 min-w-0 whitespace-nowrap rounded-full px-1 text-[10px] font-semibold leading-none transition sm:px-3 sm:text-[11px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ff5c35] ${
+                      className={`h-8 min-w-0 whitespace-nowrap rounded-full px-1 text-[10px] font-semibold leading-none transition sm:h-9 sm:px-3 sm:text-[11px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ff5c35] ${
                         mode === item.id
                           ? "bg-[#171716] text-white"
                           : "bg-black/[0.05] text-black/52 hover:bg-black/[0.08] hover:text-black/72"
@@ -1409,7 +1416,7 @@ export default function Home() {
                   ))}
                 </div>
 
-                <div className="mt-3">
+                <div className="mt-2.5 sm:mt-3">
                   <div className="flex items-center justify-between gap-3 px-0.5">
                     <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-black/40">
                       {data ? `Browse ${data.context.resultCount} places` : "Finding places"}
@@ -1427,7 +1434,7 @@ export default function Home() {
                       </button>
                     )}
                   </div>
-                  <div className="no-scrollbar -mx-5 mt-2 flex gap-1.5 overflow-x-auto px-5 pb-1 sm:-mx-6 sm:px-6" aria-label="Filter places">
+                  <div className="no-scrollbar -mx-4 mt-1.5 flex gap-1.5 overflow-x-auto px-4 pb-1 sm:-mx-6 sm:mt-2 sm:px-6" aria-label="Filter places">
                     {data ? data.filters.map((item) => (
                         <button
                           key={item.id}
@@ -1456,7 +1463,7 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="mt-3">
+                <div className="mt-2.5 sm:mt-3">
                   {loading && !data ? (
                     <LoadingPicks />
                   ) : error && !data ? (
@@ -1535,7 +1542,7 @@ export default function Home() {
           )}
         </section>
 
-        <section className="relative min-h-[410px] overflow-hidden bg-[#111110] lg:min-h-0" aria-label="757 venue map">
+        <section className="relative min-h-0 overflow-hidden bg-[#111110]" aria-label="757 venue map">
           <div className="absolute inset-0">
             <div ref={mapContainerRef} className="h-full w-full" />
           </div>
@@ -1550,7 +1557,7 @@ export default function Home() {
             </div>
           )}
 
-          <div className="pointer-events-none absolute left-4 top-4 z-10 flex items-center gap-2 rounded-full border border-white/10 bg-black/72 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-white/62 shadow-sm backdrop-blur-xl sm:left-5 sm:top-5">
+          <div className="pointer-events-none absolute left-3 top-3 z-10 flex items-center gap-2 rounded-full border border-white/10 bg-black/72 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-white/62 shadow-sm backdrop-blur-xl sm:left-5 sm:top-5">
             <span className="h-1.5 w-1.5 rounded-full bg-[#ff5c35]" />
             {filter === "all"
               ? "757 map · Right now"
@@ -1560,7 +1567,7 @@ export default function Home() {
           <button
             type="button"
             onClick={useMyLocation}
-            className="absolute bottom-8 right-4 z-10 flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-black/72 text-white shadow-[0_12px_40px_rgba(0,0,0,0.3)] backdrop-blur-xl transition hover:bg-black/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ff5c35] sm:right-5"
+            className="absolute bottom-4 right-3 z-10 flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-black/72 text-white shadow-[0_12px_40px_rgba(0,0,0,0.3)] backdrop-blur-xl transition hover:bg-black/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ff5c35] sm:bottom-8 sm:right-5"
             aria-label="Center map on my location"
           >
             <LocateFixed size={17} />
