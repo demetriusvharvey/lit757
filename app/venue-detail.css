@@ -1,0 +1,27 @@
+@media (max-width:1023px){
+  .venue-detail-sheet{max-height:92vh!important;padding:8px 16px calc(28px + env(safe-area-inset-bottom))!important;background:linear-gradient(180deg,#151922 0%,#090c11 45%,#05070a 100%)!important;border-color:#343b47!important;box-shadow:0 -30px 90px rgba(0,0,0,.78)!important}
+  .venue-detail-sheet .utility-head{padding:2px 2px 18px;border-bottom:1px solid rgba(255,255,255,.07)}
+  .venue-detail-sheet .utility-head span{display:inline-flex;align-items:center;gap:7px;color:#ff695f!important}
+  .venue-detail-sheet .utility-head span:before{content:"";width:7px;height:7px;border-radius:50%;background:#ff554a;box-shadow:0 0 0 5px rgba(255,85,74,.12),0 0 18px rgba(255,85,74,.65)}
+  .venue-detail-sheet .utility-head h2{max-width:285px;margin-top:7px!important;font-size:30px!important;line-height:1.02!important}
+  .venue-detail-sheet .utility-head p{font-size:12px!important;color:#aeb5c0!important}
+  .venue-detail-sheet>.utility-head+div{margin-top:16px!important;gap:9px!important}
+  .venue-detail-sheet>.utility-head+div>.alert-card{position:relative;min-height:106px;padding:14px!important;overflow:hidden;border-color:#2a313c!important;background:linear-gradient(145deg,#171c24,#0e1218)!important}
+  .venue-detail-sheet>.utility-head+div>.alert-card:first-child{background:radial-gradient(circle at 82% 15%,rgba(255,85,74,.22),transparent 43%),linear-gradient(145deg,#1a1e26,#0d1117)!important}
+  .venue-detail-sheet>.utility-head+div>.alert-card small{color:#8f98a6;font-size:9px;font-weight:850;letter-spacing:.13em}
+  .venue-detail-sheet>.utility-head+div>.alert-card strong{letter-spacing:-.04em}
+  .venue-detail-sheet>.utility-head+div>.alert-card:first-child strong{color:#fff;text-shadow:0 0 26px rgba(255,85,74,.28)}
+  .venue-detail-sheet>.utility-head+div>.alert-card p{margin-top:3px!important;color:#aeb5bf!important}
+  .venue-detail-sheet>.alert-card{margin:4px 0 14px!important;padding:15px!important;border-color:rgba(183,140,255,.22)!important;background:linear-gradient(135deg,rgba(183,140,255,.1),rgba(15,19,26,.9))!important}
+  .venue-detail-sheet>.alert-card>svg{color:#b78cff!important}
+  .venue-detail-sheet>.alert-card strong{font-size:14px}
+  .venue-detail-sheet>.alert-card p{font-size:11px!important;line-height:1.45!important;color:#b5bcc7!important}
+  .venue-detail-sheet .alert-action{min-height:52px;border-radius:16px!important;font-size:13px!important;font-weight:800!important;box-shadow:0 12px 25px rgba(0,0,0,.22)}
+  .venue-detail-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+  .venue-detail-secondary{display:flex;align-items:center;justify-content:center;gap:8px;min-height:48px;border:1px solid #303744;border-radius:15px;background:#11161e;color:#fff;font-size:12px;font-weight:750}
+  .venue-detail-secondary.saved{border-color:rgba(255,85,74,.45);background:rgba(255,85,74,.1);color:#ff6c63}
+  .venue-detail-secondary svg{width:18px;height:18px}
+  .venue-detail-proof{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin:15px 0 2px}
+  .venue-detail-proof span{display:flex;min-height:54px;flex-direction:column;justify-content:center;padding:9px;border:1px solid #232a34;border-radius:13px;background:#0d1117;color:#8f98a5;font-size:8px;line-height:1.2;text-align:center}
+  .venue-detail-proof strong{display:block;margin-bottom:4px;color:#f2f4f7;font-size:10px}
+}
