@@ -12,11 +12,10 @@ import LivePulseEnhancer from "./live-pulse-enhancer";
 import LiveExperienceEnhancer from "./live-experience-enhancer";
 import NightPlannerEnhancer from "./night-planner-enhancer";
 import SmartAlertsEnhancer from "./smart-alerts-enhancer";
-import MobileAppShellEnhancer from "./mobile-app-shell-enhancer";
+import MobileHome from "./mobile-home";
 
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"], display: "swap" });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
-
 const configuredHost = process.env.NEXT_PUBLIC_SITE_URL || process.env.VERCEL_PROJECT_PRODUCTION_URL || "http://localhost:3000";
 const siteUrl = configuredHost.startsWith("http") ? configuredHost : `https://${configuredHost}`;
 const socialTitle = "The Fastest Way to Know What’s Happening Around You";
@@ -62,15 +61,15 @@ const rankedFeedBootstrap = `
       return new Response(JSON.stringify(payload), { status: response.status, statusText: response.statusText, headers: response.headers });
     } catch { return response; }
   };
-})();
-`;
+})();`;
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className={`${inter.variable} ${geistMono.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col">
         <script dangerouslySetInnerHTML={{ __html: rankedFeedBootstrap }} />
-        {children}
+        <MobileHome />
+        <div className="legacy-app-shell">{children}</div>
         <DiscoveryEnhancer />
         <EventEngagementEnhancer />
         <ActivityStatusEnhancer />
@@ -80,7 +79,6 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <LiveExperienceEnhancer />
         <NightPlannerEnhancer />
         <SmartAlertsEnhancer />
-        <MobileAppShellEnhancer />
         <AuthChoiceEnhancer />
         <AuthLifecycle />
       </body>
