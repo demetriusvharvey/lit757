@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import DiscoveryEnhancer from "./discovery-enhancer";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -40,6 +41,31 @@ export const metadata: Metadata = {
   },
 };
 
+const rankedFeedBootstrap = `
+(() => {
+  if (window.__lit757RankedFeedInstalled) return;
+  window.__lit757RankedFeedInstalled = true;
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = async (...args) => {
+    const response = await nativeFetch(...args);
+    const target = typeof args[0] === "string" ? args[0] : args[0]?.url || "";
+    if (!target.includes("/api/discover") || !response.ok) return response;
+    try {
+      const payload = await response.clone().json();
+      if (!payload?.success || !Array.isArray(payload.venues)) return response;
+      payload.picks = payload.venues.slice(0, 40);
+      return new Response(JSON.stringify(payload), {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+    } catch {
+      return response;
+    }
+  };
+})();
+`;
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -50,7 +76,11 @@ export default function RootLayout({
       lang="en"
       className={`${inter.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <script dangerouslySetInnerHTML={{ __html: rankedFeedBootstrap }} />
+        {children}
+        <DiscoveryEnhancer />
+      </body>
     </html>
   );
 }
