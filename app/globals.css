@@ -107,6 +107,37 @@ select {
   box-shadow: 0 0 0 8px rgba(37, 99, 235, 0.2), 0 8px 24px rgba(0, 0, 0, 0.28);
 }
 
+/* Mobile is map-first: discovery controls remain usable while the live map is
+   visible immediately instead of sitting below a full-screen recommendation list. */
+@media (max-width: 1023px) {
+  body {
+    overflow: hidden;
+  }
+
+  main:has(section[aria-label="757 venue map"]) {
+    height: 100dvh;
+    min-height: 100dvh;
+    overflow: hidden;
+  }
+
+  main:has(section[aria-label="757 venue map"]) > div {
+    display: grid;
+    height: 100dvh;
+    min-height: 0;
+    grid-template-rows: minmax(0, 56dvh) minmax(0, 44dvh);
+  }
+
+  main:has(section[aria-label="757 venue map"]) > div > section:first-child {
+    height: auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  section[aria-label="757 venue map"] {
+    min-height: 0 !important;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
