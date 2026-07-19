@@ -1,0 +1,51 @@
+name: Fix mobile map touch targets
+
+on:
+  push:
+    paths:
+      - .github/workflows/fix-mobile-map-touch-targets.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add larger invisible tap targets for venue dots
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("app/mobile-home.tsx")
+          text = path.read_text()
+
+          old_layer = '''        map.addLayer({id:"mobile-live-dot",type:"circle",source:"mobile-live-dots",maxzoom:17,paint:{"circle-radius":["interpolate",["linear"],["get","score"],58,2.4,78,4,100,6],"circle-color":activityColor,"circle-opacity":.97,"circle-stroke-width":["interpolate",["linear"],["get","score"],58,0,84,1,100,1.8],"circle-stroke-color":"rgba(255,255,255,.92)"}});'''
+          new_layer = '''        map.addLayer({id:"mobile-live-hit",type:"circle",source:"mobile-live-dots",maxzoom:17,paint:{"circle-radius":18,"circle-color":"rgba(0,0,0,0)","circle-opacity":0}});
+        map.addLayer({id:"mobile-live-dot",type:"circle",source:"mobile-live-dots",maxzoom:17,paint:{"circle-radius":["interpolate",["linear"],["get","score"],58,2.4,78,4,100,6],"circle-color":activityColor,"circle-opacity":.97,"circle-stroke-width":["interpolate",["linear"],["get","score"],58,0,84,1,100,1.8],"circle-stroke-color":"rgba(255,255,255,.92)"}});'''
+
+          old_handlers = '''map.on("click","mobile-live-dot",e=>openMapVenue(e.features?.[0]));
+map.on("click","mobile-venue-pins",e=>openMapVenue(e.features?.[0]));
+["mobile-live-dot","mobile-venue-pins"].forEach(layer=>{map.on("mouseenter",layer,()=>{map.getCanvas().style.cursor="pointer";});map.on("mouseleave",layer,()=>{map.getCanvas().style.cursor="";});});'''
+          new_handlers = '''map.on("click","mobile-live-hit",e=>openMapVenue(e.features?.[0]));
+map.on("click","mobile-live-dot",e=>openMapVenue(e.features?.[0]));
+map.on("click","mobile-venue-pins",e=>openMapVenue(e.features?.[0]));
+map.on("touchend","mobile-live-hit",e=>{e.preventDefault();openMapVenue(e.features?.[0]);});
+map.on("touchend","mobile-live-dot",e=>{e.preventDefault();openMapVenue(e.features?.[0]);});
+["mobile-live-hit","mobile-live-dot","mobile-venue-pins"].forEach(layer=>{map.on("mouseenter",layer,()=>{map.getCanvas().style.cursor="pointer";});map.on("mouseleave",layer,()=>{map.getCanvas().style.cursor="";});});'''
+
+          if old_layer not in text:
+              raise SystemExit("Expected live dot layer was not found")
+          if old_handlers not in text:
+              raise SystemExit("Expected map handlers were not found")
+
+          text = text.replace(old_layer, new_layer).replace(old_handlers, new_handlers)
+          path.write_text(text)
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/mobile-home.tsx
+          git commit -m "fix: enlarge mobile map pin tap targets"
+          git push
