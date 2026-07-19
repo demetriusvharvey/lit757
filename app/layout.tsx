@@ -3,6 +3,7 @@ import { Inter, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import DiscoveryEnhancer from "./discovery-enhancer";
 import AuthLifecycle from "./auth-lifecycle";
+import EventEngagementEnhancer from "./event-engagement-enhancer";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -67,6 +68,7 @@ const rankedFeedBootstrap = `
       const payload = await response.clone().json();
       if (!payload?.success || !Array.isArray(payload.venues)) return response;
       payload.picks = payload.venues.slice(0, 40);
+      window.dispatchEvent(new CustomEvent("lit757:discovery", { detail: payload }));
       return new Response(JSON.stringify(payload), {
         status: response.status,
         statusText: response.statusText,
@@ -93,6 +95,7 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: rankedFeedBootstrap }} />
         {children}
         <DiscoveryEnhancer />
+        <EventEngagementEnhancer />
         <AuthLifecycle />
       </body>
     </html>
