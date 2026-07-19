@@ -7,6 +7,7 @@ import "./venue-cards.css";
 import "./mobile-explore-polish.css";
 import MapLayerGuard from "./map-layer-guard";
 import MobileHome from "./mobile-home";
+import MobileRenderGuard from "./mobile-render-guard";
 import BuzzExperience from "./buzz-experience";
 import BuzzBrandEnhancer from "./buzz-brand-enhancer";
 import HomeMapResizer from "./home-map-resizer";
@@ -71,8 +72,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en" className={`${inter.variable} ${geistMono.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col">
+        <style>{`@media (max-width:1023px){.legacy-app-shell{display:block!important}.mobile-home-mounted .legacy-app-shell{display:none!important}}`}</style>
         <script dangerouslySetInnerHTML={{ __html: rankedFeedBootstrap }} />
         <MapLayerGuard />
+        <MobileRenderGuard />
         <MobileHome />
         <BuzzExperience />
         <BuzzBrandEnhancer />
