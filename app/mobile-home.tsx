@@ -6,18 +6,23 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import "./mobile-home.css";
 import { Bell, Bookmark, CalendarDays, ChevronRight, Compass, Heart, Map, Music2, Search, ShoppingBag, Sparkles, TreePine, Utensils, Wine } from "lucide-react";
 
-type Venue = { id:string; name:string; city?:string; lat:number; lng:number; photoUrl?:string|null; reason?:string; openNow?:boolean|null; event?:{name?:string|null}|null; activity?:{score:number;label:string;trendLabel:string} };
+type Venue = { id:string; name:string; city?:string; kind?:string; type?:string; lat:number; lng:number; photoUrl?:string|null; reason?:string; openNow?:boolean|null; event?:{name?:string|null;ticketUrl?:string|null;url?:string|null}|null; activity?:{score:number;label:string;trendLabel:string} };
 type Payload = { venues?:Venue[]; picks?:Venue[] };
 
 const cats = [["All",Compass],["Food",Utensils],["Drinks",Wine],["Nightlife",Music2],["Events",CalendarDays],["Outdoors",TreePine],["Shopping",ShoppingBag]] as const;
 const score = (v:Venue) => v.activity?.score ?? 70;
 const validVenue = (v:Venue) => Number.isFinite(v.lat) && Number.isFinite(v.lng) && v.lat !== 0 && v.lng !== 0;
-const districts = [
-  {name:"Waterside",detail:"Getting Busier",lng:-76.2922,lat:36.8462},
-  {name:"Oceanfront",detail:"🔥 Very Busy",lng:-75.9779,lat:36.8529},
-  {name:"Town Center",detail:"↑ Getting Busier",lng:-76.1341,lat:36.8429},
-  {name:"Ghent",detail:"Moderate",lng:-76.3015,lat:36.8669},
-];
+const categoryFor=(v:Venue)=>{
+  const explicit=`${v.kind||""} ${v.type||""}`.toLowerCase();
+  const text=`${v.name} ${v.reason||""} ${v.event?.name||""} ${explicit}`.toLowerCase();
+  if(v.event?.name)return "Events";
+  if(/restaurant|diner|cafe|pizza|grill|kitchen|food|taco|burger|bakery|seafood/.test(text))return "Food";
+  if(/bar|brew|cocktail|wine|drink|pub/.test(text))return "Drinks";
+  if(/club|dj|music|nightlife|lounge/.test(text))return "Nightlife";
+  if(/park|trail|beach|garden|outdoor|museum/.test(text))return "Outdoors";
+  if(/shop|mall|market|store/.test(text))return "Shopping";
+  return "All";
+};
 
 export default function MobileHome(){
   const [venues,setVenues]=useState<Venue[]>([]);
@@ -25,10 +30,10 @@ export default function MobileHome(){
   const mapEl=useRef<HTMLDivElement|null>(null);
   const mapRef=useRef<mapboxgl.Map|null>(null);
   const venueMarkers=useRef<mapboxgl.Marker[]>([]);
-  const districtMarkers=useRef<mapboxgl.Marker[]>([]);
 
   useEffect(()=>{fetch("/api/discover?city=All%20757&mode=all",{cache:"no-store"}).then(r=>r.json()).then((p:Payload)=>setVenues(p.venues||p.picks||[])).catch(()=>undefined)},[]);
-  const top=useMemo(()=>[...venues].sort((a,b)=>score(b)-score(a)).slice(0,4),[venues]);
+  const filtered=useMemo(()=>[...venues].filter(v=>active==="All"||categoryFor(v)===active).sort((a,b)=>score(b)-score(a)),[venues,active]);
+  const shown=filtered;
 
   useEffect(()=>{
     const token=process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
@@ -37,59 +42,42 @@ export default function MobileHome(){
     const map=new mapboxgl.Map({container:mapEl.current,style:"mapbox://styles/mapbox/dark-v11",center:[-76.17,36.88],zoom:8.7,minZoom:8,maxZoom:15});
     map.addControl(new mapboxgl.NavigationControl({showCompass:false}),"top-right");
     mapRef.current=map;
-    map.on("load",()=>{
-      districtMarkers.current=districts.map(d=>{
-        const el=document.createElement("div");
-        el.className="map-place-marker";
-        el.innerHTML=`<strong>${d.name}</strong><span>${d.detail}</span>`;
-        return new mapboxgl.Marker({element:el,anchor:"bottom"}).setLngLat([d.lng,d.lat]).addTo(map);
-      });
-    });
-    return()=>{
-      venueMarkers.current.forEach(m=>m.remove());
-      districtMarkers.current.forEach(m=>m.remove());
-      venueMarkers.current=[];
-      districtMarkers.current=[];
-      map.remove();
-      mapRef.current=null;
-    };
+    return()=>{venueMarkers.current.forEach(m=>m.remove());venueMarkers.current=[];map.remove();mapRef.current=null};
   },[]);
 
   useEffect(()=>{
-    const map=mapRef.current;
-    if(!map)return;
+    const map=mapRef.current;if(!map)return;
     const render=()=>{
-      const mapped=venues.filter(validVenue).slice(0,40);
-      const geojson: GeoJSON.FeatureCollection<GeoJSON.Point>={type:"FeatureCollection",features:mapped.map(v=>({type:"Feature",geometry:{type:"Point",coordinates:[v.lng,v.lat]},properties:{weight:Math.max(.2,score(v)/100)}}))};
+      const mapped=filtered.filter(validVenue);
+      const geojson:GeoJSON.FeatureCollection<GeoJSON.Point>={type:"FeatureCollection",features:mapped.map(v=>({type:"Feature",geometry:{type:"Point",coordinates:[v.lng,v.lat]},properties:{weight:Math.max(.25,score(v)/100)}}))};
       const source=map.getSource("mobile-activity-heat") as mapboxgl.GeoJSONSource|undefined;
-      if(source) source.setData(geojson);
-      else {
+      if(source)source.setData(geojson);else{
         map.addSource("mobile-activity-heat",{type:"geojson",data:geojson});
-        map.addLayer({id:"mobile-activity-heat-layer",type:"heatmap",source:"mobile-activity-heat",maxzoom:15,paint:{"heatmap-weight":["get","weight"],"heatmap-intensity":["interpolate",["linear"],["zoom"],7,.8,12,1.6],"heatmap-radius":["interpolate",["linear"],["zoom"],7,24,12,48],"heatmap-opacity":["interpolate",["linear"],["zoom"],7,.72,13,.5],"heatmap-color":["interpolate",["linear"],["heatmap-density"],0,"rgba(0,0,0,0)",.18,"rgba(0,126,255,.55)",.38,"rgba(34,211,238,.72)",.58,"rgba(255,210,58,.8)",.76,"rgba(255,122,0,.9)",1,"rgba(255,25,45,.96)"]}});
+        map.addLayer({id:"mobile-activity-heat-layer",type:"heatmap",source:"mobile-activity-heat",maxzoom:15,paint:{
+          "heatmap-weight":["get","weight"],
+          "heatmap-intensity":["interpolate",["linear"],["zoom"],7,.7,12,1.4],
+          "heatmap-radius":["interpolate",["linear"],["zoom"],7,18,12,38],
+          "heatmap-opacity":["interpolate",["linear"],["heatmap-density"],0,0,.12,0,.24,.35,.5,.7,1,.9],
+          "heatmap-color":["interpolate",["linear"],["heatmap-density"],0,"rgba(0,0,0,0)",.22,"rgba(0,126,255,0)",.35,"rgba(0,126,255,.42)",.55,"rgba(255,210,58,.68)",.75,"rgba(255,122,0,.82)",1,"rgba(255,25,45,.94)"]
+        }});
       }
       venueMarkers.current.forEach(m=>m.remove());
-      venueMarkers.current=mapped.slice(0,18).map(v=>{const el=document.createElement("div");el.className="mobile-live-marker";el.textContent=String(score(v));return new mapboxgl.Marker({element:el,anchor:"center"}).setLngLat([v.lng,v.lat]).addTo(map)});
+      venueMarkers.current=mapped.map(v=>{const el=document.createElement("button");el.className="mobile-venue-pin";el.title=v.name;el.setAttribute("aria-label",`${v.name}, activity ${score(v)}`);el.innerHTML=`<span>${score(v)}</span>`;return new mapboxgl.Marker({element:el,anchor:"center"}).setLngLat([v.lng,v.lat]).addTo(map)});
     };
     map.loaded()?render():map.once("load",render);
-  },[venues]);
+  },[filtered]);
 
-  const fallback:Venue[]=[
-    {id:"1",name:"Metro Diner Chesapeake",city:"Chesapeake",lat:0,lng:0,reason:"Live music tonight 7–10PM",activity:{score:76,label:"Busy now",trendLabel:"Getting busier"}},
-    {id:"2",name:"Becca’s Restaurant & Garden",city:"Virginia Beach",lat:0,lng:0,reason:"Happy Hour until 7PM",activity:{score:74,label:"Busy now",trendLabel:"Getting busier"}},
-    {id:"3",name:"The Mariners’ Museum",city:"Newport News",lat:0,lng:0,reason:"New exhibition open",activity:{score:72,label:"Moderate",trendLabel:"Steady"}},
-    {id:"4",name:"Yard House",city:"Virginia Beach",lat:0,lng:0,reason:"Popular with groups right now",activity:{score:71,label:"Busy now",trendLabel:"Getting busier"}},
-  ];
-  const shown=top.length?top:fallback;
-  const activePlaces=venues.filter(v=>score(v)>=52&&v.openNow!==false).length||147;
-  const rising=venues.filter(v=>v.activity?.trendLabel==="Getting Busier").length||31;
+  const activePlaces=filtered.filter(v=>score(v)>=52&&v.openNow!==false).length;
+  const rising=filtered.filter(v=>v.activity?.trendLabel?.toLowerCase().includes("busier")).length;
+  const avg=filtered.length?Math.round(filtered.reduce((sum,v)=>sum+score(v),0)/filtered.length):0;
 
   return <div className="mobile-native-home lg:hidden">
     <header className="mobile-native-header"><div className="mobile-native-brand"><strong>757</strong><span>THINGS TO DO</span></div><div className="mobile-native-actions"><button aria-label="Search"><Search/></button><button aria-label="Saved places"><Bookmark/></button><button className="mobile-avatar" aria-label="Profile">D<i/></button></div></header>
     <main className="mobile-native-scroll">
-      <section className="mobile-native-pulse"><div className="pulse-kicker"><b/> LIVE PULSE <span>Updated just now</span></div><h1>757 is active right now 🚀</h1><div className="pulse-grid"><div><em>⌁</em><strong>{rising}</strong><small>Getting busier</small></div><div><em>⌖</em><strong>{activePlaces}</strong><small>Active places</small></div><div><em>♧</em><strong>8.2K</strong><small>People out</small></div><div><em>↗</em><strong>+18%</strong><small>vs last hour</small></div></div></section>
+      <section className="mobile-native-pulse"><div className="pulse-kicker"><b/> LIVE PULSE <span>Updated just now</span></div><h1>757 is active right now 🚀</h1><div className="pulse-grid"><div><em>⌁</em><strong>{rising}</strong><small>Getting busier</small></div><div><em>⌖</em><strong>{activePlaces}</strong><small>Active places</small></div><div><em>♧</em><strong>{avg}</strong><small>Avg activity</small></div><div><em>↗</em><strong>{filtered.length}</strong><small>Places shown</small></div></div></section>
       <section className="mobile-native-map"><div ref={mapEl} className="mobile-native-mapbox"/><div className="heat-legend">Calm <i/> Very Busy</div></section>
       <nav className="mobile-category-rail">{cats.map(([label,Icon])=><button key={label} className={active===label?"active":""} onClick={()=>setActive(label)}><span><Icon/></span><small>{label}</small></button>)}</nav>
-      <section className="mobile-native-feed"><div className="feed-title"><h2>Live Activity Feed <span>LIVE</span></h2><button>See all <ChevronRight/></button></div><div className="feed-list">{shown.map((v,i)=><article className="feed-row" key={v.id}><div className="feed-photo">{v.photoUrl?<img src={v.photoUrl} alt=""/>:v.name.slice(0,1)}</div><div className={`feed-score s${i}`}>{score(v)}</div><div className="feed-copy"><strong>{v.name}</strong><span><b>{v.activity?.trendLabel||"Getting busier"}</b> · {v.activity?.label||"Busy now"}</span><small>☆ {v.event?.name||v.reason||"Popular nearby right now"}</small></div><div className="feed-meta"><span>{i===0?"Just now":`${i*2+1}m ago`}</span><ChevronRight/><Heart/></div></article>)}</div></section>
+      <section className="mobile-native-feed"><div className="feed-title"><h2>{active==="All"?"Live Activity Feed":active} <span>{shown.length}</span></h2><button>All places <ChevronRight/></button></div><div className="feed-list">{shown.map((v,i)=><article className="feed-row" key={v.id}><div className="feed-photo">{v.photoUrl?<img src={v.photoUrl} alt=""/>:v.name.slice(0,1)}</div><div className={`feed-score s${i%4}`}>{score(v)}</div><div className="feed-copy"><strong>{v.name}</strong><span><b>{v.activity?.trendLabel||"Steady"}</b> · {v.activity?.label||"Active now"}</span><small>{v.event?.name?`🎟 ${v.event.name}`:`☆ ${v.reason||"Popular nearby right now"}`}</small></div><div className="feed-meta"><span>{i===0?"Just now":`${Math.min(59,i*2+1)}m ago`}</span><ChevronRight/><Heart/></div></article>)}</div></section>
       <button className="mobile-plan-card"><span className="plan-orb"><Sparkles/></span><span><strong>Plan my night</strong><small>AI-powered recommendations<br/>built around you</small></span><b>Get started <ChevronRight/></b></button>
     </main>
     <nav className="mobile-native-bottom"><button className="active"><span><Compass/></span><small>Explore</small></button><button><span><Map/></span><small>Map</small></button><button><span><Heart/></span><small>Favorites</small></button><button><span><Bell/><i/></span><small>Alerts</small></button><button><span><CalendarDays/></span><small>Plans</small></button></nav>
