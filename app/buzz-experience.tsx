@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronRight, Flame, TrendingDown, TrendingUp, X } from "lucide-react";
+import { CalendarDays, ChevronRight, Flame, Music2, Sparkles, TrendingDown, TrendingUp, Users, X } from "lucide-react";
 import "./buzz-experience.css";
 
 type Venue = {
@@ -17,6 +17,8 @@ type Venue = {
 };
 
 type DiscoveryPayload = { venues?: Venue[]; picks?: Venue[] };
+type FeedKind = "surge" | "event" | "crowd" | "prediction";
+type FeedItem = { id: string; venue: Venue; kind: FeedKind; title: string; detail: string; minutesAgo: number };
 
 const categories = ["All", "Food", "Bars", "Live", "Events", "Family", "Outdoors", "Sports"];
 const buzzScore = (venue: Venue) => Math.max(0, Math.min(100, Number(venue.activity?.score ?? 0)));
@@ -50,17 +52,16 @@ const whyBuzz = (venue: Venue) => {
 };
 const timeline = (venue: Venue) => {
   const base = buzzScore(venue);
-  return [-18, -8, 3, 10, 5, -7].map((delta, index) => ({
-    label: `${6 + index} PM`,
-    value: Math.max(12, Math.min(100, base + delta)),
-  }));
+  return [-18, -8, 3, 10, 5, -7].map((delta, index) => ({ label: `${6 + index} PM`, value: Math.max(12, Math.min(100, base + delta)) }));
 };
+const feedIcon = (kind: FeedKind) => kind === "event" ? <CalendarDays /> : kind === "crowd" ? <Users /> : kind === "prediction" ? <Sparkles /> : <TrendingUp />;
 
 export default function BuzzExperience() {
   const [venues, setVenues] = useState<Venue[]>([]);
   const [category, setCategory] = useState("All");
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<Venue | null>(null);
+  const [expandedFeed, setExpandedFeed] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -84,11 +85,7 @@ export default function BuzzExperience() {
       document.querySelectorAll("body *").forEach((node) => {
         if (node.children.length || !(node instanceof HTMLElement)) return;
         const value = node.textContent || "";
-        const next = value
-          .replace(/LIVE SCORE/g, "BUZZ SCORE")
-          .replace(/Score (\d+)/g, "Buzz $1")
-          .replace(/Very lit/gi, "On fire")
-          .replace(/LIT757/g, "Buzz757");
+        const next = value.replace(/LIVE SCORE/g, "BUZZ SCORE").replace(/Score (\d+)/g, "Buzz $1").replace(/Very lit/gi, "On fire");
         if (next !== value) node.textContent = next;
       });
     };
@@ -98,50 +95,36 @@ export default function BuzzExperience() {
     return () => observer.disconnect();
   }, []);
 
-  const ranked = useMemo(() => venues
-    .filter((venue) => matchesCategory(venue, category))
-    .sort((a, b) => buzzScore(b) - buzzScore(a))
-    .slice(0, 10), [venues, category]);
+  const ranked = useMemo(() => venues.filter((venue) => matchesCategory(venue, category)).sort((a, b) => buzzScore(b) - buzzScore(a)).slice(0, 10), [venues, category]);
+  const feed = useMemo<FeedItem[]>(() => ranked.slice(0, 8).map((venue, index) => {
+    const score = buzzScore(venue);
+    if (venue.event?.name) return { id: `event-${venue.id}`, venue, kind: "event", title: `${venue.event.name} is driving the Buzz`, detail: `${venue.name} · Buzz ${score}`, minutesAgo: 4 + index * 3 };
+    if (index % 4 === 1) return { id: `crowd-${venue.id}`, venue, kind: "crowd", title: `${venue.name} is pulling a crowd`, detail: `${buzzLabel(score)} · ${venue.city || "Hampton Roads"}`, minutesAgo: 7 + index * 3 };
+    if (index % 4 === 2) return { id: `prediction-${venue.id}`, venue, kind: "prediction", title: `${venue.name} may peak soon`, detail: `Projected Buzz ${Math.min(100, score + 8)} within the hour`, minutesAgo: 10 + index * 3 };
+    return { id: `surge-${venue.id}`, venue, kind: "surge", title: `${venue.name} jumped +${Math.max(6, Math.round((score - 50) / 2))} Buzz`, detail: `${buzzLabel(score)} · Buzz ${score}`, minutesAgo: 2 + index * 3 };
+  }), [ranked]);
 
   const selectedTimeline = selected ? timeline(selected) : [];
+  const visibleFeed = expandedFeed ? feed : feed.slice(0, 4);
 
   return <>
-    <section className="buzz-launcher" aria-label="Trending by Buzz">
-      <div className="buzz-category-scroll">
-        {categories.map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{item}</button>)}
+    <section className="buzz-feed" aria-label="Buzz Feed">
+      <div className="buzz-feed-head"><div><span><Flame /> BUZZ FEED</span><h2>What’s happening now</h2></div><button onClick={() => setOpen(true)}>Top 10 <ChevronRight /></button></div>
+      <div className="buzz-feed-list">
+        {visibleFeed.map((item) => <button key={item.id} className={`buzz-feed-item ${item.kind}`} onClick={() => setSelected(item.venue)}>
+          <i>{feedIcon(item.kind)}</i><span><strong>{item.title}</strong><small>{item.detail}</small></span><time>{item.minutesAgo}m</time><ChevronRight />
+        </button>)}
       </div>
-      <button className="buzz-open" onClick={() => setOpen(true)}>
-        <span><Flame /> <b>Trending by Buzz</b></span>
-        <small>{ranked[0] ? `${ranked[0].name} leads at ${buzzScore(ranked[0])}` : "See what is moving now"}</small>
-        <ChevronRight />
-      </button>
+      {feed.length > 4 && <button className="buzz-feed-more" onClick={() => setExpandedFeed((value) => !value)}>{expandedFeed ? "Show less" : `See ${feed.length - 4} more updates`}</button>}
     </section>
 
-    {open && <div className="buzz-backdrop" onClick={() => setOpen(false)}>
-      <section className="buzz-sheet" onClick={(event) => event.stopPropagation()}>
-        <div className="buzz-handle" />
-        <header><div><span>LIVE AROUND YOU</span><h2>Trending by Buzz</h2><p>Ranked by current activity and momentum.</p></div><button onClick={() => setOpen(false)}><X /></button></header>
-        <div className="buzz-sheet-categories">{categories.map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{item}</button>)}</div>
-        <div className="buzz-ranking">
-          {ranked.map((venue, index) => {
-            const trend = trendFor(venue);
-            return <button key={venue.id} onClick={() => setSelected(venue)}>
-              <i>{index + 1}</i><span><strong>{venue.name}</strong><small>{buzzLabel(buzzScore(venue))} · {venue.city || "Hampton Roads"}</small></span>
-              <b>{buzzScore(venue)}</b>{trend === "falling" ? <TrendingDown /> : <TrendingUp className={trend === "steady" ? "steady" : ""} />}
-            </button>;
-          })}
-        </div>
-      </section>
-    </div>}
+    <section className="buzz-launcher" aria-label="Trending by Buzz">
+      <div className="buzz-category-scroll">{categories.map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{item}</button>)}</div>
+      <button className="buzz-open" onClick={() => setOpen(true)}><span><Flame /> <b>Trending by Buzz</b></span><small>{ranked[0] ? `${ranked[0].name} leads at ${buzzScore(ranked[0])}` : "See what is moving now"}</small><ChevronRight /></button>
+    </section>
 
-    {selected && <div className="buzz-backdrop buzz-detail-backdrop" onClick={() => setSelected(null)}>
-      <section className="buzz-detail" onClick={(event) => event.stopPropagation()}>
-        <div className="buzz-handle" />
-        <header><div><span>{buzzLabel(buzzScore(selected)).toUpperCase()}</span><h2>{selected.name}</h2><p>{selected.city || "Hampton Roads"}</p></div><button onClick={() => setSelected(null)}><X /></button></header>
-        <div className="buzz-score-card"><div><small>BUZZ SCORE</small><strong>{buzzScore(selected)}</strong></div><span>{trendFor(selected) === "falling" ? "↓ Falling" : trendFor(selected) === "steady" ? "→ Steady" : "↑ Rising"}</span></div>
-        <section className="buzz-timeline"><div><span>BUZZ TONIGHT</span><small>Estimated activity</small></div>{selectedTimeline.map((point) => <div className="buzz-hour" key={point.label}><small>{point.label}</small><i><b style={{ width: `${point.value}%` }} /></i><span>{point.value}</span></div>)}</section>
-        <section className="buzz-why"><span>WHY THE BUZZ?</span>{whyBuzz(selected).map((reason) => <p key={reason}><Flame /> {reason}</p>)}</section>
-      </section>
-    </div>}
+    {open && <div className="buzz-backdrop" onClick={() => setOpen(false)}><section className="buzz-sheet" onClick={(event) => event.stopPropagation()}><div className="buzz-handle"/><header><div><span>LIVE AROUND YOU</span><h2>Trending by Buzz</h2><p>Ranked by current activity and momentum.</p></div><button onClick={() => setOpen(false)}><X /></button></header><div className="buzz-sheet-categories">{categories.map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{item}</button>)}</div><div className="buzz-ranking">{ranked.map((venue, index) => { const trend = trendFor(venue); return <button key={venue.id} onClick={() => setSelected(venue)}><i>{index + 1}</i><span><strong>{venue.name}</strong><small>{buzzLabel(buzzScore(venue))} · {venue.city || "Hampton Roads"}</small></span><b>{buzzScore(venue)}</b>{trend === "falling" ? <TrendingDown /> : <TrendingUp className={trend === "steady" ? "steady" : ""} />}</button>; })}</div></section></div>}
+
+    {selected && <div className="buzz-backdrop buzz-detail-backdrop" onClick={() => setSelected(null)}><section className="buzz-detail" onClick={(event) => event.stopPropagation()}><div className="buzz-handle"/><header><div><span>{buzzLabel(buzzScore(selected)).toUpperCase()}</span><h2>{selected.name}</h2><p>{selected.city || "Hampton Roads"}</p></div><button onClick={() => setSelected(null)}><X /></button></header><div className="buzz-score-card"><div><small>BUZZ SCORE</small><strong>{buzzScore(selected)}</strong></div><span>{trendFor(selected) === "falling" ? "↓ Falling" : trendFor(selected) === "steady" ? "→ Steady" : "↑ Rising"}</span></div><section className="buzz-timeline"><div><span>BUZZ TONIGHT</span><small>Estimated activity</small></div>{selectedTimeline.map((point) => <div className="buzz-hour" key={point.label}><small>{point.label}</small><i><b style={{ width: `${point.value}%` }}/></i><span>{point.value}</span></div>)}</section><section className="buzz-why"><span>WHY THE BUZZ?</span>{whyBuzz(selected).map((reason) => <p key={reason}><Flame /> {reason}</p>)}</section></section></div>}
   </>;
 }
