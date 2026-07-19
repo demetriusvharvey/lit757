@@ -1,82 +1,39 @@
 export const dynamic = "force-dynamic";
 export const maxDuration = 20;
 
+type GooglePlacePhoto = {
+  name?: string;
+  widthPx?: number;
+  heightPx?: number;
+  authorAttributions?: Array<{ displayName?: string; uri?: string }>;
+};
+
 type GooglePlaceDetails = {
   id?: string;
   displayName?: { text?: string };
-  formattedAddress?: string;
-  location?: {
-    latitude?: number;
-    longitude?: number;
-  };
-};
-
-type StreetViewMetadata = {
-  status?: string;
-  location?: { lat?: number; lng?: number };
+  photos?: GooglePlacePhoto[];
 };
 
 function isValidPlaceId(value: string) {
   return /^[A-Za-z0-9_-]{10,220}$/.test(value);
 }
 
-function streetViewLocation(place: GooglePlaceDetails) {
-  if (place.formattedAddress) return place.formattedAddress;
-
-  const latitude = Number(place.location?.latitude);
-  const longitude = Number(place.location?.longitude);
-
-  if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
-    return `${latitude},${longitude}`;
-  }
-
-  return "";
+function isValidPhotoName(value: string) {
+  return /^places\/[A-Za-z0-9_-]+\/photos\/[A-Za-z0-9_-]+$/.test(value);
 }
 
-function bearingToVenue(
-  panorama?: StreetViewMetadata["location"],
-  venue?: GooglePlaceDetails["location"]
-) {
-  const fromLat = Number(panorama?.lat);
-  const fromLng = Number(panorama?.lng);
-  const toLat = Number(venue?.latitude);
-  const toLng = Number(venue?.longitude);
-  if (![fromLat, fromLng, toLat, toLng].every(Number.isFinite)) return null;
-
-  const radians = (degrees: number) => (degrees * Math.PI) / 180;
-  const y = Math.sin(radians(toLng - fromLng)) * Math.cos(radians(toLat));
-  const x =
-    Math.cos(radians(fromLat)) * Math.sin(radians(toLat)) -
-    Math.sin(radians(fromLat)) * Math.cos(radians(toLat)) * Math.cos(radians(toLng - fromLng));
-  return (Math.atan2(y, x) * 180) / Math.PI + 360;
-}
-
-async function storefrontHeading(
-  location: string,
-  place: GooglePlaceDetails,
-  apiKey: string
-) {
-  const params = new URLSearchParams({
-    location,
-    source: "outdoor",
-    radius: "100",
-    key: apiKey,
-  });
-  const response = await fetch(
-    `https://maps.googleapis.com/maps/api/streetview/metadata?${params.toString()}`,
-    { cache: "no-store" }
-  );
-  if (!response.ok) return null;
-  const metadata = (await response.json()) as StreetViewMetadata;
-  if (metadata.status !== "OK") return null;
-  const bearing = bearingToVenue(metadata.location, place.location);
-  return bearing === null ? null : String(Math.round(bearing % 360));
+function chooseBestPhoto(photos: GooglePlacePhoto[]) {
+  return [...photos]
+    .filter((photo) => photo.name && isValidPhotoName(photo.name))
+    .sort((left, right) => {
+      const leftArea = Number(left.widthPx || 0) * Number(left.heightPx || 0);
+      const rightArea = Number(right.widthPx || 0) * Number(right.heightPx || 0);
+      return rightArea - leftArea;
+    })[0];
 }
 
 export async function GET(request: Request) {
-  const apiKey =
-    process.env.GOOGLE_STREET_VIEW_API_KEY ||
-    process.env.GOOGLE_PLACES_API_KEY;
+  const apiKey = process.env.GOOGLE_PLACES_API_KEY;
   const placeId = new URL(request.url).searchParams.get("placeId") || "";
 
   if (!apiKey || !isValidPlaceId(placeId)) {
@@ -88,9 +45,9 @@ export async function GET(request: Request) {
     {
       headers: {
         "X-Goog-Api-Key": apiKey,
-        "X-Goog-FieldMask": "id,displayName,formattedAddress,location",
+        "X-Goog-FieldMask": "id,displayName,photos",
       },
-      cache: "no-store",
+      next: { revalidate: 86400 },
     }
   );
 
@@ -99,30 +56,34 @@ export async function GET(request: Request) {
   }
 
   const place = (await detailsResponse.json()) as GooglePlaceDetails;
-  const location = streetViewLocation(place);
+  const photo = chooseBestPhoto(place.photos || []);
 
-  if (!location) {
+  // No Street View fallback: an empty branded placeholder is more trustworthy
+  // than showing a nearby road, parking lot, or unrelated building.
+  if (!photo?.name) {
     return new Response(null, { status: 404 });
   }
 
-  const heading = await storefrontHeading(location, place, apiKey);
-
-  const params = new URLSearchParams({
-    size: "640x420",
-    scale: "2",
-    location,
-    source: "outdoor",
-    fov: "75",
-    pitch: "2",
-    radius: "100",
-    return_error_code: "true",
-    key: apiKey,
-  });
-  if (heading) params.set("heading", heading);
-  const imageResponse = await fetch(
-    `https://maps.googleapis.com/maps/api/streetview?${params.toString()}`,
-    { cache: "no-store" }
+  const photoResponse = await fetch(
+    `https://places.googleapis.com/v1/${photo.name}/media?maxWidthPx=1280&maxHeightPx=840&skipHttpRedirect=true`,
+    {
+      headers: { "X-Goog-Api-Key": apiKey },
+      next: { revalidate: 86400 },
+    }
   );
+
+  if (!photoResponse.ok) {
+    return new Response(null, { status: photoResponse.status });
+  }
+
+  const payload = (await photoResponse.json()) as { photoUri?: string };
+  if (!payload.photoUri) {
+    return new Response(null, { status: 404 });
+  }
+
+  const imageResponse = await fetch(payload.photoUri, {
+    next: { revalidate: 86400 },
+  });
 
   if (!imageResponse.ok) {
     return new Response(null, { status: imageResponse.status });
@@ -131,8 +92,9 @@ export async function GET(request: Request) {
   return new Response(await imageResponse.arrayBuffer(), {
     headers: {
       "Content-Type": imageResponse.headers.get("content-type") || "image/jpeg",
-      "Cache-Control": "private, no-store",
-      "X-Venue-Photo-Source": "google-street-view",
+      "Cache-Control": "public, s-maxage=86400, stale-while-revalidate=604800",
+      "X-Venue-Photo-Source": "google-place-photo",
+      "X-Venue-Name": encodeURIComponent(place.displayName?.text || ""),
     },
   });
 }
