@@ -14,9 +14,10 @@ const cats = [["All",Compass],["Food",Utensils],["Drinks",Wine],["Nightlife",Mus
 const prompts=["Date night under $100","Live music tonight","Something fun with kids","Drinks then dancing"];
 const FAVORITES_KEY="lit757-mobile-favorites";
 const ALERTS_KEY="lit757-mobile-alerts";
-const score = (v:Venue) => v.activity?.score ?? 70;
-const coords = (v:Venue):[number,number] => [Number(v.lng),Number(v.lat)];
-const validVenue = (v:Venue) => {const [lng,lat]=coords(v);return Number.isFinite(lat)&&Number.isFinite(lng)&&lat!==0&&lng!==0;};
+const score=(v:Venue)=>v.activity?.score??70;
+const heatScore=(v:Venue)=>v.activity?.score??0;
+const coords=(v:Venue):[number,number]=>[Number(v.lng),Number(v.lat)];
+const validVenue=(v:Venue)=>{const [lng,lat]=coords(v);return Number.isFinite(lat)&&Number.isFinite(lng)&&lat!==0&&lng!==0;};
 const categoryFor=(v:Venue)=>{
   const explicit=`${v.kind||""} ${v.type||""}`.toLowerCase();
   const text=`${v.name} ${v.reason||""} ${v.event?.name||""} ${explicit}`.toLowerCase();
@@ -54,6 +55,7 @@ export default function MobileHome(){
     try{setFavoriteIds(new Set(JSON.parse(localStorage.getItem(FAVORITES_KEY)||"[]") as string[]));setAlertsEnabled(localStorage.getItem(ALERTS_KEY)==="true");}catch{}
     fetch("/api/discover?city=All%20757&mode=all",{cache:"no-store"}).then(r=>r.json()).then((p:Payload)=>setVenues(p.venues||p.picks||[])).catch(()=>undefined);
   },[]);
+
   const filtered=useMemo(()=>[...venues].filter(v=>active==="All"||categoryFor(v)===active).sort((a,b)=>score(b)-score(a)),[venues,active]);
   const mapped=useMemo(()=>filtered.filter(validVenue),[filtered]);
   const favorites=useMemo(()=>venues.filter(v=>favoriteIds.has(v.id)),[venues,favoriteIds]);
@@ -65,29 +67,32 @@ export default function MobileHome(){
     const map=new mapboxgl.Map({container:mapEl.current,style:"mapbox://styles/mapbox/dark-v11",center:[-76.17,36.88],zoom:8.6,minZoom:7.5,maxZoom:17,attributionControl:true});
     map.addControl(new mapboxgl.NavigationControl({showCompass:false}),"top-right");
     mapRef.current=map;
-    return()=>{map.remove();mapRef.current=null};
+    return()=>{map.remove();mapRef.current=null;};
   },[]);
 
   useEffect(()=>{
     const map=mapRef.current;if(!map)return;
     const render=()=>{
-      const features:GeoJSON.Feature<GeoJSON.Point>[] = mapped.map((v,index)=>({type:"Feature",geometry:{type:"Point",coordinates:coords(v)},properties:{id:v.id,index,name:v.name,score:score(v),category:categoryFor(v)}}));
-      const geojson:GeoJSON.FeatureCollection<GeoJSON.Point>={type:"FeatureCollection",features};
+      const pinFeatures:GeoJSON.Feature<GeoJSON.Point>[]=mapped.map((v,index)=>({type:"Feature",geometry:{type:"Point",coordinates:coords(v)},properties:{id:v.id,index,name:v.name,score:score(v),category:categoryFor(v)}}));
+      const heatFeatures:GeoJSON.Feature<GeoJSON.Point>[]=mapped.filter(v=>heatScore(v)>=55&&v.openNow!==false).map(v=>({type:"Feature",geometry:{type:"Point",coordinates:coords(v)},properties:{score:heatScore(v)}}));
+      const pinGeojson:GeoJSON.FeatureCollection<GeoJSON.Point>={type:"FeatureCollection",features:pinFeatures};
+      const heatGeojson:GeoJSON.FeatureCollection<GeoJSON.Point>={type:"FeatureCollection",features:heatFeatures};
       const heatSource=map.getSource("mobile-venue-heat") as mapboxgl.GeoJSONSource|undefined;
       const pinSource=map.getSource("mobile-venues") as mapboxgl.GeoJSONSource|undefined;
-      if(heatSource)heatSource.setData(geojson);if(pinSource)pinSource.setData(geojson);
+      if(heatSource)heatSource.setData(heatGeojson);
+      if(pinSource)pinSource.setData(pinGeojson);
       if(!heatSource){
-        map.addSource("mobile-venue-heat",{type:"geojson",data:geojson});
-        map.addLayer({id:"mobile-venue-glow",type:"heatmap",source:"mobile-venue-heat",maxzoom:14,paint:{
-          "heatmap-weight":["interpolate",["linear"],["get","score"],0,.08,45,.24,65,.48,82,.72,100,.9],
-          "heatmap-intensity":["interpolate",["linear"],["zoom"],7,.48,9,.68,11,.78,13,.55],
-          "heatmap-radius":["interpolate",["linear"],["zoom"],7,18,9,25,11,32,13,24],
-          "heatmap-opacity":["interpolate",["linear"],["zoom"],7,.48,9,.58,11,.52,13,.28,14,0],
-          "heatmap-color":["interpolate",["linear"],["heatmap-density"],0,"rgba(0,0,0,0)",.18,"rgba(49,151,255,.12)",.38,"rgba(60,214,178,.24)",.58,"rgba(247,199,72,.38)",.78,"rgba(255,133,55,.54)",1,"rgba(255,77,70,.68)"]
+        map.addSource("mobile-venue-heat",{type:"geojson",data:heatGeojson});
+        map.addLayer({id:"mobile-venue-glow",type:"heatmap",source:"mobile-venue-heat",maxzoom:12.8,paint:{
+          "heatmap-weight":["interpolate",["linear"],["get","score"],55,.12,70,.3,85,.58,100,.82],
+          "heatmap-intensity":["interpolate",["linear"],["zoom"],7,.28,9,.42,11,.52,12.8,.34],
+          "heatmap-radius":["interpolate",["linear"],["zoom"],7,10,9,15,11,20,12.8,16],
+          "heatmap-opacity":["interpolate",["linear"],["zoom"],7,.32,9,.42,11,.36,12.8,0],
+          "heatmap-color":["interpolate",["linear"],["heatmap-density"],0,"rgba(0,0,0,0)",.28,"rgba(54,182,255,.08)",.48,"rgba(69,220,169,.16)",.68,"rgba(246,199,72,.26)",.84,"rgba(255,137,61,.38)",1,"rgba(255,78,70,.5)"]
         }});
       }
       if(!pinSource){
-        map.addSource("mobile-venues",{type:"geojson",data:geojson,cluster:true,clusterMaxZoom:12,clusterRadius:90});
+        map.addSource("mobile-venues",{type:"geojson",data:pinGeojson,cluster:true,clusterMaxZoom:12,clusterRadius:90});
         map.addLayer({id:"mobile-clusters",type:"circle",source:"mobile-venues",filter:["has","point_count"],minzoom:9.2,paint:{"circle-color":["step",["get","point_count"],"#f2c94c",20,"#ff8b34",55,"#ff554a"],"circle-radius":["step",["get","point_count"],10,20,13,55,16],"circle-stroke-width":1.5,"circle-stroke-color":"rgba(255,255,255,.82)","circle-opacity":.88}});
         map.addLayer({id:"mobile-cluster-count",type:"symbol",source:"mobile-venues",filter:["has","point_count"],minzoom:9.2,layout:{"text-field":["get","point_count_abbreviated"],"text-size":9},paint:{"text-color":"#081016"}});
         map.addLayer({id:"mobile-venue-pins",type:"circle",source:"mobile-venues",filter:["!",["has","point_count"]],minzoom:11.3,paint:{"circle-radius":["interpolate",["linear"],["zoom"],11.3,3.5,14,6.5,16,8],"circle-color":["step",["get","score"],"#43d879",45,"#f2c94c",65,"#ff8b34",82,"#ff554a"],"circle-stroke-width":["interpolate",["linear"],["zoom"],11.3,.8,14,1.5],"circle-stroke-color":"rgba(255,255,255,.86)","circle-opacity":.94}});
@@ -115,14 +120,7 @@ export default function MobileHome(){
   function openPlanner(){setActiveTab("ai");setPlannerOpen(true);}
   function closeOverlay(){setFavoritesOpen(false);setAlertsOpen(false);setActiveTab("explore");}
   function toggleFavorite(event:MouseEvent,venue:Venue){event.stopPropagation();setFavoriteIds(current=>{const next=new Set(current);next.has(venue.id)?next.delete(venue.id):next.add(venue.id);try{localStorage.setItem(FAVORITES_KEY,JSON.stringify([...next]));}catch{}return next;});}
-  async function enableAlerts(){
-    setAlertMessage("");
-    if(typeof Notification==="undefined"){setAlertMessage("Notifications are not supported in this browser yet.");return;}
-    const permission=await Notification.requestPermission();
-    if(permission!=="granted"){setAlertMessage("Notifications were not allowed. You can enable them later in browser settings.");return;}
-    setAlertsEnabled(true);try{localStorage.setItem(ALERTS_KEY,"true");}catch{}
-    setAlertMessage("Alerts are on. We’ll only notify you about saved places and meaningful activity.");
-  }
+  async function enableAlerts(){setAlertMessage("");if(typeof Notification==="undefined"){setAlertMessage("Notifications are not supported in this browser yet.");return;}const permission=await Notification.requestPermission();if(permission!=="granted"){setAlertMessage("Notifications were not allowed. You can enable them later in browser settings.");return;}setAlertsEnabled(true);try{localStorage.setItem(ALERTS_KEY,"true");}catch{}setAlertMessage("Alerts are on. We’ll only notify you about saved places and meaningful activity.");}
 
   const activePlaces=filtered.filter(v=>score(v)>=52&&v.openNow!==false).length;
   const rising=filtered.filter(v=>v.activity?.trendLabel?.toLowerCase().includes("busier")).length;
@@ -137,13 +135,7 @@ export default function MobileHome(){
       <button className="mobile-plan-card" onClick={openPlanner}><span className="plan-orb"><Sparkles/></span><span><strong>Ask AI</strong><small>Tell us the vibe. We’ll plan the move.</small></span><b>Plan now <ChevronRight/></b></button>
       <section className="mobile-native-feed"><div className="feed-title"><h2>{active==="All"?"Live Activity Feed":active} <span>{filtered.length}</span></h2><button onClick={()=>setActive("All")}>All places <ChevronRight/></button></div><div className="feed-list">{filtered.map((v,i)=><article className="feed-row" key={v.id} onClick={()=>{setSelected(v);if(validVenue(v))mapRef.current?.easeTo({center:coords(v),zoom:13,duration:550});}}><div className="feed-photo">{v.photoUrl?<img src={v.photoUrl} alt=""/>:v.name.slice(0,1)}</div><div className={`feed-score s${i%4}`}>{score(v)}</div><div className="feed-copy"><strong>{v.name}</strong><span><b>{v.activity?.trendLabel||"Steady"}</b> · {v.activity?.label||"Active now"}</span><small>{v.event?.name?`🎟 ${v.event.name}`:`☆ ${v.reason||"Popular nearby right now"}`}</small></div><div className="feed-meta"><span>{i===0?"Just now":`${Math.min(59,i*2+1)}m ago`}</span><ChevronRight/><button className={favoriteIds.has(v.id)?"favorite-toggle saved":"favorite-toggle"} onClick={event=>toggleFavorite(event,v)} aria-label={favoriteIds.has(v.id)?"Remove from favorites":"Add to favorites"}><Heart fill={favoriteIds.has(v.id)?"currentColor":"none"}/></button></div></article>)}</div></section>
     </main>
-    <nav className="mobile-native-bottom">
-      <button className={activeTab==="explore"?"active":""} onClick={goExplore}><span><Compass/></span><small>Explore</small></button>
-      <button className={activeTab==="map"?"active":""} onClick={goMap}><span><Map/></span><small>Map</small></button>
-      <button className={activeTab==="favorites"?"active":""} onClick={openFavorites}><span><Heart/></span><small>Favorites</small></button>
-      <button className={activeTab==="alerts"?"active":""} onClick={openAlerts}><span><Bell/>{!alertsEnabled&&<i/>}</span><small>Alerts</small></button>
-      <button className={activeTab==="ai"?"active":""} onClick={openPlanner}><span><Sparkles/></span><small>Ask AI</small></button>
-    </nav>
+    <nav className="mobile-native-bottom"><button className={activeTab==="explore"?"active":""} onClick={goExplore}><span><Compass/></span><small>Explore</small></button><button className={activeTab==="map"?"active":""} onClick={goMap}><span><Map/></span><small>Map</small></button><button className={activeTab==="favorites"?"active":""} onClick={openFavorites}><span><Heart/></span><small>Favorites</small></button><button className={activeTab==="alerts"?"active":""} onClick={openAlerts}><span><Bell/>{!alertsEnabled&&<i/>}</span><small>Alerts</small></button><button className={activeTab==="ai"?"active":""} onClick={openPlanner}><span><Sparkles/></span><small>Ask AI</small></button></nav>
     {plannerOpen&&<div className="planner-backdrop" onClick={closePlanner}><section className="planner-sheet" onClick={event=>event.stopPropagation()}><div className="planner-handle"/><div className="planner-head"><div><span>ASK AI</span><h2>What kind of move?</h2><p>Describe the vibe, budget, people, or timing.</p></div><button onClick={closePlanner} aria-label="Close Ask AI"><X/></button></div><div className="planner-prompts">{prompts.map(prompt=><button key={prompt} onClick={()=>void runPlanner(prompt)}>{prompt}</button>)}</div><form onSubmit={submitPlanner} className="planner-form"><input value={plannerQuery} onChange={event=>setPlannerQuery(event.target.value)} placeholder="Try “chill date night near Norfolk”" aria-label="Ask AI what to plan"/><button disabled={plannerLoading||!plannerQuery.trim()} aria-label="Build my plan">{plannerLoading?<span className="planner-spinner"/>:<Send/>}</button></form>{plannerError&&<p className="planner-error">{plannerError}</p>}{plannerResults.length>0&&<div className="planner-results"><div className="planner-result-title"><span>YOUR PLAN</span><strong>{plannerTitle}</strong></div>{plannerResults.map((venue,index)=><button key={venue.id} onClick={()=>{setSelected(venue);closePlanner();if(validVenue(venue))mapRef.current?.easeTo({center:coords(venue),zoom:13,duration:550});}}><i>{index+1}</i><span><strong>{venue.name}</strong><small>{venue.event?.name||venue.reason||venue.city||"Recommended for your plan"}</small></span><ChevronRight/></button>)}</div>}</section></div>}
     {favoritesOpen&&<div className="planner-backdrop" onClick={closeOverlay}><section className="utility-sheet" onClick={event=>event.stopPropagation()}><div className="planner-handle"/><div className="utility-head"><div><span>FAVORITES</span><h2>Your saved places</h2><p>Keep the spots you want to watch.</p></div><button onClick={closeOverlay}><X/></button></div>{favorites.length?<div className="utility-list">{favorites.map(v=><button key={v.id} onClick={()=>{setSelected(v);closeOverlay();if(validVenue(v)){mapSectionRef.current?.scrollIntoView({behavior:"smooth"});mapRef.current?.easeTo({center:coords(v),zoom:13,duration:550});}}><div className="utility-photo">{v.photoUrl?<img src={v.photoUrl} alt=""/>:v.name.slice(0,1)}</div><span><strong>{v.name}</strong><small>{v.city||v.activity?.label||"Saved place"}</small></span><ChevronRight/></button>)}</div>:<div className="utility-empty"><Heart/><strong>No favorites yet</strong><p>Tap the heart on any place in the activity feed to save it here.</p></div>}</section></div>}
     {alertsOpen&&<div className="planner-backdrop" onClick={closeOverlay}><section className="utility-sheet" onClick={event=>event.stopPropagation()}><div className="planner-handle"/><div className="utility-head"><div><span>SMART ALERTS</span><h2>Let the app work for you</h2><p>Get a quiet notification when a saved place starts heating up.</p></div><button onClick={closeOverlay}><X/></button></div><div className="alert-card"><Bell/><div><strong>{alertsEnabled?"Alerts are on":"Turn on saved-place alerts"}</strong><p>{alertsEnabled?"We’ll only send meaningful activity and event updates.":"Favorite places first, then enable notifications. No constant spam."}</p></div></div><button className="alert-action" onClick={()=>void enableAlerts()} disabled={alertsEnabled}>{alertsEnabled?"Enabled":"Enable alerts"}</button>{alertMessage&&<p className="alert-message">{alertMessage}</p>}</section></div>}
