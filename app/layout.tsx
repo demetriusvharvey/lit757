@@ -4,6 +4,7 @@ import "./globals.css";
 import "./venue-detail.css";
 import "./venue-voting.css";
 import "./venue-cards.css";
+import MapLayerGuard from "./map-layer-guard";
 import MobileHome from "./mobile-home";
 import HomeMapResizer from "./home-map-resizer";
 import LegacyEnhancers from "./legacy-enhancers";
@@ -64,6 +65,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en" className={`${inter.variable} ${geistMono.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col">
         <script dangerouslySetInnerHTML={{ __html: rankedFeedBootstrap }} />
+        <MapLayerGuard />
         <MobileHome />
         <HomeMapResizer />
         <VenueDetailEnhancer />
