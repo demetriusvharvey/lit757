@@ -4,6 +4,7 @@ import "./globals.css";
 import "./venue-detail.css";
 import "./venue-voting.css";
 import "./venue-cards.css";
+import "./mobile-explore-polish.css";
 import MapLayerGuard from "./map-layer-guard";
 import MobileHome from "./mobile-home";
 import BuzzExperience from "./buzz-experience";
