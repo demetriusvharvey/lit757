@@ -1,9 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ComponentType } from "react";
 import Link from "next/link";
 import { Building2, CalendarPlus, TicketCheck } from "lucide-react";
 import { supabase } from "../../src/lib/supabase";
+
+type ActionCard = {
+  icon: ComponentType<{ size?: number }>;
+  title: string;
+  detail: string;
+};
+
+const ACTIONS: ActionCard[] = [
+  { icon: Building2, title: "Claim a venue", detail: "Request ownership verification." },
+  { icon: CalendarPlus, title: "Create events", detail: "Publish dates, times and ticket links." },
+  { icon: TicketCheck, title: "Update sales", detail: "Share verified capacity and tickets sold." },
+];
 
 export default function OrganizerPage() {
   const [email, setEmail] = useState<string | null>(null);
@@ -27,14 +39,14 @@ export default function OrganizerPage() {
           </div>
         ) : (
           <div className="mt-8 grid gap-3 sm:grid-cols-3">
-            {[
-              [Building2, "Claim a venue", "Request ownership verification."],
-              [CalendarPlus, "Create events", "Publish dates, times and ticket links."],
-              [TicketCheck, "Update sales", "Share verified capacity and tickets sold."],
-            ].map(([Icon, title, detail]) => {
-              const Component = Icon as typeof Building2;
-              return <article key={String(title)} className="rounded-[1.5rem] border border-black/[0.08] bg-white/75 p-5"><Component size={20} /><h2 className="mt-5 font-semibold">{String(title)}</h2><p className="mt-2 text-xs leading-5 text-black/45">{String(detail)}</p><button className="mt-5 rounded-full bg-[#171716] px-4 py-2.5 text-xs font-semibold text-white">Coming next</button></article>;
-            })}
+            {ACTIONS.map(({ icon: Icon, title, detail }) => (
+              <article key={title} className="rounded-[1.5rem] border border-black/[0.08] bg-white/75 p-5">
+                <Icon size={20} />
+                <h2 className="mt-5 font-semibold">{title}</h2>
+                <p className="mt-2 text-xs leading-5 text-black/45">{detail}</p>
+                <button type="button" className="mt-5 rounded-full bg-[#171716] px-4 py-2.5 text-xs font-semibold text-white">Coming next</button>
+              </article>
+            ))}
           </div>
         )}
 
