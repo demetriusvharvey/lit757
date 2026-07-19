@@ -2,8 +2,6 @@
 
 import { useEffect } from "react";
 
-const escapeSelector=(value:string)=>value.replace(/["\\]/g,"\\$&");
-
 export default function VenueDetailEnhancer(){
   useEffect(()=>{
     const enhance=()=>{
@@ -13,8 +11,27 @@ export default function VenueDetailEnhancer(){
         sheet.classList.add("venue-detail-sheet");
 
         const title=sheet.querySelector<HTMLHeadingElement>(".utility-head h2")?.textContent?.trim()||"This place";
+        const header=sheet.querySelector<HTMLElement>(".utility-head");
         const directions=[...sheet.querySelectorAll<HTMLButtonElement>("button")].find(button=>button.textContent?.includes("Get directions"));
-        if(!directions)return;
+        if(!directions||!header)return;
+
+        const matchingRow=[...document.querySelectorAll<HTMLElement>(".feed-row")].find(row=>row.querySelector(".feed-copy strong")?.textContent?.trim()===title);
+        const sourceImage=matchingRow?.querySelector<HTMLImageElement>(".feed-photo img");
+        const hero=document.createElement("div");
+        hero.className="venue-detail-hero";
+        if(sourceImage?.src){
+          const image=document.createElement("img");
+          image.src=sourceImage.src;
+          image.alt=title;
+          hero.append(image);
+        }else{
+          hero.classList.add("venue-detail-hero-fallback");
+          hero.textContent=title.slice(0,1).toUpperCase();
+        }
+        const shade=document.createElement("div");
+        shade.className="venue-detail-hero-shade";
+        hero.append(shade);
+        header.insertAdjacentElement("beforebegin",hero);
 
         const proof=document.createElement("div");
         proof.className="venue-detail-proof";
@@ -28,7 +45,6 @@ export default function VenueDetailEnhancer(){
         save.type="button";
         save.className="venue-detail-secondary";
         save.setAttribute("aria-label",`Save ${title}`);
-        const matchingRow=[...document.querySelectorAll<HTMLElement>(".feed-row")].find(row=>row.querySelector(".feed-copy strong")?.textContent?.trim()===title);
         const favorite=matchingRow?.querySelector<HTMLButtonElement>(".favorite-toggle");
         const syncSave=()=>{const saved=favorite?.classList.contains("saved")??false;save.classList.toggle("saved",saved);save.textContent=saved?"♥ Saved":"♡ Save place";};
         syncSave();
