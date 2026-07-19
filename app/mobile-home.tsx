@@ -84,7 +84,10 @@ export default function MobileHome(){
           const clusterId=feature?.properties?.cluster_id;
           const source=map.getSource("mobile-venues") as mapboxgl.GeoJSONSource;
           if(clusterId===undefined)return;
-          source.getClusterExpansionZoom(clusterId).then(zoom=>map.easeTo({center:(feature.geometry as GeoJSON.Point).coordinates as [number,number],zoom})).catch(()=>undefined);
+          source.getClusterExpansionZoom(clusterId,(error,zoom)=>{
+            if(error||zoom===undefined)return;
+            map.easeTo({center:(feature.geometry as GeoJSON.Point).coordinates as [number,number],zoom});
+          });
         });
         map.on("click","mobile-venue-pins",e=>{
           const feature=e.features?.[0];
