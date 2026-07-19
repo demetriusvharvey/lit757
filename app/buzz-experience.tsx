@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, ChevronRight, Flame, Music2, Sparkles, TrendingDown, TrendingUp, Users, X } from "lucide-react";
+import { createPortal } from "react-dom";
+import { CalendarDays, ChevronRight, Flame, Sparkles, TrendingDown, TrendingUp, Users, X } from "lucide-react";
 import "./buzz-experience.css";
 
 type Venue = {
@@ -62,6 +63,26 @@ export default function BuzzExperience() {
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<Venue | null>(null);
   const [expandedFeed, setExpandedFeed] = useState(false);
+  const [homeMount, setHomeMount] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const attach = () => {
+      const hero = document.querySelector<HTMLElement>(".mobile-native-pulse");
+      if (!hero) return false;
+      let mount = document.getElementById("buzz-feed-home-mount");
+      if (!mount) {
+        mount = document.createElement("div");
+        mount.id = "buzz-feed-home-mount";
+        hero.insertAdjacentElement("afterend", mount);
+      }
+      setHomeMount(mount);
+      return true;
+    };
+    if (attach()) return;
+    const observer = new MutationObserver(() => { if (attach()) observer.disconnect(); });
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     const load = async () => {
@@ -80,21 +101,6 @@ export default function BuzzExperience() {
     return () => window.removeEventListener("activity757:discovery", onDiscovery);
   }, []);
 
-  useEffect(() => {
-    const replaceLegacyLanguage = () => {
-      document.querySelectorAll("body *").forEach((node) => {
-        if (node.children.length || !(node instanceof HTMLElement)) return;
-        const value = node.textContent || "";
-        const next = value.replace(/LIVE SCORE/g, "BUZZ SCORE").replace(/Score (\d+)/g, "Buzz $1").replace(/Very lit/gi, "On fire");
-        if (next !== value) node.textContent = next;
-      });
-    };
-    const observer = new MutationObserver(replaceLegacyLanguage);
-    observer.observe(document.body, { childList: true, subtree: true });
-    replaceLegacyLanguage();
-    return () => observer.disconnect();
-  }, []);
-
   const ranked = useMemo(() => venues.filter((venue) => matchesCategory(venue, category)).sort((a, b) => buzzScore(b) - buzzScore(a)).slice(0, 10), [venues, category]);
   const feed = useMemo<FeedItem[]>(() => ranked.slice(0, 8).map((venue, index) => {
     const score = buzzScore(venue);
@@ -104,12 +110,11 @@ export default function BuzzExperience() {
     return { id: `surge-${venue.id}`, venue, kind: "surge", title: `${venue.name} jumped +${Math.max(6, Math.round((score - 50) / 2))} Buzz`, detail: `${buzzLabel(score)} · Buzz ${score}`, minutesAgo: 2 + index * 3 };
   }), [ranked]);
 
-  const selectedTimeline = selected ? timeline(selected) : [];
   const visibleFeed = expandedFeed ? feed : feed.slice(0, 4);
-
-  return <>
+  const selectedTimeline = selected ? timeline(selected) : [];
+  const homeContent = <>
     <section className="buzz-feed" aria-label="Buzz Feed">
-      <div className="buzz-feed-head"><div><span><Flame /> BUZZ FEED</span><h2>What’s happening now</h2></div><button onClick={() => setOpen(true)}>Top 10 <ChevronRight /></button></div>
+      <div className="buzz-feed-head"><div><span><Flame /> BUZZ FEED</span><h2>What’s happening now</h2></div><button onClick={() => setOpen(true)}>See all <ChevronRight /></button></div>
       <div className="buzz-feed-list">
         {visibleFeed.map((item) => <button key={item.id} className={`buzz-feed-item ${item.kind}`} onClick={() => setSelected(item.venue)}>
           <i>{feedIcon(item.kind)}</i><span><strong>{item.title}</strong><small>{item.detail}</small></span><time>{item.minutesAgo}m</time><ChevronRight />
@@ -117,14 +122,15 @@ export default function BuzzExperience() {
       </div>
       {feed.length > 4 && <button className="buzz-feed-more" onClick={() => setExpandedFeed((value) => !value)}>{expandedFeed ? "Show less" : `See ${feed.length - 4} more updates`}</button>}
     </section>
-
     <section className="buzz-launcher" aria-label="Trending by Buzz">
       <div className="buzz-category-scroll">{categories.map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{item}</button>)}</div>
       <button className="buzz-open" onClick={() => setOpen(true)}><span><Flame /> <b>Trending by Buzz</b></span><small>{ranked[0] ? `${ranked[0].name} leads at ${buzzScore(ranked[0])}` : "See what is moving now"}</small><ChevronRight /></button>
     </section>
+  </>;
 
+  return <>
+    {homeMount ? createPortal(homeContent, homeMount) : null}
     {open && <div className="buzz-backdrop" onClick={() => setOpen(false)}><section className="buzz-sheet" onClick={(event) => event.stopPropagation()}><div className="buzz-handle"/><header><div><span>LIVE AROUND YOU</span><h2>Trending by Buzz</h2><p>Ranked by current activity and momentum.</p></div><button onClick={() => setOpen(false)}><X /></button></header><div className="buzz-sheet-categories">{categories.map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{item}</button>)}</div><div className="buzz-ranking">{ranked.map((venue, index) => { const trend = trendFor(venue); return <button key={venue.id} onClick={() => setSelected(venue)}><i>{index + 1}</i><span><strong>{venue.name}</strong><small>{buzzLabel(buzzScore(venue))} · {venue.city || "Hampton Roads"}</small></span><b>{buzzScore(venue)}</b>{trend === "falling" ? <TrendingDown /> : <TrendingUp className={trend === "steady" ? "steady" : ""} />}</button>; })}</div></section></div>}
-
     {selected && <div className="buzz-backdrop buzz-detail-backdrop" onClick={() => setSelected(null)}><section className="buzz-detail" onClick={(event) => event.stopPropagation()}><div className="buzz-handle"/><header><div><span>{buzzLabel(buzzScore(selected)).toUpperCase()}</span><h2>{selected.name}</h2><p>{selected.city || "Hampton Roads"}</p></div><button onClick={() => setSelected(null)}><X /></button></header><div className="buzz-score-card"><div><small>BUZZ SCORE</small><strong>{buzzScore(selected)}</strong></div><span>{trendFor(selected) === "falling" ? "↓ Falling" : trendFor(selected) === "steady" ? "→ Steady" : "↑ Rising"}</span></div><section className="buzz-timeline"><div><span>BUZZ TONIGHT</span><small>Estimated activity</small></div>{selectedTimeline.map((point) => <div className="buzz-hour" key={point.label}><small>{point.label}</small><i><b style={{ width: `${point.value}%` }}/></i><span>{point.value}</span></div>)}</section><section className="buzz-why"><span>WHY THE BUZZ?</span>{whyBuzz(selected).map((reason) => <p key={reason}><Flame /> {reason}</p>)}</section></section></div>}
   </>;
 }
