@@ -9,14 +9,22 @@ export default function AuthChoiceEnhancer() {
 
   useEffect(() => {
     const sync = () => {
-      const emailInput = document.querySelector<HTMLInputElement>('input[type="email"][placeholder="Email address"]');
+      const accountHeading = Array.from(document.querySelectorAll<HTMLHeadingElement>("h2")).find(
+        (node) => node.textContent?.trim() === "Make it yours."
+      );
+      const accountRoot = accountHeading?.closest(".flex.min-h-0.flex-1.flex-col");
+      const emailInput = accountRoot?.querySelector<HTMLInputElement>(
+        'input[type="email"][placeholder="Email address"]'
+      );
       const form = emailInput?.closest("form") as HTMLFormElement | null;
-      if (!form) {
+
+      if (!form || !accountRoot) {
+        document.getElementById("lit-auth-choice")?.remove();
         setMount(null);
         return;
       }
 
-      let host = form.parentElement?.querySelector<HTMLElement>("#lit-auth-choice");
+      let host = accountRoot.querySelector<HTMLElement>("#lit-auth-choice");
       if (!host) {
         host = document.createElement("div");
         host.id = "lit-auth-choice";
@@ -27,7 +35,9 @@ export default function AuthChoiceEnhancer() {
       const submit = form.querySelector<HTMLButtonElement>('button[type="submit"]');
       if (submit && !submit.dataset.working) {
         submit.childNodes.forEach((node) => {
-          if (node.nodeType === Node.TEXT_NODE) node.textContent = mode === "signin" ? " Sign in with email" : " Create account with email";
+          if (node.nodeType === Node.TEXT_NODE) {
+            node.textContent = mode === "signin" ? " Sign in with email" : " Create account with email";
+          }
         });
       }
     };
