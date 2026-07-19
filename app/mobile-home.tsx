@@ -53,26 +53,26 @@ export default function MobileHome(){
       const existing=map.getSource("mobile-venues") as mapboxgl.GeoJSONSource|undefined;
       if(existing) existing.setData(geojson);
       else {
-        map.addSource("mobile-venues",{type:"geojson",data:geojson,cluster:true,clusterMaxZoom:13,clusterRadius:42});
-        map.addLayer({id:"mobile-venue-glow",type:"heatmap",source:"mobile-venues",maxzoom:12,paint:{
-          "heatmap-weight":["interpolate",["linear"],["get","score"],0,0,100,1],
-          "heatmap-intensity":["interpolate",["linear"],["zoom"],7,.35,12,.8],
-          "heatmap-radius":["interpolate",["linear"],["zoom"],7,14,12,28],
-          "heatmap-opacity":["interpolate",["linear"],["zoom"],7,.2,11,.12,12,0],
-          "heatmap-color":["interpolate",["linear"],["heatmap-density"],0,"rgba(0,0,0,0)",.35,"rgba(255,210,58,.18)",.65,"rgba(255,122,0,.28)",1,"rgba(255,45,55,.42)"]
+        map.addSource("mobile-venues",{type:"geojson",data:geojson,cluster:true,clusterMaxZoom:12,clusterRadius:78});
+        map.addLayer({id:"mobile-venue-glow",type:"heatmap",source:"mobile-venues",maxzoom:13,paint:{
+          "heatmap-weight":["interpolate",["linear"],["get","score"],0,.12,45,.45,70,.75,100,1],
+          "heatmap-intensity":["interpolate",["linear"],["zoom"],7,.85,10,1.2,13,.7],
+          "heatmap-radius":["interpolate",["linear"],["zoom"],7,28,10,42,13,24],
+          "heatmap-opacity":["interpolate",["linear"],["zoom"],7,.58,9.5,.48,11.5,.3,13,0],
+          "heatmap-color":["interpolate",["linear"],["heatmap-density"],0,"rgba(0,0,0,0)",.12,"rgba(28,148,255,.28)",.3,"rgba(44,220,170,.42)",.5,"rgba(255,213,64,.55)",.72,"rgba(255,125,32,.68)",1,"rgba(255,48,62,.82)"]
         }});
         map.addLayer({id:"mobile-clusters",type:"circle",source:"mobile-venues",filter:["has","point_count"],paint:{
-          "circle-color":["step",["get","point_count"],"#f2c94c",12,"#ff8b34",35,"#ff554a"],
-          "circle-radius":["step",["get","point_count"],18,12,22,35,27],
-          "circle-stroke-width":3,"circle-stroke-color":"#ffffff","circle-opacity":.96
+          "circle-color":["step",["get","point_count"],"#f2c94c",16,"#ff8b34",45,"#ff554a"],
+          "circle-radius":["step",["get","point_count"],13,16,16,45,20],
+          "circle-stroke-width":2,"circle-stroke-color":"rgba(255,255,255,.9)","circle-opacity":.9
         }});
-        map.addLayer({id:"mobile-cluster-count",type:"symbol",source:"mobile-venues",filter:["has","point_count"],layout:{"text-field":["get","point_count_abbreviated"],"text-size":12},paint:{"text-color":"#081016"}});
-        map.addLayer({id:"mobile-venue-pins",type:"circle",source:"mobile-venues",filter:["!",["has","point_count"]],paint:{
-          "circle-radius":["interpolate",["linear"],["zoom"],8,7,12,10,15,12],
+        map.addLayer({id:"mobile-cluster-count",type:"symbol",source:"mobile-venues",filter:["has","point_count"],layout:{"text-field":["get","point_count_abbreviated"],"text-size":10},paint:{"text-color":"#081016"}});
+        map.addLayer({id:"mobile-venue-pins",type:"circle",source:"mobile-venues",filter:["!",["has","point_count"]],minzoom:10.1,paint:{
+          "circle-radius":["interpolate",["linear"],["zoom"],10.1,4.5,13,7,16,9],
           "circle-color":["step",["get","score"],"#43d879",45,"#f2c94c",65,"#ff8b34",82,"#ff554a"],
-          "circle-stroke-width":2.5,"circle-stroke-color":"#ffffff","circle-opacity":.98
+          "circle-stroke-width":["interpolate",["linear"],["zoom"],10.1,1,14,2],"circle-stroke-color":"rgba(255,255,255,.9)","circle-opacity":.94
         }});
-        map.addLayer({id:"mobile-venue-score",type:"symbol",source:"mobile-venues",filter:["!",["has","point_count"]],minzoom:11.2,layout:{"text-field":["to-string",["get","score"]],"text-size":8.5},paint:{"text-color":"#ffffff"}});
+        map.addLayer({id:"mobile-venue-score",type:"symbol",source:"mobile-venues",filter:["!",["has","point_count"]],minzoom:13.4,layout:{"text-field":["to-string",["get","score"]],"text-size":8},paint:{"text-color":"#ffffff"}});
 
         map.on("click","mobile-clusters",e=>{
           const feature=map.queryRenderedFeatures(e.point,{layers:["mobile-clusters"]})[0];
@@ -95,7 +95,7 @@ export default function MobileHome(){
       if(mapped.length){
         const bounds=new mapboxgl.LngLatBounds();mapped.forEach(v=>bounds.extend([v.lng,v.lat]));
         if(mapped.length===1)map.easeTo({center:[mapped[0].lng,mapped[0].lat],zoom:13,duration:500});
-        else map.fitBounds(bounds,{padding:{top:46,right:34,bottom:46,left:34},maxZoom:11.5,duration:650});
+        else map.fitBounds(bounds,{padding:{top:46,right:34,bottom:46,left:34},maxZoom:10.2,duration:650});
       }
     };
     setSelected(null);
