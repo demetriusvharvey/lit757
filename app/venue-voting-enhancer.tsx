@@ -38,17 +38,17 @@ export default function VenueVotingEnhancer() {
       section.className = "venue-vote-card";
       section.innerHTML = `
         <div class="venue-vote-copy">
-          <span class="venue-vote-kicker">COMMUNITY SIGNAL</span>
-          <strong>Is this place actually lit?</strong>
-          <p>Your vote improves live recommendations. First vote earns <b>+10 points</b>.</p>
+          <span class="venue-vote-kicker">COMMUNITY BUZZ</span>
+          <strong>How’s the Buzz here?</strong>
+          <p>Your vote improves the Buzz Score. First vote earns <b>+10 Buzz Points</b>.</p>
         </div>
         <button type="button" class="venue-vote-button ${hasVoted ? "voted" : ""}" aria-pressed="${hasVoted}">
           <span>${hasVoted ? "♥" : "♡"}</span>
-          <strong>${hasVoted ? "You liked it" : "Like this place"}</strong>
+          <strong>${hasVoted ? "You confirmed the Buzz" : "The Buzz is real"}</strong>
           <small>${communityVotes} people agree</small>
         </button>
         <div class="venue-points-row">
-          <span>757 Points</span>
+          <span>Buzz Points</span>
           <strong>${points} pts</strong>
         </div>
       `;
@@ -67,7 +67,7 @@ export default function VenueVotingEnhancer() {
         localStorage.setItem(POINTS_KEY, String(points));
         voteButton.classList.add("voted");
         voteButton.setAttribute("aria-pressed", "true");
-        voteButton.innerHTML = `<span>♥</span><strong>You liked it</strong><small>${baselineVotes(title) + 1} people agree</small>`;
+        voteButton.innerHTML = `<span>♥</span><strong>You confirmed the Buzz</strong><small>${baselineVotes(title) + 1} people agree</small>`;
         if (pointsValue) pointsValue.textContent = `${points} pts`;
         if (countValue) countValue.textContent = `${baselineVotes(title) + 1} people agree`;
         if (navigator.vibrate) navigator.vibrate(35);
