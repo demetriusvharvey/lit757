@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 import { Inter, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import "./venue-detail.css";
 import MobileHome from "./mobile-home";
 import HomeMapResizer from "./home-map-resizer";
 import LegacyEnhancers from "./legacy-enhancers";
+import VenueDetailEnhancer from "./venue-detail-enhancer";
 
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"], display: "swap" });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
@@ -61,6 +63,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <script dangerouslySetInnerHTML={{ __html: rankedFeedBootstrap }} />
         <MobileHome />
         <HomeMapResizer />
+        <VenueDetailEnhancer />
         <div className="legacy-app-shell">{children}</div>
         <LegacyEnhancers />
       </body>
