@@ -7,6 +7,7 @@ import "./venue-cards.css";
 import MapLayerGuard from "./map-layer-guard";
 import MobileHome from "./mobile-home";
 import BuzzExperience from "./buzz-experience";
+import BuzzBrandEnhancer from "./buzz-brand-enhancer";
 import HomeMapResizer from "./home-map-resizer";
 import LegacyEnhancers from "./legacy-enhancers";
 import VenueDetailEnhancer from "./venue-detail-enhancer";
@@ -73,6 +74,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <MapLayerGuard />
         <MobileHome />
         <BuzzExperience />
+        <BuzzBrandEnhancer />
         <HomeMapResizer />
         <VenueDetailEnhancer />
         <VenueVotingEnhancer />
