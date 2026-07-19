@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import DiscoveryEnhancer from "./discovery-enhancer";
+import AuthLifecycle from "./auth-lifecycle";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -92,6 +93,7 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: rankedFeedBootstrap }} />
         {children}
         <DiscoveryEnhancer />
+        <AuthLifecycle />
       </body>
     </html>
   );
