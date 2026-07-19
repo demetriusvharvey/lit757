@@ -5,6 +5,7 @@ import DiscoveryEnhancer from "./discovery-enhancer";
 import AuthLifecycle from "./auth-lifecycle";
 import EventEngagementEnhancer from "./event-engagement-enhancer";
 import AuthChoiceEnhancer from "./auth-choice-enhancer";
+import ActivityStatusEnhancer from "./activity-status-enhancer";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -58,8 +59,22 @@ export const metadata: Metadata = {
 
 const rankedFeedBootstrap = `
 (() => {
-  if (window.__lit757RankedFeedInstalled) return;
-  window.__lit757RankedFeedInstalled = true;
+  if (window.__activity757RankedFeedInstalled) return;
+  window.__activity757RankedFeedInstalled = true;
+
+  const clamp = (value, min = 0, max = 100) => Math.min(max, Math.max(min, value));
+  const activityForVenue = (venue) => {
+    const base = clamp(Number(venue.score || 0));
+    const heatBoost = venue.heat?.level === "hot" ? 24 : venue.heat?.level === "active" ? 14 : 0;
+    const eventBoost = venue.event ? 8 : 0;
+    const openAdjustment = venue.openNow === false ? -26 : venue.openNow === true ? 4 : 0;
+    const score = Math.round(clamp(base * 0.72 + heatBoost + eventBoost + openAdjustment));
+    const label = score >= 85 ? "Very Busy" : score >= 70 ? "Busy" : score >= 52 ? "Getting Busier" : score >= 30 ? "Moderate" : "Quiet";
+    const trendLabel = venue.heat ? "Getting Busier" : venue.openNow === false ? "Slowing Down" : "Steady";
+    const confidence = venue.heat ? "high" : venue.event ? "medium" : "limited";
+    return { score, label, trendLabel, confidence };
+  };
+
   const nativeFetch = window.fetch.bind(window);
   window.fetch = async (...args) => {
     const response = await nativeFetch(...args);
@@ -68,8 +83,11 @@ const rankedFeedBootstrap = `
     try {
       const payload = await response.clone().json();
       if (!payload?.success || !Array.isArray(payload.venues)) return response;
+      payload.venues = payload.venues
+        .map((venue) => ({ ...venue, activity: activityForVenue(venue) }))
+        .sort((a, b) => b.activity.score - a.activity.score || Number(b.score || 0) - Number(a.score || 0));
       payload.picks = payload.venues.slice(0, 40);
-      window.dispatchEvent(new CustomEvent("lit757:discovery", { detail: payload }));
+      window.dispatchEvent(new CustomEvent("activity757:discovery", { detail: payload }));
       return new Response(JSON.stringify(payload), {
         status: response.status,
         statusText: response.statusText,
@@ -97,6 +115,7 @@ export default function RootLayout({
         {children}
         <DiscoveryEnhancer />
         <EventEngagementEnhancer />
+        <ActivityStatusEnhancer />
         <AuthChoiceEnhancer />
         <AuthLifecycle />
       </body>
