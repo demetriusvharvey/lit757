@@ -75,21 +75,29 @@ export default function MobileHome(){
     const map=mapRef.current;if(!map)return;
     const render=()=>{
       const pinFeatures:GeoJSON.Feature<GeoJSON.Point>[]=mapped.map((v,index)=>({type:"Feature",geometry:{type:"Point",coordinates:coords(v)},properties:{id:v.id,index,name:v.name,score:score(v),category:categoryFor(v)}}));
-      const heatFeatures:GeoJSON.Feature<GeoJSON.Point>[]=mapped.filter(v=>heatScore(v)>=70&&v.openNow!==false).map(v=>({type:"Feature",geometry:{type:"Point",coordinates:coords(v)},properties:{score:heatScore(v)}}));
+      const activityFeatures:GeoJSON.Feature<GeoJSON.Point>[]=mapped.filter(v=>heatScore(v)>=72&&v.openNow!==false).map(v=>({type:"Feature",geometry:{type:"Point",coordinates:coords(v)},properties:{score:heatScore(v)}}));
       const pinGeojson:GeoJSON.FeatureCollection<GeoJSON.Point>={type:"FeatureCollection",features:pinFeatures};
-      const heatGeojson:GeoJSON.FeatureCollection<GeoJSON.Point>={type:"FeatureCollection",features:heatFeatures};
-      const heatSource=map.getSource("mobile-venue-heat") as mapboxgl.GeoJSONSource|undefined;
+      const activityGeojson:GeoJSON.FeatureCollection<GeoJSON.Point>={type:"FeatureCollection",features:activityFeatures};
+      const activitySource=map.getSource("mobile-venue-heat") as mapboxgl.GeoJSONSource|undefined;
       const pinSource=map.getSource("mobile-venues") as mapboxgl.GeoJSONSource|undefined;
-      if(heatSource)heatSource.setData(heatGeojson);
+      if(activitySource)activitySource.setData(activityGeojson);
       if(pinSource)pinSource.setData(pinGeojson);
-      if(!heatSource){
-        map.addSource("mobile-venue-heat",{type:"geojson",data:heatGeojson});
-        map.addLayer({id:"mobile-venue-glow",type:"heatmap",source:"mobile-venue-heat",maxzoom:11.8,paint:{
-          "heatmap-weight":["interpolate",["linear"],["get","score"],70,.08,82,.2,92,.36,100,.5],
-          "heatmap-intensity":["interpolate",["linear"],["zoom"],7,.16,9,.24,10.8,.32,11.8,.2],
-          "heatmap-radius":["interpolate",["linear"],["zoom"],7,6,9,9,10.8,13,11.8,10],
-          "heatmap-opacity":["interpolate",["linear"],["zoom"],7,.18,9,.28,10.8,.24,11.8,0],
-          "heatmap-color":["interpolate",["linear"],["heatmap-density"],0,"rgba(0,0,0,0)",.38,"rgba(64,194,255,.05)",.58,"rgba(72,218,174,.1)",.74,"rgba(245,201,79,.16)",.88,"rgba(255,139,64,.23)",1,"rgba(255,82,72,.3)"]
+      if(!activitySource){
+        map.addSource("mobile-venue-heat",{type:"geojson",data:activityGeojson});
+        map.addLayer({id:"mobile-activity-halo",type:"circle",source:"mobile-venue-heat",maxzoom:12.2,paint:{
+          "circle-radius":["interpolate",["linear"],["zoom"],7,7,9,10,11,13,12.2,10],
+          "circle-color":["step",["get","score"],"#f2c94c",82,"#ff8b34",92,"#ff554a"],
+          "circle-opacity":["interpolate",["linear"],["zoom"],7,.08,9,.12,11,.15,12.2,0],
+          "circle-blur":.35,
+          "circle-stroke-width":1,
+          "circle-stroke-color":"rgba(255,255,255,.14)"
+        }});
+        map.addLayer({id:"mobile-activity-dot",type:"circle",source:"mobile-venue-heat",maxzoom:12.2,paint:{
+          "circle-radius":["interpolate",["linear"],["zoom"],7,2.2,9,3.2,11,4.2,12.2,3.5],
+          "circle-color":["step",["get","score"],"#f2c94c",82,"#ff8b34",92,"#ff554a"],
+          "circle-opacity":["interpolate",["linear"],["zoom"],7,.72,10,.9,12.2,0],
+          "circle-stroke-width":1.2,
+          "circle-stroke-color":"rgba(255,255,255,.85)"
         }});
       }
       if(!pinSource){
@@ -131,14 +139,14 @@ export default function MobileHome(){
 
   return <div className="mobile-native-home lg:hidden">
     <header className="mobile-native-header"><div className="mobile-native-brand"><strong>757</strong><span>THINGS TO DO</span></div><div className="mobile-native-actions"><button aria-label="Search"><Search/></button><button aria-label="Saved places" onClick={openFavorites}><Bookmark/></button><button className="mobile-avatar" aria-label="Open profile" onClick={openProfile}>D<i/></button></div></header>
-    <main ref={scrollRef} className="mobile-native-scroll">
+    <main ref={scrollRef} className="mobile-native-scroll" style={{paddingBottom:128}}>
       <section className="mobile-native-pulse"><div className="pulse-kicker"><b/> LIVE NOW <span>Updated just now</span></div><h1>{active==="All"?"Find something to do":"Find "+active.toLowerCase()+" near you"}</h1><div className="pulse-summary"><strong>{pulseText}</strong>{rising>0&&<span>🔥 {rising} heating up</span>}</div></section>
       <section ref={mapSectionRef} className="mobile-native-map" style={mapMode?{position:"fixed",inset:0,zIndex:10010,height:"auto",margin:0,borderRadius:0}:{}}>
         {mapMode&&<button onClick={goExplore} aria-label="Close full map" style={{position:"absolute",left:14,top:"calc(14px + env(safe-area-inset-top))",zIndex:10,display:"grid",placeItems:"center",width:42,height:42,border:"1px solid rgba(255,255,255,.18)",borderRadius:21,background:"rgba(8,11,16,.92)",color:"white",boxShadow:"0 8px 24px rgba(0,0,0,.35)"}}><ChevronLeft/></button>}
-        <div ref={mapEl} className="mobile-native-mapbox"/><div className="map-key"><span><i className="quiet"/>Quiet</span><span><i className="moderate"/>Moderate</span><span><i className="busy"/>Busy</span><span><i className="hot"/>Very busy</span></div>{selected&&<article className="map-preview"><button className="map-preview-close" onClick={()=>setSelected(null)} aria-label="Close preview"><X/></button><div className="map-preview-photo">{selected.photoUrl?<img src={selected.photoUrl} alt=""/>:selected.name.slice(0,1)}</div><div><span className="map-preview-score">{score(selected)}</span><strong>{selected.name}</strong><small>{selected.activity?.trendLabel||"Steady"} · {selected.activity?.label||"Active now"}</small><p>{selected.event?.name?`🎟 ${selected.event.name}`:selected.reason||"Popular nearby right now"}</p></div><ChevronRight/></article>}
+        <div ref={mapEl} className="mobile-native-mapbox"/><div className="map-key"><span><i className="moderate"/>Active</span><span><i className="busy"/>Busy</span><span><i className="hot"/>Hot</span></div>{selected&&<article className="map-preview"><button className="map-preview-close" onClick={()=>setSelected(null)} aria-label="Close preview"><X/></button><div className="map-preview-photo">{selected.photoUrl?<img src={selected.photoUrl} alt=""/>:selected.name.slice(0,1)}</div><div><span className="map-preview-score">{score(selected)}</span><strong>{selected.name}</strong><small>{selected.activity?.trendLabel||"Steady"} · {selected.activity?.label||"Active now"}</small><p>{selected.event?.name?`🎟 ${selected.event.name}`:selected.reason||"Popular nearby right now"}</p></div><ChevronRight/></article>}
       </section>
       <nav className="mobile-category-rail">{cats.map(([label,Icon])=><button key={label} className={active===label?"active":""} onClick={()=>setActive(label)}><span><Icon/></span><small>{label}</small></button>)}</nav>
-      <button className="mobile-plan-card" onClick={openPlanner}><span className="plan-orb"><Sparkles/></span><span><strong>Ask AI</strong><small>Tell us the vibe. We’ll plan the move.</small></span><b>Plan now <ChevronRight/></b></button>
+      <button className="mobile-plan-card" style={{marginTop:16,marginBottom:18}} onClick={openPlanner}><span className="plan-orb"><Sparkles/></span><span><strong>Ask AI</strong><small>Tell us the vibe. We’ll plan the move.</small></span><b>Plan now <ChevronRight/></b></button>
       <section className="mobile-native-feed"><div className="feed-title"><h2>{active==="All"?"Live Activity Feed":active} <span>{filtered.length}</span></h2><button onClick={()=>setActive("All")}>All places <ChevronRight/></button></div><div className="feed-list">{filtered.map((v,i)=><article className="feed-row" key={v.id} onClick={()=>{setSelected(v);if(validVenue(v))mapRef.current?.easeTo({center:coords(v),zoom:13,duration:550});}}><div className="feed-photo">{v.photoUrl?<img src={v.photoUrl} alt=""/>:v.name.slice(0,1)}</div><div className={`feed-score s${i%4}`}>{score(v)}</div><div className="feed-copy"><strong>{v.name}</strong><span><b>{v.activity?.trendLabel||"Steady"}</b> · {v.activity?.label||"Active now"}</span><small>{v.event?.name?`🎟 ${v.event.name}`:`☆ ${v.reason||"Popular nearby right now"}`}</small></div><div className="feed-meta"><span>{i===0?"Just now":`${Math.min(59,i*2+1)}m ago`}</span><ChevronRight/><button className={favoriteIds.has(v.id)?"favorite-toggle saved":"favorite-toggle"} onClick={event=>toggleFavorite(event,v)} aria-label={favoriteIds.has(v.id)?"Remove from favorites":"Add to favorites"}><Heart fill={favoriteIds.has(v.id)?"currentColor":"none"}/></button></div></article>)}</div></section>
     </main>
     {!mapMode&&<nav className="mobile-native-bottom"><button className={activeTab==="explore"?"active":""} onClick={goExplore}><span><Compass/></span><small>Explore</small></button><button className={activeTab==="map"?"active":""} onClick={goMap}><span><Map/></span><small>Map</small></button><button className={activeTab==="favorites"?"active":""} onClick={openFavorites}><span><Heart/></span><small>Favorites</small></button><button className={activeTab==="alerts"?"active":""} onClick={openAlerts}><span><Bell/>{!alertsEnabled&&<i/>}</span><small>Alerts</small></button><button className={activeTab==="ai"?"active":""} onClick={openPlanner}><span><Sparkles/></span><small>Ask AI</small></button></nav>}
