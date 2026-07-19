@@ -8,6 +8,7 @@ import AuthChoiceEnhancer from "./auth-choice-enhancer";
 import ActivityStatusEnhancer from "./activity-status-enhancer";
 import ActivityInsightsEnhancer from "./activity-insights-enhancer";
 import VenueDecisionEnhancer from "./venue-decision-enhancer";
+import LivePulseEnhancer from "./live-pulse-enhancer";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -28,9 +29,9 @@ const siteUrl = configuredHost.startsWith("http")
   ? configuredHost
   : `https://${configuredHost}`;
 
-const socialTitle = "Find the Most Active Places in the 757";
+const socialTitle = "The Fastest Way to Know What’s Happening Around You";
 const socialDescription =
-  "Live-ranked restaurants, nightlife, events and things to do across Hampton Roads.";
+  "Real-time activity, events, restaurants and things to do across Hampton Roads.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
@@ -47,7 +48,7 @@ export const metadata: Metadata = {
         url: "/opengraph-image",
         width: 1200,
         height: 630,
-        alt: "Find the most active places in the 757",
+        alt: "The fastest way to know what is happening around you in real time",
       },
     ],
   },
@@ -120,6 +121,7 @@ export default function RootLayout({
         <ActivityStatusEnhancer />
         <ActivityInsightsEnhancer />
         <VenueDecisionEnhancer />
+        <LivePulseEnhancer />
         <AuthChoiceEnhancer />
         <AuthLifecycle />
       </body>
