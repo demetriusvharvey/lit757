@@ -3,6 +3,7 @@ import { Inter, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import "./venue-detail.css";
 import "./venue-voting.css";
+import "./venue-cards.css";
 import MobileHome from "./mobile-home";
 import HomeMapResizer from "./home-map-resizer";
 import LegacyEnhancers from "./legacy-enhancers";
