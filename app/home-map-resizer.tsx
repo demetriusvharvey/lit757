@@ -6,6 +6,7 @@ export default function HomeMapResizer() {
   useEffect(() => {
     let stopped = false;
     let observer: ResizeObserver | null = null;
+    let lastTouchAt = 0;
     const timers: number[] = [];
 
     const resizeMap = () => {
@@ -22,6 +23,33 @@ export default function HomeMapResizer() {
       mapBox.style.height = "100%";
 
       window.dispatchEvent(new Event("resize"));
+    };
+
+    const dispatchMapClick = (target: EventTarget | null, clientX: number, clientY: number, screenX: number, screenY: number) => {
+      const canvas = target instanceof Element ? target.closest(".mapboxgl-canvas") : null;
+      if (!(canvas instanceof HTMLCanvasElement)) return;
+
+      canvas.dispatchEvent(new MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+        clientX,
+        clientY,
+        screenX,
+        screenY,
+        view: window,
+      }));
+    };
+
+    const onTouchEnd = (event: TouchEvent) => {
+      const touch = event.changedTouches[0];
+      if (!touch) return;
+      lastTouchAt = Date.now();
+      dispatchMapClick(event.target, touch.clientX, touch.clientY, touch.screenX, touch.screenY);
+    };
+
+    const onPointerUp = (event: PointerEvent) => {
+      if (event.pointerType !== "touch" || Date.now() - lastTouchAt < 500) return;
+      dispatchMapClick(event.target, event.clientX, event.clientY, event.screenX, event.screenY);
     };
 
     const attach = () => {
@@ -53,6 +81,8 @@ export default function HomeMapResizer() {
       }
     };
 
+    document.addEventListener("touchend", onTouchEnd, { passive: true, capture: true });
+    document.addEventListener("pointerup", onPointerUp, true);
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("pageshow", resizeMap);
     window.addEventListener("orientationchange", resizeMap);
@@ -61,6 +91,8 @@ export default function HomeMapResizer() {
       stopped = true;
       observer?.disconnect();
       timers.forEach(window.clearTimeout);
+      document.removeEventListener("touchend", onTouchEnd, true);
+      document.removeEventListener("pointerup", onPointerUp, true);
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pageshow", resizeMap);
       window.removeEventListener("orientationchange", resizeMap);
