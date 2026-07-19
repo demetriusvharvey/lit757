@@ -51,7 +51,11 @@ const rankedFeedBootstrap = `
     try {
       const payload = await response.clone().json();
       if (!payload?.success || !Array.isArray(payload.venues)) return response;
-      payload.venues = payload.venues.map((venue) => ({ ...venue, activity: activityForVenue(venue) })).sort((a, b) => b.activity.score - a.activity.score || Number(b.score || 0) - Number(a.score || 0));
+      payload.venues = payload.venues.map((venue) => ({
+        ...venue,
+        photoUrl: venue.photoVerified === true ? venue.photoUrl : null,
+        activity: activityForVenue(venue)
+      })).sort((a, b) => b.activity.score - a.activity.score || Number(b.score || 0) - Number(a.score || 0));
       payload.picks = payload.venues.slice(0, 40);
       window.__activity757LatestDiscovery = payload;
       window.dispatchEvent(new CustomEvent("activity757:discovery", { detail: payload }));
