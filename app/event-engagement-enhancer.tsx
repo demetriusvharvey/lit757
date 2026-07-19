@@ -5,17 +5,8 @@ import { createPortal } from "react-dom";
 import { Check, Ticket, Users } from "lucide-react";
 import { supabase } from "../src/lib/supabase";
 
-type EventInfo = {
-  id: string;
-  name: string;
-  ticketStatus?: string | null;
-};
-
-type VenueInfo = {
-  id: string;
-  event?: EventInfo | null;
-};
-
+type EventInfo = { id: string; name: string; ticketStatus?: string | null };
+type VenueInfo = { id: string; event?: EventInfo | null };
 type Engagement = {
   eventId: string;
   interested: number;
@@ -67,7 +58,7 @@ export default function EventEngagementEnhancer() {
       const scheduleLabel = Array.from(document.querySelectorAll("p")).find(
         (node) => node.textContent?.trim() === "On the schedule"
       );
-      const card = scheduleLabel?.closest("div.rounded-\[1\.45rem\]") as HTMLElement | null;
+      const card = scheduleLabel?.parentElement?.parentElement?.parentElement as HTMLElement | null;
       if (!card) {
         setMount(null);
         return;
@@ -100,13 +91,13 @@ export default function EventEngagementEnhancer() {
       return;
     }
     const { data } = await supabase.auth.getSession();
+    const headers: HeadersInit = {};
+    if (data.session?.access_token) headers.Authorization = `Bearer ${data.session.access_token}`;
     const response = await fetch(`/api/events/engagement?eventId=${encodeURIComponent(selectedEvent.id)}`, {
       cache: "no-store",
-      headers: data.session?.access_token
-        ? { Authorization: `Bearer ${data.session.access_token}` }
-        : undefined,
+      headers,
     });
-    if (response.ok) setEngagement(await response.json());
+    if (response.ok) setEngagement((await response.json()) as Engagement);
   }, [selectedEvent]);
 
   useEffect(() => {
@@ -133,7 +124,7 @@ export default function EventEngagementEnhancer() {
         },
         body: JSON.stringify({ eventId: selectedEvent.id, status: nextStatus }),
       });
-      const payload = await response.json();
+      const payload = (await response.json()) as Engagement & { error?: string };
       if (!response.ok) throw new Error(payload.error || "Could not save your plans.");
       setEngagement(payload);
       setMessage(nextStatus === "going" ? "Added to Going." : nextStatus === "interested" ? "Saved as Interested." : "Removed.");
@@ -147,8 +138,9 @@ export default function EventEngagementEnhancer() {
   if (!mount || !selectedEvent) return null;
 
   const salesLabel = ticketLabel(engagement?.ticketing || null) || selectedEvent.ticketStatus || null;
-  const percentage = engagement?.ticketing?.verified && engagement.ticketing.capacity && engagement.ticketing.ticketsSold != null
-    ? Math.min(100, Math.round((engagement.ticketing.ticketsSold / engagement.ticketing.capacity) * 100))
+  const ticketing = engagement?.ticketing;
+  const percentage = ticketing?.verified && ticketing.capacity != null && ticketing.capacity > 0 && ticketing.ticketsSold != null
+    ? Math.min(100, Math.round((ticketing.ticketsSold / ticketing.capacity) * 100))
     : null;
 
   return createPortal(
@@ -159,9 +151,7 @@ export default function EventEngagementEnhancer() {
             <span className="inline-flex items-center gap-2 text-[11px] font-semibold text-black/68">
               <Ticket size={14} /> {salesLabel}
             </span>
-            {engagement?.ticketing?.verified && (
-              <span className="text-[9px] font-bold uppercase tracking-[0.12em] text-[#d44b2b]">Verified</span>
-            )}
+            {ticketing?.verified && <span className="text-[9px] font-bold uppercase tracking-[0.12em] text-[#d44b2b]">Verified</span>}
           </div>
           {percentage != null && (
             <div className="mt-2 h-2 overflow-hidden rounded-full bg-black/[0.08]">
@@ -170,31 +160,12 @@ export default function EventEngagementEnhancer() {
           )}
         </div>
       )}
-
       <div className="mt-3 grid grid-cols-2 gap-2">
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void update("interested")}
-          className={`flex h-11 items-center justify-center gap-2 rounded-full text-[11px] font-semibold transition disabled:opacity-50 ${
-            engagement?.mine === "interested"
-              ? "bg-[#171716] text-white"
-              : "border border-black/[0.09] bg-white text-black/68"
-          }`}
-        >
+        <button type="button" disabled={busy} onClick={() => void update("interested")} className={`flex h-11 items-center justify-center gap-2 rounded-full text-[11px] font-semibold transition disabled:opacity-50 ${engagement?.mine === "interested" ? "bg-[#171716] text-white" : "border border-black/[0.09] bg-white text-black/68"}`}>
           {engagement?.mine === "interested" ? <Check size={14} /> : <Users size={14} />}
           Interested · {engagement?.interested || 0}
         </button>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void update("going")}
-          className={`flex h-11 items-center justify-center gap-2 rounded-full text-[11px] font-semibold transition disabled:opacity-50 ${
-            engagement?.mine === "going"
-              ? "bg-[#ff5c35] text-white"
-              : "border border-[#ffb49f] bg-[#fff0e8] text-[#ba3e24]"
-          }`}
-        >
+        <button type="button" disabled={busy} onClick={() => void update("going")} className={`flex h-11 items-center justify-center gap-2 rounded-full text-[11px] font-semibold transition disabled:opacity-50 ${engagement?.mine === "going" ? "bg-[#ff5c35] text-white" : "border border-[#ffb49f] bg-[#fff0e8] text-[#ba3e24]"}`}>
           {engagement?.mine === "going" && <Check size={14} />}
           Going · {engagement?.going || 0}
         </button>
