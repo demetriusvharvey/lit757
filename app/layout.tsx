@@ -11,6 +11,7 @@ import VenueDecisionEnhancer from "./venue-decision-enhancer";
 import LivePulseEnhancer from "./live-pulse-enhancer";
 import LiveExperienceEnhancer from "./live-experience-enhancer";
 import NightPlannerEnhancer from "./night-planner-enhancer";
+import SmartAlertsEnhancer from "./smart-alerts-enhancer";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -126,6 +127,7 @@ export default function RootLayout({
         <LivePulseEnhancer />
         <LiveExperienceEnhancer />
         <NightPlannerEnhancer />
+        <SmartAlertsEnhancer />
         <AuthChoiceEnhancer />
         <AuthLifecycle />
       </body>
