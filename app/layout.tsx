@@ -4,14 +4,13 @@ import "./globals.css";
 import "./venue-detail.css";
 import "./venue-voting.css";
 import "./venue-cards.css";
-import "./claim-business.css";
 import MapLayerGuard from "./map-layer-guard";
 import MobileHome from "./mobile-home";
+import BuzzExperience from "./buzz-experience";
 import HomeMapResizer from "./home-map-resizer";
 import LegacyEnhancers from "./legacy-enhancers";
 import VenueDetailEnhancer from "./venue-detail-enhancer";
 import VenueVotingEnhancer from "./venue-voting-enhancer";
-import ClaimBusinessEnhancer from "./claim-business-enhancer";
 
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"], display: "swap" });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
@@ -73,10 +72,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <script dangerouslySetInnerHTML={{ __html: rankedFeedBootstrap }} />
         <MapLayerGuard />
         <MobileHome />
+        <BuzzExperience />
         <HomeMapResizer />
         <VenueDetailEnhancer />
         <VenueVotingEnhancer />
-        <ClaimBusinessEnhancer />
         <div className="legacy-app-shell">{children}</div>
         <LegacyEnhancers />
       </body>
