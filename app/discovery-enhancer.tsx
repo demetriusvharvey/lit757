@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { Flame } from "lucide-react";
+import { Activity } from "lucide-react";
 
 const FILTERS = [
   { label: "All", query: "" },
@@ -47,10 +47,10 @@ export default function DiscoveryEnhancer() {
       }
 
       original.style.display = "none";
-      let host = document.getElementById("lit-category-rail");
+      let host = document.getElementById("activity-category-rail");
       if (!host) {
         host = document.createElement("div");
-        host.id = "lit-category-rail";
+        host.id = "activity-category-rail";
         original.insertAdjacentElement("beforebegin", host);
       }
       setMount(host);
@@ -59,7 +59,7 @@ export default function DiscoveryEnhancer() {
     attach();
     return () => {
       cancelled = true;
-      document.getElementById("lit-category-rail")?.remove();
+      document.getElementById("activity-category-rail")?.remove();
       const original = document.querySelector<HTMLElement>(
         '[role="tablist"][aria-label="Discovery categories"]'
       );
@@ -86,8 +86,8 @@ export default function DiscoveryEnhancer() {
     <div className="mt-2.5">
       <div className="mb-2 flex items-center justify-between px-0.5">
         <span className="inline-flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-black/38">
-          <Flame size={11} className="text-[#ff5c35]" fill="currentColor" />
-          Ranked by activity
+          <Activity size={11} className="text-[#ff5c35]" />
+          Ranked by current activity
         </span>
         <span className="text-[9px] font-medium text-black/30">Swipe categories</span>
       </div>
