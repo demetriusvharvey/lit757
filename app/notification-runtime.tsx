@@ -13,15 +13,10 @@ type RemotePreferences = {
   saved?: Array<{ venue_id: string; venue_name?: string | null }>;
   alerts?: Array<{ venue_id: string; venue_name?: string | null; threshold?: number }>;
 };
-
-declare global {
-  interface Window {
-    __activity757LatestDiscovery?: {
-      venues?: Array<{ id: string; name?: string }>;
-      picks?: Array<{ id: string; name?: string }>;
-    };
-  }
-}
+type DiscoverySnapshot = {
+  venues?: Array<{ id: string; name?: string }>;
+  picks?: Array<{ id: string; name?: string }>;
+};
 
 function readJson<T>(key: string, fallback: T): T {
   try {
@@ -37,7 +32,7 @@ function writeStatus(status: string) {
 }
 
 function venueName(venueId: string) {
-  const discovery = window.__activity757LatestDiscovery;
+  const discovery = (window as typeof window & { __activity757LatestDiscovery?: DiscoverySnapshot }).__activity757LatestDiscovery;
   const venues = discovery?.venues || discovery?.picks || [];
   return venues.find(venue => String(venue.id) === String(venueId))?.name || null;
 }
