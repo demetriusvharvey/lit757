@@ -11,107 +11,108 @@ declare global {
 }
 
 const LOCATION_STORAGE_KEY = "lit757-user-location";
-const AUTO_LOCATION_KEY = "lit757-auto-location";
+const LOCATION_ENABLED_KEY = "lit757-location-enabled";
 
-// Capture the real Mapbox instance before any React effects create the map.
-// The previous version patched this inside useEffect, which could run too late.
-if (typeof window !== "undefined" && !window.__lit757LocationPatched) {
-  window.__lit757LocationPatched = true;
-  const OriginalMap = mapboxgl.Map;
-  try {
-    (mapboxgl as unknown as { Map: typeof mapboxgl.Map }).Map = class Lit757Map extends OriginalMap {
-      constructor(options: mapboxgl.MapOptions) {
-        super(options);
-        window.__lit757Map = this;
-      }
-    } as typeof mapboxgl.Map;
-  } catch {
-    // The map still works even if the runtime prevents replacing this export.
-  }
-}
+type SavedLocation = {
+  latitude: number;
+  longitude: number;
+  updatedAt?: number;
+};
 
 export default function LocationExperience() {
   useEffect(() => {
     let destroyed = false;
     let controlsHost: HTMLDivElement | null = null;
     let watchId: number | null = null;
-    let centerRetry: number | null = null;
-    let selectedZoom = 14.6;
+    let currentZoom = 14.6;
 
-    const setLabel = (text: string) => {
-      const label = controlsHost?.querySelector("[data-location-label]");
-      if (label) label.textContent = text;
+    if (!window.__lit757LocationPatched) {
+      window.__lit757LocationPatched = true;
+      const originalAddControl = mapboxgl.Map.prototype.addControl;
+      mapboxgl.Map.prototype.addControl = function patchedAddControl(control, position) {
+        window.__lit757Map = this;
+        window.dispatchEvent(new CustomEvent("lit757:map-ready"));
+        return originalAddControl.call(this, control, position);
+      };
+    }
+
+    const readSaved = (): SavedLocation | null => {
+      try {
+        const raw = localStorage.getItem(LOCATION_STORAGE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as SavedLocation;
+        if (!Number.isFinite(parsed.latitude) || !Number.isFinite(parsed.longitude)) return null;
+        return parsed;
+      } catch {
+        return null;
+      }
     };
 
-    const centerMap = (latitude: number, longitude: number, zoom = selectedZoom) => {
+    const centerMap = (latitude: number, longitude: number, zoom = currentZoom) => {
       const map = window.__lit757Map;
-      if (!map || !map.isStyleLoaded()) return false;
+      if (!map) return false;
       map.resize();
       map.stop();
-      map.easeTo({ center: [longitude, latitude], zoom, duration: 900, essential: true });
+      map.easeTo({ center: [longitude, latitude], zoom, duration: 700 });
       return true;
     };
 
-    const centerWhenReady = (latitude: number, longitude: number, zoom = selectedZoom, attempts = 0) => {
-      if (destroyed) return;
-      if (centerMap(latitude, longitude, zoom)) return;
-      if (attempts >= 30) {
-        setLabel("Tap to retry");
-        return;
+    const centerSaved = (zoom = currentZoom) => {
+      const saved = readSaved();
+      return saved ? centerMap(saved.latitude, saved.longitude, zoom) : false;
+    };
+
+    const retryCenter = (latitude: number, longitude: number, attempts = 18) => {
+      if (destroyed || attempts <= 0) return;
+      if (!centerMap(latitude, longitude)) {
+        window.setTimeout(() => retryCenter(latitude, longitude, attempts - 1), 180);
       }
-      centerRetry = window.setTimeout(() => centerWhenReady(latitude, longitude, zoom, attempts + 1), 180);
+    };
+
+    const updateControls = (active: boolean, labelText?: string) => {
+      controlsHost?.classList.toggle("location-active", active);
+      const label = controlsHost?.querySelector("[data-location-label]");
+      if (label && labelText) label.textContent = labelText;
     };
 
     const saveAndCenter = (position: GeolocationPosition) => {
-      const { latitude, longitude, accuracy } = position.coords;
-      localStorage.setItem(LOCATION_STORAGE_KEY, JSON.stringify({ latitude, longitude, accuracy, updatedAt: Date.now() }));
-      localStorage.setItem(AUTO_LOCATION_KEY, "true");
-      controlsHost?.classList.add("location-active");
-      setLabel("Near me");
-      centerWhenReady(latitude, longitude, selectedZoom);
+      const { latitude, longitude } = position.coords;
+      localStorage.setItem(
+        LOCATION_STORAGE_KEY,
+        JSON.stringify({ latitude, longitude, updatedAt: Date.now() }),
+      );
+      localStorage.setItem(LOCATION_ENABLED_KEY, "true");
+      retryCenter(latitude, longitude);
+      updateControls(true, "Near me");
     };
 
-    const handleLocationError = (error: GeolocationPositionError) => {
+    const onLocationError = (error: GeolocationPositionError) => {
       if (error.code === error.PERMISSION_DENIED) {
-        localStorage.setItem(AUTO_LOCATION_KEY, "false");
-        setLabel("Enable location");
+        localStorage.setItem(LOCATION_ENABLED_KEY, "false");
+        updateControls(false, "Enable location");
       } else {
-        setLabel("Tap to retry");
+        updateControls(false, "Try location again");
       }
     };
 
-    const requestLocation = (follow = true) => {
+    const startLocation = () => {
       if (!navigator.geolocation) {
-        setLabel("Location unavailable");
+        updateControls(false, "Location unavailable");
         return;
       }
-      setLabel("Locating…");
-      navigator.geolocation.getCurrentPosition(saveAndCenter, handleLocationError, {
+
+      navigator.geolocation.getCurrentPosition(saveAndCenter, onLocationError, {
         enableHighAccuracy: true,
-        timeout: 15000,
-        maximumAge: 0,
+        timeout: 12000,
+        maximumAge: 30000,
       });
-      if (follow && watchId === null) {
-        watchId = navigator.geolocation.watchPosition(saveAndCenter, handleLocationError, {
+
+      if (watchId === null) {
+        watchId = navigator.geolocation.watchPosition(saveAndCenter, onLocationError, {
           enableHighAccuracy: true,
           timeout: 20000,
-          maximumAge: 30000,
+          maximumAge: 60000,
         });
-      }
-    };
-
-    const useSavedLocation = () => {
-      const saved = localStorage.getItem(LOCATION_STORAGE_KEY);
-      if (!saved) return false;
-      try {
-        const { latitude, longitude } = JSON.parse(saved) as { latitude: number; longitude: number };
-        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return false;
-        controlsHost?.classList.add("location-active");
-        setLabel("Near me");
-        centerWhenReady(latitude, longitude, selectedZoom);
-        return true;
-      } catch {
-        return false;
       }
     };
 
@@ -123,8 +124,10 @@ export default function LocationExperience() {
         return;
       }
 
-      controlsHost = mapSection.querySelector<HTMLDivElement>(".location-map-controls");
-      if (!controlsHost) {
+      const existing = mapSection.querySelector<HTMLDivElement>(".location-map-controls");
+      if (existing) {
+        controlsHost = existing;
+      } else {
         controlsHost = document.createElement("div");
         controlsHost.className = "location-map-controls";
         controlsHost.innerHTML = `
@@ -137,7 +140,11 @@ export default function LocationExperience() {
         mapSection.appendChild(controlsHost);
       }
 
-      controlsHost.querySelector(".location-center-button")?.addEventListener("click", () => requestLocation(true));
+      controlsHost.querySelector(".location-center-button")?.addEventListener("click", () => {
+        const saved = readSaved();
+        if (saved) retryCenter(saved.latitude, saved.longitude);
+        startLocation();
+      });
 
       const radiusButton = controlsHost.querySelector<HTMLButtonElement>(".nearby-radius-button");
       const radii = [
@@ -149,39 +156,37 @@ export default function LocationExperience() {
       radiusButton?.addEventListener("click", () => {
         radiusIndex = (radiusIndex + 1) % radii.length;
         const radius = radii[radiusIndex];
-        selectedZoom = radius.zoom;
+        currentZoom = radius.zoom;
         radiusButton.textContent = radius.label;
-        if (!useSavedLocation()) requestLocation(true);
+        if (!centerSaved(radius.zoom)) startLocation();
       });
 
-      const autoLocation = localStorage.getItem(AUTO_LOCATION_KEY) !== "false";
-      useSavedLocation();
+      const saved = readSaved();
+      if (saved) {
+        updateControls(true, "Near me");
+        retryCenter(saved.latitude, saved.longitude);
+      }
 
-      // Once permission has been granted, location remains the default experience.
-      // Browsers still control permission, so the app cannot bypass a user denial.
-      if (autoLocation && navigator.permissions?.query) {
-        navigator.permissions.query({ name: "geolocation" as PermissionName }).then((status) => {
-          if (status.state === "granted") requestLocation(true);
-          else if (status.state === "prompt" && !localStorage.getItem(LOCATION_STORAGE_KEY)) requestLocation(false);
-          else if (status.state === "denied") setLabel("Enable location");
-          status.onchange = () => {
-            if (status.state === "granted") requestLocation(true);
-            if (status.state === "denied") setLabel("Enable location");
-          };
-        }).catch(() => {
-          if (!localStorage.getItem(LOCATION_STORAGE_KEY)) requestLocation(false);
-        });
-      } else if (autoLocation && !localStorage.getItem(LOCATION_STORAGE_KEY)) {
-        requestLocation(false);
+      if (localStorage.getItem(LOCATION_ENABLED_KEY) !== "false") {
+        startLocation();
       }
     };
 
+    const recenterAfterDiscovery = () => {
+      const saved = readSaved();
+      if (!saved || localStorage.getItem(LOCATION_ENABLED_KEY) === "false") return;
+      window.setTimeout(() => retryCenter(saved.latitude, saved.longitude), 850);
+    };
+
+    window.addEventListener("lit757:map-ready", recenterAfterDiscovery);
+    window.addEventListener("activity757:discovery", recenterAfterDiscovery);
     installControls();
 
     return () => {
       destroyed = true;
-      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
-      if (centerRetry !== null) window.clearTimeout(centerRetry);
+      if (watchId !== null && navigator.geolocation) navigator.geolocation.clearWatch(watchId);
+      window.removeEventListener("lit757:map-ready", recenterAfterDiscovery);
+      window.removeEventListener("activity757:discovery", recenterAfterDiscovery);
       controlsHost?.remove();
     };
   }, []);
