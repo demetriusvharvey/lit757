@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import "./venue-detail.css";
@@ -16,11 +16,27 @@ const siteUrl = configuredHost.startsWith("http") ? configuredHost : `https://${
 const socialTitle = "The Fastest Way to Know What’s Happening Around You";
 const socialDescription = "Real-time activity, events, restaurants and things to do across Hampton Roads.";
 
+export const viewport: Viewport = {
+  themeColor: "#020304",
+  colorScheme: "dark",
+  viewportFit: "cover",
+};
+
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: `${socialTitle} | Things To Do 757`,
   description: socialDescription,
   applicationName: "Things To Do 757",
+  manifest: "/manifest.webmanifest",
+  icons: {
+    icon: "/icon.svg",
+    apple: "/icon.svg",
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "757 Buzz",
+  },
   openGraph: { title: socialTitle, description: socialDescription, type: "website", siteName: "Things To Do 757", images: [{ url: "/opengraph-image", width: 1200, height: 630, alt: "The fastest way to know what is happening around you in real time" }] },
   twitter: { card: "summary_large_image", title: socialTitle, description: socialDescription, images: ["/opengraph-image"] },
 };
