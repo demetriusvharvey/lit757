@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import type mapboxgl from "mapbox-gl";
 import { useMapController } from "./map-controller";
 
+// Keep the visual pins small, but treat taps within a 48px diameter as intentional.
 const TAP_RADIUS_PX = 24;
 const PIN_LAYERS = ["mobile-venue-pins", "mobile-live-dot"] as const;
 
@@ -36,7 +37,7 @@ export default function MapPinTapEnhancer() {
           const coordinates = (feature.geometry as GeoJSON.Point).coordinates as [number, number];
           const projected = map.project(coordinates);
           const distance = Math.hypot(projected.x - event.point.x, projected.y - event.point.y);
-          return { feature, projected, distance };
+          return { projected, distance };
         })
         .sort((left, right) => left.distance - right.distance)[0];
 
