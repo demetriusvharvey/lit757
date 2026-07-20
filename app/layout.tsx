@@ -9,6 +9,7 @@ import "./unified-experience.css";
 import "./venue-browser-experience.css";
 import MapLayerGuard from "./map-layer-guard";
 import MobileHome from "./mobile-home";
+import DesktopHome from "./desktop-home";
 import MobileRenderGuard from "./mobile-render-guard";
 import LocationExperience from "./location-experience";
 import VenueBrowserExperience from "./venue-browser-experience";
@@ -82,6 +83,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <MobileRenderGuard />
         <LocationExperience />
         <MobileHome />
+        <DesktopHome />
         <VenueBrowserExperience />
         <BuzzExperience />
         <BuzzBrandEnhancer />
