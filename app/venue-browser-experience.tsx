@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronRight, List, MapPin, Search, X } from "lucide-react";
+import { ChevronRight, List, MapPin, Search, SlidersHorizontal, X } from "lucide-react";
 
 type Venue={id:string;name:string;city?:string;kind?:string;type?:string;lat:number|string;lng:number|string;reason?:string;openNow?:boolean|null;activity?:{score?:number};event?:{name?:string|null}|null};
 type Payload={venues?:Venue[];picks?:Venue[]};
@@ -10,17 +10,25 @@ declare global{interface Window{__lit757Map?:import("mapbox-gl").Map}}
 
 const score=(venue:Venue)=>venue.activity?.score??70;
 const searchable=(venue:Venue)=>`${venue.name} ${venue.city||""} ${venue.kind||""} ${venue.type||""} ${venue.reason||""} ${venue.event?.name||""}`.toLowerCase();
+const categoryFor=(venue:Venue)=>{const text=searchable(venue);if(venue.event?.name)return"Events";if(/restaurant|diner|cafe|pizza|grill|kitchen|food|taco|burger|bakery|seafood/.test(text))return"Food";if(/bar|brew|cocktail|wine|drink|pub/.test(text))return"Drinks";if(/club|dj|music|nightlife|lounge/.test(text))return"Nightlife";if(/park|trail|beach|garden|outdoor|museum/.test(text))return"Outdoors";if(/shop|mall|market|store/.test(text))return"Shopping";return"All";};
 
 export default function VenueBrowserExperience(){
   const [open,setOpen]=useState(false);
   const [query,setQuery]=useState("");
   const [venues,setVenues]=useState<Venue[]>([]);
   const [loading,setLoading]=useState(false);
+  const [activeCategory,setActiveCategory]=useState("All");
+  const [visibleOnly,setVisibleOnly]=useState(true);
+
+  const readActiveCategory=()=>{
+    const label=document.querySelector<HTMLButtonElement>(".mobile-category-rail button.active small")?.textContent?.trim();
+    return label||"All";
+  };
 
   useEffect(()=>{
     let listButton:HTMLButtonElement|null=null;
     let cancelled=false;
-    const openBrowser=()=>setOpen(true);
+    const openBrowser=()=>{setActiveCategory(readActiveCategory());setOpen(true);};
     const install=()=>{
       if(cancelled)return;
       const searchButton=document.querySelector<HTMLButtonElement>('.mobile-native-actions button[aria-label="Search"]');
@@ -32,8 +40,8 @@ export default function VenueBrowserExperience(){
         listButton=document.createElement("button");
         listButton.type="button";
         listButton.className="venue-list-map-button";
-        listButton.innerHTML='<span>☰</span> View places';
-        listButton.setAttribute("aria-label","View nearby places as a list");
+        listButton.innerHTML='<span>☰</span> Places';
+        listButton.setAttribute("aria-label","View places in the current map area");
         mapSection.appendChild(listButton);
       }
       listButton.onclick=openBrowser;
@@ -54,11 +62,18 @@ export default function VenueBrowserExperience(){
 
   const results=useMemo(()=>{
     const clean=query.trim().toLowerCase();
+    const bounds=window.__lit757Map?.getBounds();
     return [...venues]
+      .filter(venue=>activeCategory==="All"||categoryFor(venue)===activeCategory)
       .filter(venue=>!clean||searchable(venue).includes(clean))
+      .filter(venue=>{
+        if(!visibleOnly||!bounds)return true;
+        const lat=Number(venue.lat),lng=Number(venue.lng);
+        return Number.isFinite(lat)&&Number.isFinite(lng)&&bounds.contains([lng,lat]);
+      })
       .sort((a,b)=>score(b)-score(a))
       .slice(0,80);
-  },[venues,query]);
+  },[venues,query,activeCategory,visibleOnly,open]);
 
   const showOnMap=(venue:Venue)=>{
     const latitude=Number(venue.lat),longitude=Number(venue.lng);
@@ -73,15 +88,19 @@ export default function VenueBrowserExperience(){
   return <div className="venue-browser-backdrop" onClick={()=>setOpen(false)}>
     <section className="venue-browser-sheet" onClick={event=>event.stopPropagation()}>
       <div className="venue-browser-handle"/>
-      <header><div><span>NEARBY PLACES</span><h2>Find a place</h2><p>Search businesses, venues, events, food, nightlife, or neighborhoods.</p></div><button onClick={()=>setOpen(false)} aria-label="Close venue browser"><X/></button></header>
-      <label className="venue-browser-search"><Search/><input autoFocus value={query} onChange={event=>setQuery(event.target.value)} placeholder="Search places, events, food, nightlife..."/>{query&&<button onClick={()=>setQuery("")} aria-label="Clear search"><X/></button>}</label>
-      <div className="venue-browser-meta"><span><List/> {results.length} places</span><small>Sorted by Buzz</small></div>
+      <header><div><span>{activeCategory==="All"?"PLACES NEARBY":activeCategory.toUpperCase()}</span><h2>Browse this area</h2><p>Results follow your selected category and the map area you are viewing.</p></div><button onClick={()=>setOpen(false)} aria-label="Close venue browser"><X/></button></header>
+      <label className="venue-browser-search"><Search/><input autoFocus value={query} onChange={event=>setQuery(event.target.value)} placeholder={`Search ${activeCategory==="All"?"places":activeCategory.toLowerCase()} nearby…`}/>{query&&<button onClick={()=>setQuery("")} aria-label="Clear search"><X/></button>}</label>
+      <div className="venue-browser-filters">
+        <button className={visibleOnly?"active":""} onClick={()=>setVisibleOnly(value=>!value)}><MapPin/> This map area</button>
+        <button onClick={()=>setActiveCategory("All")} className={activeCategory==="All"?"active":""}><SlidersHorizontal/> All categories</button>
+      </div>
+      <div className="venue-browser-meta"><span><List/> {results.length} {activeCategory==="All"?"places":activeCategory.toLowerCase()}</span><small>Highest Buzz first</small></div>
       <div className="venue-browser-list">
-        {loading?<div className="venue-browser-empty">Loading nearby places…</div>:results.length?results.map(venue=><button key={venue.id} onClick={()=>showOnMap(venue)}>
+        {loading?<div className="venue-browser-empty">Loading places…</div>:results.length?results.map(venue=><button key={venue.id} onClick={()=>showOnMap(venue)}>
           <div className="venue-browser-score">{score(venue)}</div>
-          <span><strong>{venue.name}</strong><small><MapPin/> {venue.city||"Hampton Roads"}{venue.event?.name?` · ${venue.event.name}`:""}</small><em>{venue.reason||`${venue.openNow===false?"Closed":"Open now"} · Tap to show on map`}</em></span>
+          <span><strong>{venue.name}</strong><small><MapPin/> {venue.city||"Nearby"}{venue.event?.name?` · ${venue.event.name}`:""}</small><em>{venue.reason||`${venue.openNow===false?"Closed":"Open now"} · Show on map`}</em></span>
           <ChevronRight/>
-        </button>):<div className="venue-browser-empty">No matching places. Try a broader search.</div>}
+        </button>):<div className="venue-browser-empty"><strong>No places in this view</strong><span>Zoom out, switch category, or turn off “This map area.”</span></div>}
       </div>
     </section>
   </div>;
