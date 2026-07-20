@@ -6,7 +6,6 @@
 
   .mobile-native-pulse{order:1!important}
 
-  /* Keep Ask AI directly below the hero without letting it dominate. */
   .mobile-plan-card{
     order:2!important;
     grid-template-columns:38px minmax(0,1fr) auto!important;
@@ -23,9 +22,7 @@
   .mobile-plan-card>b{padding:8px 11px!important;font-size:10px!important}
   .mobile-plan-card>b svg{width:13px!important}
 
-  /* Remove the clipped horizontal ticker that was showing beneath Ask AI. */
   .mobile-native-pulse + div{display:none!important}
-
   .mobile-category-rail{order:3!important;margin-top:0!important}
 
   .mobile-native-map{
@@ -36,29 +33,7 @@
     overflow:hidden!important;
   }
 
-  /* Keep the Buzz cue visible the instant the map enters the opening viewport. */
-  .mobile-native-map::before{
-    content:"🔥  Live updates below  ↓";
-    position:absolute;
-    left:50%;
-    top:12px;
-    bottom:auto;
-    z-index:8;
-    transform:translateX(-50%);
-    padding:8px 12px;
-    border:1px solid rgba(255,255,255,.16);
-    border-radius:999px;
-    background:rgba(5,8,12,.9);
-    color:#f3f5f7;
-    font-size:10px;
-    font-weight:800;
-    letter-spacing:.01em;
-    white-space:nowrap;
-    pointer-events:none;
-    box-shadow:0 8px 24px rgba(0,0,0,.28);
-    backdrop-filter:blur(14px);
-    animation:buzz-scroll-cue 3.8s ease-in-out infinite;
-  }
+  .mobile-native-map::before{display:none!important}
 
   #buzz-feed-home-mount{
     order:5!important;
@@ -67,16 +42,5 @@
     z-index:2!important;
   }
 
-  /* Explore is map + Buzz, not an endless duplicate venue directory. */
   .mobile-native-feed{display:none!important}
-
-  @keyframes buzz-scroll-cue{
-    0%,72%,100%{transform:translate(-50%,0);opacity:.88}
-    82%{transform:translate(-50%,3px);opacity:1}
-    90%{transform:translate(-50%,0);opacity:.92}
-  }
-}
-
-@media (prefers-reduced-motion:reduce){
-  .mobile-native-map::before{animation:none!important}
 }
