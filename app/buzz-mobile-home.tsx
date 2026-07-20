@@ -284,7 +284,7 @@ export default function BuzzMobileHome() {
       attributionControl: true,
     });
     map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-right");
-    const onMoveStart = (event: mapboxgl.MapboxEvent<MouseEvent | TouchEvent | WheelEvent | undefined>) => {
+    const onMoveStart = (event: { originalEvent?: unknown }) => {
       if (event.originalEvent) userMoveRef.current = true;
     };
     const onMoveEnd = () => {
