@@ -65,7 +65,8 @@ export default function LocationExperience() {
         clearCenterTimers();
       });
       map.on("zoomstart", event => {
-        if (event.originalEvent) {
+        const originalEvent = (event as typeof event & { originalEvent?: Event }).originalEvent;
+        if (originalEvent) {
           userMovedMap = true;
           clearCenterTimers();
         }
