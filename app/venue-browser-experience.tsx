@@ -2,23 +2,24 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ChevronRight, List, MapPin, Search, SlidersHorizontal, X } from "lucide-react";
+import { useMapController } from "./map-controller";
 
 type Venue={id:string;name:string;city?:string;kind?:string;type?:string;lat:number|string;lng:number|string;reason?:string;openNow?:boolean|null;activity?:{score?:number};event?:{name?:string|null}|null};
 type Payload={venues?:Venue[];picks?:Venue[]};
-
-declare global{interface Window{__lit757Map?:import("mapbox-gl").Map}}
 
 const score=(venue:Venue)=>venue.activity?.score??70;
 const searchable=(venue:Venue)=>`${venue.name} ${venue.city||""} ${venue.kind||""} ${venue.type||""} ${venue.reason||""} ${venue.event?.name||""}`.toLowerCase();
 const categoryFor=(venue:Venue)=>{const text=searchable(venue);if(venue.event?.name)return"Events";if(/restaurant|diner|cafe|pizza|grill|kitchen|food|taco|burger|bakery|seafood/.test(text))return"Food";if(/bar|brew|cocktail|wine|drink|pub/.test(text))return"Drinks";if(/club|dj|music|nightlife|lounge/.test(text))return"Nightlife";if(/park|trail|beach|garden|outdoor|museum/.test(text))return"Outdoors";if(/shop|mall|market|store/.test(text))return"Shopping";return"All";};
 
 export default function VenueBrowserExperience(){
+  const {map,setSelectedVenueId}=useMapController();
   const [open,setOpen]=useState(false);
   const [query,setQuery]=useState("");
   const [venues,setVenues]=useState<Venue[]>([]);
   const [loading,setLoading]=useState(false);
   const [activeCategory,setActiveCategory]=useState("All");
   const [visibleOnly,setVisibleOnly]=useState(true);
+  const [mapRevision,setMapRevision]=useState(0);
 
   const readActiveCategory=()=>{
     const label=document.querySelector<HTMLButtonElement>(".mobile-category-rail button.active small")?.textContent?.trim();
@@ -51,6 +52,13 @@ export default function VenueBrowserExperience(){
   },[]);
 
   useEffect(()=>{
+    if(!open||!map)return;
+    const update=()=>setMapRevision(value=>value+1);
+    map.on("moveend",update);
+    return()=>{map.off("moveend",update);};
+  },[map,open]);
+
+  useEffect(()=>{
     if(!open||venues.length)return;
     setLoading(true);
     fetch("/api/discover?city=All%20757&mode=all",{cache:"no-store"})
@@ -62,7 +70,7 @@ export default function VenueBrowserExperience(){
 
   const results=useMemo(()=>{
     const clean=query.trim().toLowerCase();
-    const bounds=window.__lit757Map?.getBounds();
+    const bounds=map?.getBounds();
     return [...venues]
       .filter(venue=>activeCategory==="All"||categoryFor(venue)===activeCategory)
       .filter(venue=>!clean||searchable(venue).includes(clean))
@@ -73,14 +81,15 @@ export default function VenueBrowserExperience(){
       })
       .sort((a,b)=>score(b)-score(a))
       .slice(0,80);
-  },[venues,query,activeCategory,visibleOnly,open]);
+  },[venues,query,activeCategory,visibleOnly,map,mapRevision]);
 
   const showOnMap=(venue:Venue)=>{
     const latitude=Number(venue.lat),longitude=Number(venue.lng);
     setOpen(false);
+    setSelectedVenueId(venue.id);
     if(Number.isFinite(latitude)&&Number.isFinite(longitude)){
-      window.__lit757Map?.resize();
-      window.__lit757Map?.easeTo({center:[longitude,latitude],zoom:15,duration:750});
+      map?.resize();
+      map?.easeTo({center:[longitude,latitude],zoom:15,duration:750});
     }
   };
 
