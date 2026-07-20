@@ -6,10 +6,12 @@ import "./venue-voting.css";
 import "./venue-cards.css";
 import "./mobile-explore-polish.css";
 import "./unified-experience.css";
+import "./venue-browser-experience.css";
 import MapLayerGuard from "./map-layer-guard";
 import MobileHome from "./mobile-home";
 import MobileRenderGuard from "./mobile-render-guard";
 import LocationExperience from "./location-experience";
+import VenueBrowserExperience from "./venue-browser-experience";
 import BuzzExperience from "./buzz-experience";
 import BuzzBrandEnhancer from "./buzz-brand-enhancer";
 import HomeMapResizer from "./home-map-resizer";
@@ -80,6 +82,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <MobileRenderGuard />
         <LocationExperience />
         <MobileHome />
+        <VenueBrowserExperience />
         <BuzzExperience />
         <BuzzBrandEnhancer />
         <HomeMapResizer />
