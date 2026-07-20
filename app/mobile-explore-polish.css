@@ -36,18 +36,19 @@
     overflow:hidden!important;
   }
 
-  /* Subtle scroll cue: the map stays central, but users know live updates continue below. */
+  /* Keep the Buzz cue visible the instant the map enters the opening viewport. */
   .mobile-native-map::before{
     content:"🔥  Live updates below  ↓";
     position:absolute;
     left:50%;
-    bottom:12px;
+    top:12px;
+    bottom:auto;
     z-index:8;
     transform:translateX(-50%);
     padding:8px 12px;
     border:1px solid rgba(255,255,255,.16);
     border-radius:999px;
-    background:rgba(5,8,12,.86);
+    background:rgba(5,8,12,.9);
     color:#f3f5f7;
     font-size:10px;
     font-weight:800;
