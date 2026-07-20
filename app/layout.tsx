@@ -7,18 +7,7 @@ import "./venue-cards.css";
 import "./mobile-explore-polish.css";
 import "./unified-experience.css";
 import "./venue-browser-experience.css";
-import MapLayerGuard from "./map-layer-guard";
-import MobileHome from "./mobile-home";
-import DesktopHome from "./desktop-home";
-import MobileRenderGuard from "./mobile-render-guard";
-import LocationExperience from "./location-experience";
-import VenueBrowserExperience from "./venue-browser-experience";
-import BuzzExperience from "./buzz-experience";
-import BuzzBrandEnhancer from "./buzz-brand-enhancer";
-import HomeMapResizer from "./home-map-resizer";
-import LegacyEnhancers from "./legacy-enhancers";
-import VenueDetailEnhancer from "./venue-detail-enhancer";
-import VenueVotingEnhancer from "./venue-voting-enhancer";
+import ClientShell from "./client-shell";
 
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"], display: "swap" });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
@@ -79,19 +68,8 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <body className="min-h-full flex flex-col">
         <style>{`@media (max-width:1023px){.legacy-app-shell{display:block!important}.mobile-home-mounted .legacy-app-shell{display:none!important}}`}</style>
         <script dangerouslySetInnerHTML={{ __html: rankedFeedBootstrap }} />
-        <MapLayerGuard />
-        <MobileRenderGuard />
-        <LocationExperience />
-        <MobileHome />
-        <DesktopHome />
-        <VenueBrowserExperience />
-        <BuzzExperience />
-        <BuzzBrandEnhancer />
-        <HomeMapResizer />
-        <VenueDetailEnhancer />
-        <VenueVotingEnhancer />
+        <ClientShell />
         <div className="legacy-app-shell">{children}</div>
-        <LegacyEnhancers />
       </body>
     </html>
   );
