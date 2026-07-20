@@ -7,6 +7,7 @@ const MapLayerGuard = dynamic(() => import("./map-layer-guard"), { ssr: false })
 const MobileRenderGuard = dynamic(() => import("./mobile-render-guard"), { ssr: false });
 const LocationExperience = dynamic(() => import("./location-experience"), { ssr: false });
 const MobileHome = dynamic(() => import("./mobile-home"), { ssr: false });
+const NotificationRuntime = dynamic(() => import("./notification-runtime"), { ssr: false });
 const DesktopHome = dynamic(() => import("./desktop-home"), { ssr: false });
 const VenueBrowserExperience = dynamic(() => import("./venue-browser-experience"), { ssr: false });
 const BuzzExperience = dynamic(() => import("./buzz-experience"), { ssr: false });
@@ -23,6 +24,7 @@ export default function ClientShell() {
       <MobileRenderGuard />
       <LocationExperience />
       <MobileHome />
+      <NotificationRuntime />
       <DesktopHome />
       <VenueBrowserExperience />
       <BuzzExperience />
