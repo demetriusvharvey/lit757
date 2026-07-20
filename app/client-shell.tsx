@@ -8,6 +8,8 @@ const LocationExperience = dynamic(() => import("./location-experience"), { ssr:
 const MobileHome = dynamic(() => import("./buzz-mobile-home"), { ssr: false });
 const BuzzPinRestorer = dynamic(() => import("./buzz-pin-restorer"), { ssr: false });
 const BuzzProductPositioning = dynamic(() => import("./buzz-product-positioning"), { ssr: false });
+const BuzzScoreTransparency = dynamic(() => import("./buzz-score-transparency"), { ssr: false });
+const BuzzCrowdReport = dynamic(() => import("./buzz-crowd-report"), { ssr: false });
 const DesktopHome = dynamic(() => import("./buzz-desktop-home"), { ssr: false });
 const NotificationRuntime = dynamic(() => import("./notification-runtime"), { ssr: false });
 const NotificationAuth = dynamic(() => import("./notification-auth"), { ssr: false });
@@ -21,6 +23,8 @@ export default function ClientShell() {
       <MobileHome />
       <BuzzPinRestorer />
       <BuzzProductPositioning />
+      <BuzzScoreTransparency />
+      <BuzzCrowdReport />
       <DesktopHome />
       <NotificationRuntime />
       <NotificationAuth />
