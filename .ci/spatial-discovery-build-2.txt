@@ -1,0 +1,1 @@
+validate spatial discovery with captured build log
