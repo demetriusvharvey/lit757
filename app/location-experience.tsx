@@ -2,103 +2,30 @@
 
 import { useEffect } from "react";
 import mapboxgl from "mapbox-gl";
-
-declare global {
-  interface Window {
-    __lit757Map?: mapboxgl.Map;
-    __lit757UserLocation?: { latitude: number; longitude: number; updatedAt: number };
-    __lit757MapCaptureInstalled?: boolean;
-  }
-}
+import { useMapController } from "./map-controller";
 
 const LOCATION_STORAGE_KEY = "lit757-user-location";
 const LOCATION_MODE_KEY = "lit757-location-enabled";
 const LOCATION_ZOOM = 14.2;
 
+type SavedLocation = {
+  latitude: number;
+  longitude: number;
+  accuracy: number;
+  updatedAt: number;
+};
+
 export default function LocationExperience() {
+  const { map, setUserLocation } = useMapController();
+
   useEffect(() => {
+    if (!map) return;
+
     let destroyed = false;
-    let controlsHost: HTMLDivElement | null = null;
     let watchId: number | null = null;
-    let centerTimers: number[] = [];
-    let userMovedMap = false;
-    let mapListenersInstalled = false;
-
-    if (!window.__lit757MapCaptureInstalled) {
-      window.__lit757MapCaptureInstalled = true;
-      const originalResize = mapboxgl.Map.prototype.resize;
-      const originalEaseTo = mapboxgl.Map.prototype.easeTo;
-      const originalJumpTo = mapboxgl.Map.prototype.jumpTo;
-
-      mapboxgl.Map.prototype.resize = function (...args) {
-        window.__lit757Map = this;
-        return originalResize.apply(this, args);
-      };
-      mapboxgl.Map.prototype.easeTo = function (...args) {
-        window.__lit757Map = this;
-        return originalEaseTo.apply(this, args);
-      };
-      mapboxgl.Map.prototype.jumpTo = function (...args) {
-        window.__lit757Map = this;
-        return originalJumpTo.apply(this, args);
-      };
-    }
-
-    const clearCenterTimers = () => {
-      centerTimers.forEach(timer => window.clearTimeout(timer));
-      centerTimers = [];
-    };
-
-    const discoverMap = () => {
-      const map = window.__lit757Map;
-      if (map) return map;
-      if (!document.querySelector(".mobile-native-map .mapboxgl-canvas")) return undefined;
-      window.dispatchEvent(new Event("resize"));
-      return window.__lit757Map;
-    };
-
-    const installMapListeners = (map: mapboxgl.Map) => {
-      if (mapListenersInstalled) return;
-      mapListenersInstalled = true;
-      map.on("dragstart", () => {
-        userMovedMap = true;
-        clearCenterTimers();
-      });
-      map.on("zoomstart", event => {
-        const originalEvent = (event as typeof event & { originalEvent?: Event }).originalEvent;
-        if (originalEvent) {
-          userMovedMap = true;
-          clearCenterTimers();
-        }
-      });
-      map.on("rotatestart", () => {
-        userMovedMap = true;
-        clearCenterTimers();
-      });
-    };
-
-    const centerMap = (latitude: number, longitude: number, immediate = false, force = false) => {
-      if (userMovedMap && !force) return false;
-      const map = discoverMap();
-      if (!map) return false;
-      installMapListeners(map);
-      map.resize();
-      const options = { center: [longitude, latitude] as [number, number], zoom: LOCATION_ZOOM };
-      if (immediate) map.jumpTo(options);
-      else map.easeTo({ ...options, duration: 650 });
-      return true;
-    };
-
-    const focusLocationOnce = (latitude: number, longitude: number, force = false) => {
-      clearCenterTimers();
-      userMovedMap = false;
-      const attempts = [0, 250, 700, 1400];
-      attempts.forEach((delay, index) => {
-        centerTimers.push(window.setTimeout(() => {
-          if (!destroyed) centerMap(latitude, longitude, index === attempts.length - 1, force);
-        }, delay));
-      });
-    };
+    let marker: mapboxgl.Marker | null = null;
+    let controlsHost: HTMLDivElement | null = null;
+    let initialFocusComplete = false;
 
     const setLabel = (text: string, active = false) => {
       controlsHost?.classList.toggle("location-active", active);
@@ -106,14 +33,48 @@ export default function LocationExperience() {
       if (label) label.textContent = text;
     };
 
-    const savePosition = (position: GeolocationPosition, shouldFocus = false) => {
-      const { latitude, longitude } = position.coords;
-      const saved = { latitude, longitude, updatedAt: Date.now() };
-      window.__lit757UserLocation = saved;
-      localStorage.setItem(LOCATION_STORAGE_KEY, JSON.stringify(saved));
+    const renderMarker = (location: SavedLocation) => {
+      setUserLocation(location);
+      if (!marker) {
+        const element = document.createElement("button");
+        element.type = "button";
+        element.className = "user-location-marker";
+        element.setAttribute("aria-label", "You are here");
+        element.innerHTML = `
+          <span class="user-location-accuracy" aria-hidden="true"></span>
+          <span class="user-location-pulse" aria-hidden="true"></span>
+          <span class="user-location-dot" aria-hidden="true"></span>
+          <span class="user-location-label">YOU</span>
+        `;
+        element.onclick = () => map.easeTo({ center: [location.longitude, location.latitude], zoom: LOCATION_ZOOM, duration: 550 });
+        marker = new mapboxgl.Marker({ element, anchor: "center" })
+          .setLngLat([location.longitude, location.latitude])
+          .addTo(map);
+      } else {
+        marker.setLngLat([location.longitude, location.latitude]);
+      }
+
+      const size = Math.max(46, Math.min(128, 42 + location.accuracy * 0.35));
+      marker.getElement().style.setProperty("--user-accuracy-size", `${size}px`);
+      marker.getElement().onclick = () => map.easeTo({ center: [location.longitude, location.latitude], zoom: LOCATION_ZOOM, duration: 550 });
+    };
+
+    const savePosition = (position: GeolocationPosition, focus = false) => {
+      const location: SavedLocation = {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+        accuracy: Math.max(0, position.coords.accuracy || 0),
+        updatedAt: Date.now(),
+      };
+      localStorage.setItem(LOCATION_STORAGE_KEY, JSON.stringify(location));
       localStorage.setItem(LOCATION_MODE_KEY, "true");
       setLabel("Near me", true);
-      if (shouldFocus) focusLocationOnce(latitude, longitude, true);
+      renderMarker(location);
+      if (focus) {
+        map.resize();
+        map.easeTo({ center: [location.longitude, location.latitude], zoom: LOCATION_ZOOM, duration: initialFocusComplete ? 550 : 0 });
+        initialFocusComplete = true;
+      }
     };
 
     const onLocationError = () => {
@@ -121,11 +82,11 @@ export default function LocationExperience() {
       setLabel("Enable location", false);
     };
 
-    const requestLocation = (forceFocus = true) => {
+    const requestLocation = (focus = true) => {
       if (!navigator.geolocation) return onLocationError();
       setLabel("Locating…", true);
       navigator.geolocation.getCurrentPosition(
-        position => savePosition(position, forceFocus),
+        position => savePosition(position, focus),
         onLocationError,
         { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
       );
@@ -140,11 +101,8 @@ export default function LocationExperience() {
       );
     };
 
-    const installControls = () => {
-      if (destroyed) return;
-      const mapSection = document.querySelector<HTMLElement>(".mobile-native-map");
-      if (!mapSection) return void window.setTimeout(installControls, 100);
-
+    const mapSection = document.querySelector<HTMLElement>(".mobile-native-map");
+    if (mapSection) {
       controlsHost = mapSection.querySelector<HTMLDivElement>(".location-map-controls");
       if (!controlsHost) {
         controlsHost = document.createElement("div");
@@ -157,36 +115,34 @@ export default function LocationExperience() {
         `;
         mapSection.appendChild(controlsHost);
       }
-
       controlsHost.querySelector(".location-center-button")?.addEventListener("click", () => requestLocation(true));
+    }
 
-      const savedRaw = localStorage.getItem(LOCATION_STORAGE_KEY);
-      const enabled = localStorage.getItem(LOCATION_MODE_KEY) !== "false";
-      if (savedRaw && enabled) {
-        try {
-          const saved = JSON.parse(savedRaw) as { latitude: number; longitude: number; updatedAt: number };
-          window.__lit757UserLocation = saved;
-          setLabel("Near me", true);
-          focusLocationOnce(saved.latitude, saved.longitude);
-          requestLocation(false);
-          startWatching();
-          return;
-        } catch {}
-      }
-      if (enabled) {
+    const enabled = localStorage.getItem(LOCATION_MODE_KEY) !== "false";
+    const savedRaw = localStorage.getItem(LOCATION_STORAGE_KEY);
+    if (enabled && savedRaw) {
+      try {
+        const saved = JSON.parse(savedRaw) as SavedLocation;
+        renderMarker(saved);
+        map.jumpTo({ center: [saved.longitude, saved.latitude], zoom: LOCATION_ZOOM });
+        initialFocusComplete = true;
+        requestLocation(false);
+      } catch {
         requestLocation(true);
-        startWatching();
       }
-    };
+    } else if (enabled) {
+      requestLocation(true);
+    }
+    if (enabled) startWatching();
 
-    installControls();
     return () => {
       destroyed = true;
-      clearCenterTimers();
       if (watchId !== null) navigator.geolocation?.clearWatch(watchId);
+      marker?.remove();
       controlsHost?.remove();
+      if (destroyed) setUserLocation(null);
     };
-  }, []);
+  }, [map, setUserLocation]);
 
   return null;
 }
