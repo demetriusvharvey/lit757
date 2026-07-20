@@ -41,8 +41,10 @@ export default function BuzzPinRestorer() {
   const [venues, setVenues] = useState<Venue[]>([]);
   const receivedDiscoveryRef = useRef(false);
   const tapCycleRef = useRef<TapCycle | null>(null);
+  const mappedRef = useRef<Venue[]>([]);
 
   const mapped = useMemo(() => venues.filter(validVenue), [venues]);
+  mappedRef.current = mapped;
 
   useEffect(() => {
     const receive = (event: Event) => {
@@ -67,6 +69,42 @@ export default function BuzzPinRestorer() {
     if (!map) return;
     let cancelled = false;
 
+    const chooseNearest = (event: mapboxgl.MapLayerMouseEvent) => {
+      const box: [mapboxgl.PointLike, mapboxgl.PointLike] = [
+        [event.point.x - TAP_RADIUS, event.point.y - TAP_RADIUS],
+        [event.point.x + TAP_RADIUS, event.point.y + TAP_RADIUS],
+      ];
+      const unique = new Map<string, number>();
+      for (const feature of map.queryRenderedFeatures(box, { layers: [HITBOX_ID] })) {
+        const id = String(feature.properties?.id || "");
+        if (!id || feature.geometry.type !== "Point") continue;
+        const projected = map.project(feature.geometry.coordinates as [number, number]);
+        const distance = Math.hypot(projected.x - event.point.x, projected.y - event.point.y);
+        const previousDistance = unique.get(id);
+        if (previousDistance == null || distance < previousDistance) unique.set(id, distance);
+      }
+      const ids = [...unique.entries()].sort((left, right) => left[1] - right[1]).map(([id]) => id);
+      if (!ids.length) return;
+
+      const previous = tapCycleRef.current;
+      const repeated = Boolean(
+        previous &&
+        Date.now() - previous.at < 1500 &&
+        Math.hypot(previous.x - event.point.x, previous.y - event.point.y) < 20 &&
+        previous.ids.join("|") === ids.join("|")
+      );
+      const index = repeated && previous ? (previous.index + 1) % ids.length : 0;
+      tapCycleRef.current = { ids, index, x: event.point.x, y: event.point.y, at: Date.now() };
+      const venueId = ids[index];
+      const venue = mappedRef.current.find(item => String(item.id) === venueId);
+      if (!venue) return;
+      setSelectedVenueId(venueId);
+      if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate(10);
+      map.easeTo({ center: [Number(venue.lng), Number(venue.lat)], zoom: Math.max(map.getZoom(), 13), duration: 450 });
+    };
+    const enter = () => { map.getCanvas().style.cursor = "pointer"; };
+    const leave = () => { map.getCanvas().style.cursor = ""; };
+
     const install = () => {
       if (cancelled || map.getSource(SOURCE_ID)) return;
 
@@ -87,8 +125,6 @@ export default function BuzzPinRestorer() {
         90, "#FF5C5C",
       ];
 
-      // The large interaction layer sits underneath the visible pins, so it
-      // improves tapping without covering or dimming the marker artwork.
       map.addLayer({
         id: HITBOX_ID,
         type: "circle",
@@ -131,42 +167,6 @@ export default function BuzzPinRestorer() {
         paint: { "text-color": "#FFFFFF" },
       });
 
-      const chooseNearest = (event: mapboxgl.MapLayerMouseEvent) => {
-        const box: [mapboxgl.PointLike, mapboxgl.PointLike] = [
-          [event.point.x - TAP_RADIUS, event.point.y - TAP_RADIUS],
-          [event.point.x + TAP_RADIUS, event.point.y + TAP_RADIUS],
-        ];
-        const unique = new Map<string, number>();
-        for (const feature of map.queryRenderedFeatures(box, { layers: [HITBOX_ID] })) {
-          const id = String(feature.properties?.id || "");
-          if (!id || feature.geometry.type !== "Point") continue;
-          const projected = map.project(feature.geometry.coordinates as [number, number]);
-          const distance = Math.hypot(projected.x - event.point.x, projected.y - event.point.y);
-          const previousDistance = unique.get(id);
-          if (previousDistance == null || distance < previousDistance) unique.set(id, distance);
-        }
-        const ids = [...unique.entries()].sort((left, right) => left[1] - right[1]).map(([id]) => id);
-        if (!ids.length) return;
-
-        const previous = tapCycleRef.current;
-        const repeated = Boolean(
-          previous &&
-          Date.now() - previous.at < 1500 &&
-          Math.hypot(previous.x - event.point.x, previous.y - event.point.y) < 20 &&
-          previous.ids.join("|") === ids.join("|")
-        );
-        const index = repeated && previous ? (previous.index + 1) % ids.length : 0;
-        tapCycleRef.current = { ids, index, x: event.point.x, y: event.point.y, at: Date.now() };
-        const venueId = ids[index];
-        const venue = mapped.find(item => String(item.id) === venueId);
-        if (!venue) return;
-        setSelectedVenueId(venueId);
-        if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate(10);
-        map.easeTo({ center: [Number(venue.lng), Number(venue.lat)], zoom: Math.max(map.getZoom(), 13), duration: 450 });
-      };
-      const enter = () => { map.getCanvas().style.cursor = "pointer"; };
-      const leave = () => { map.getCanvas().style.cursor = ""; };
-
       map.on("click", HITBOX_ID, chooseNearest);
       map.on("mouseenter", HITBOX_ID, enter);
       map.on("mouseleave", HITBOX_ID, leave);
@@ -178,8 +178,13 @@ export default function BuzzPinRestorer() {
     return () => {
       cancelled = true;
       map.off("load", install);
+      if (map.getLayer(HITBOX_ID)) {
+        map.off("click", HITBOX_ID, chooseNearest);
+        map.off("mouseenter", HITBOX_ID, enter);
+        map.off("mouseleave", HITBOX_ID, leave);
+      }
     };
-  }, [map, mapped, setSelectedVenueId]);
+  }, [map, setSelectedVenueId]);
 
   useEffect(() => {
     if (!map) return;
