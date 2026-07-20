@@ -67,7 +67,7 @@ export async function loadActiveSignals(db: SupabaseClient, venueId: string, now
 export async function recomputeBuzzScore(db: SupabaseClient, venue: VenueForBuzz, now = new Date()) {
   const signals = await loadActiveSignals(db, venue.id, now);
   const score = calculateBuzzScore(venue, signals, now);
-  const { error } = await db.from("buzz_score_snapshots").upsert({
+  const snapshot = {
     venue_id: venue.id,
     score: score.score,
     label: score.label,
@@ -80,8 +80,13 @@ export async function recomputeBuzzScore(db: SupabaseClient, venue: VenueForBuzz
     source_families: score.sourceFamilies,
     explanation: score.explanation,
     factors: score.factors,
-    updated_at: now.toISOString(),
-  }, { onConflict: "venue_id" });
-  if (error) throw new Error(`Could not save Buzz score: ${error.message}`);
+  };
+
+  const [{ error: snapshotError }, { error: historyError }] = await Promise.all([
+    db.from("buzz_score_snapshots").upsert({ ...snapshot, updated_at: now.toISOString() }, { onConflict: "venue_id" }),
+    db.from("buzz_score_history").upsert(snapshot, { onConflict: "venue_id,computed_at", ignoreDuplicates: true }),
+  ]);
+  if (snapshotError) throw new Error(`Could not save Buzz score: ${snapshotError.message}`);
+  if (historyError) throw new Error(`Could not save Buzz score history: ${historyError.message}`);
   return score;
 }
