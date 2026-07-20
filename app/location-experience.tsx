@@ -13,7 +13,7 @@ declare global {
 
 const LOCATION_STORAGE_KEY = "lit757-user-location";
 const LOCATION_MODE_KEY = "lit757-location-enabled";
-const LOCATION_ZOOM = 14.6;
+const LOCATION_ZOOM = 14.8;
 
 export default function LocationExperience() {
   useEffect(() => {
@@ -22,34 +22,46 @@ export default function LocationExperience() {
     let watchId: number | null = null;
     let centerTimers: number[] = [];
 
-    // LocationExperience mounts before MobileHome. Capture the exact Mapbox instance
-    // when MobileHome creates it instead of trying to discover a private DOM property.
+    /*
+     * Capture the live map through Mapbox's instance methods. Patching the
+     * constructor is unreliable in bundled Safari builds because the export can
+     * be immutable. Every map uses resize/easeTo/fitBounds, so these wrappers
+     * reliably register the real instance without touching MobileHome state.
+     */
     if (!window.__lit757MapCaptureInstalled) {
       window.__lit757MapCaptureInstalled = true;
-      const OriginalMap = mapboxgl.Map;
-      const CapturedMap = class extends OriginalMap {
-        constructor(options: mapboxgl.MapOptions) {
-          super(options);
-          window.__lit757Map = this;
-          this.once("load", () => {
-            const saved = window.__lit757UserLocation;
-            if (saved && localStorage.getItem(LOCATION_MODE_KEY) !== "false") {
-              this.resize();
-              this.jumpTo({ center: [saved.longitude, saved.latitude], zoom: LOCATION_ZOOM });
-            }
-          });
-        }
-      } as typeof mapboxgl.Map;
+      const proto = mapboxgl.Map.prototype as mapboxgl.Map & Record<string, unknown>;
+      const originalResize = mapboxgl.Map.prototype.resize;
+      const originalEaseTo = mapboxgl.Map.prototype.easeTo;
+      const originalJumpTo = mapboxgl.Map.prototype.jumpTo;
+      const originalFitBounds = mapboxgl.Map.prototype.fitBounds;
 
-      try {
-        (mapboxgl as unknown as { Map: typeof mapboxgl.Map }).Map = CapturedMap;
-      } catch {
-        try {
-          Object.defineProperty(mapboxgl, "Map", { configurable: true, writable: true, value: CapturedMap });
-        } catch {
-          // The explicit map registration below still works on compatible builds.
+      mapboxgl.Map.prototype.resize = function (...args) {
+        window.__lit757Map = this;
+        return originalResize.apply(this, args);
+      };
+      mapboxgl.Map.prototype.easeTo = function (...args) {
+        window.__lit757Map = this;
+        return originalEaseTo.apply(this, args);
+      };
+      mapboxgl.Map.prototype.jumpTo = function (...args) {
+        window.__lit757Map = this;
+        return originalJumpTo.apply(this, args);
+      };
+      mapboxgl.Map.prototype.fitBounds = function (...args) {
+        window.__lit757Map = this;
+        const enabled = localStorage.getItem(LOCATION_MODE_KEY) === "true";
+        const saved = window.__lit757UserLocation;
+        if (enabled && saved) {
+          originalJumpTo.call(this, {
+            center: [saved.longitude, saved.latitude],
+            zoom: LOCATION_ZOOM,
+          });
+          return this;
         }
-      }
+        return originalFitBounds.apply(this, args);
+      };
+      void proto;
     }
 
     const clearCenterTimers = () => {
@@ -57,13 +69,24 @@ export default function LocationExperience() {
       centerTimers = [];
     };
 
-    const centerMap = (latitude: number, longitude: number, immediate = false) => {
+    const discoverMap = () => {
       const map = window.__lit757Map;
+      if (map) return map;
+      const canvas = document.querySelector<HTMLCanvasElement>(".mobile-native-map .mapboxgl-canvas");
+      if (!canvas) return undefined;
+      // Triggering a resize event causes the patched resize method to capture
+      // the instance in builds where Mapbox has not animated yet.
+      window.dispatchEvent(new Event("resize"));
+      return window.__lit757Map;
+    };
+
+    const centerMap = (latitude: number, longitude: number, immediate = false) => {
+      const map = discoverMap();
       if (!map) return false;
       map.resize();
       const options = { center: [longitude, latitude] as [number, number], zoom: LOCATION_ZOOM };
       if (immediate) map.jumpTo(options);
-      else map.easeTo({ ...options, duration: 700 });
+      else map.easeTo({ ...options, duration: 650 });
       return true;
     };
 
@@ -72,14 +95,12 @@ export default function LocationExperience() {
       let attempts = 0;
       const retry = () => {
         if (destroyed) return;
-        if (!centerMap(latitude, longitude, attempts > 1) && attempts++ < 50) {
+        if (!centerMap(latitude, longitude, attempts > 2) && attempts++ < 80) {
           centerTimers.push(window.setTimeout(retry, 100));
         }
       };
       retry();
-      // Venue data can call fitBounds after the initial geolocation response.
-      // Reapply the user view after those asynchronous map updates finish.
-      [350, 800, 1400, 2400, 4000].forEach((delay, index) => {
+      [250, 600, 1100, 1800, 3000].forEach((delay, index) => {
         centerTimers.push(window.setTimeout(() => centerMap(latitude, longitude, index >= 2), delay));
       });
     };
@@ -101,6 +122,7 @@ export default function LocationExperience() {
     };
 
     const onLocationError = () => {
+      localStorage.setItem(LOCATION_MODE_KEY, "false");
       setLabel("Enable location", false);
     };
 
@@ -149,6 +171,7 @@ export default function LocationExperience() {
         try {
           const saved = JSON.parse(savedRaw) as { latitude: number; longitude: number; updatedAt: number };
           window.__lit757UserLocation = saved;
+          localStorage.setItem(LOCATION_MODE_KEY, "true");
           setLabel("Near me", true);
           lockToLocation(saved.latitude, saved.longitude);
           requestLocation();
