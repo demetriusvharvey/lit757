@@ -19,6 +19,20 @@ type EventRow = {
   source_url?: string | null;
 };
 type PresenceRow = { venue_id?: string | null; device_id?: string | null };
+type ScoreRow = {
+  venue_id: string;
+  score: number;
+  label: string;
+  score_mode: "live" | "forecast";
+  confidence: "low" | "medium" | "high";
+  version: string;
+  computed_at: string;
+  expires_at: string;
+  evidence_age_minutes?: number | null;
+  source_families?: string[] | null;
+  explanation?: string | null;
+  factors?: unknown;
+};
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const normalize = (value: unknown) => String(value || "").toLowerCase().normalize("NFKD").replace(/\p{Diacritic}/gu, "").replace(/&/g, " and ").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
@@ -94,19 +108,22 @@ export async function GET(request: Request) {
   const query = normalize(url.searchParams.get("q"));
   const category = normalize(url.searchParams.get("category"));
   const limit = clamp(Math.round(numberParam(url.searchParams.get("limit")) || 220), 1, 400);
-  const eventStart = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
-  const eventEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-  const presenceStart = new Date(Date.now() - 45 * 60 * 1000).toISOString();
+  const now = new Date();
+  const eventStart = new Date(now.getTime() - 3 * 60 * 60 * 1000).toISOString();
+  const eventEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const presenceStart = new Date(now.getTime() - 45 * 60 * 1000).toISOString();
 
-  const [venueResult, eventResult, presenceResult] = await Promise.all([
+  const [venueResult, eventResult, presenceResult, scoreResult] = await Promise.all([
     db.from("venues").select("id,name,city,address,lat,lng,type,category,ai_score,ai_summary,google_rating,google_place_id,photo_source,phone,website,hours,enriched_at").limit(2500),
     db.from("events").select("id,name,venue_name,start_time,end_time,ticket_status,source_url").gte("start_time", eventStart).lte("start_time", eventEnd).order("start_time").limit(1200),
     db.from("venue_live_reports").select("venue_id,device_id").eq("report_type", "nearby_presence").gte("created_at", presenceStart).limit(3000),
+    db.from("buzz_score_snapshots").select("venue_id,score,label,score_mode,confidence,version,computed_at,expires_at,evidence_age_minutes,source_families,explanation,factors").gt("expires_at", new Date(now.getTime() - 10 * 60 * 1000).toISOString()).limit(3000),
   ]);
 
   if (venueResult.error) return NextResponse.json({ success: false, error: venueResult.error.message }, { status: 500 });
   if (eventResult.error) console.error("Event signals unavailable", eventResult.error.message);
   if (presenceResult.error) console.error("Live presence signals unavailable", presenceResult.error.message);
+  if (scoreResult.error) console.error("Buzz v1 snapshots unavailable; using fallback scoring", scoreResult.error.message);
 
   const events = new Map<string, EventRow>();
   for (const event of (eventResult.data || []) as EventRow[]) {
@@ -121,6 +138,9 @@ export async function GET(request: Request) {
     devices.add(report.device_id);
     presence.set(report.venue_id, devices);
   }
+
+  const scoreMap = new Map<string, ScoreRow>();
+  for (const snapshot of (scoreResult.data || []) as ScoreRow[]) scoreMap.set(snapshot.venue_id, snapshot);
 
   const ranked = ((venueResult.data || []) as VenueRow[]).flatMap((venue) => {
     const venueLat = Number(venue.lat);
@@ -141,33 +161,17 @@ export async function GET(request: Request) {
     const livePresencePoints = Math.min(35, livePresenceCount * 10);
     const eventEvidence = eventSignal(event);
     const ticketEvidence = ticketSignal(event?.ticket_status);
-    let buzzScore = Math.round(expectedPrior + livePresencePoints + eventEvidence.points + ticketEvidence.points);
+    let fallbackScore = Math.round(expectedPrior + livePresencePoints + eventEvidence.points + ticketEvidence.points);
+    const fallbackLive = livePresenceCount > 0;
+    const fallbackStrongEvent = eventEvidence.active && ticketEvidence.strength === "strong";
+    if (!fallbackLive && !fallbackStrongEvent) fallbackScore = Math.min(fallbackScore, 74);
+    fallbackScore = clamp(fallbackScore, 0, 100);
 
-    // A static prior is useful for forecasting, but it is not proof that a venue
-    // is buzzing now. Do not display extreme scores without timely evidence.
-    const hasLiveEvidence = livePresenceCount > 0;
-    const hasStrongEventEvidence = eventEvidence.active && ticketEvidence.strength === "strong";
-    if (!hasLiveEvidence && !hasStrongEventEvidence) buzzScore = Math.min(buzzScore, 74);
-    buzzScore = clamp(buzzScore, 0, 100);
-
-    const confidence = livePresenceCount >= 4 || (livePresenceCount >= 2 && eventEvidence.active)
-      ? "high"
-      : livePresenceCount >= 1 || hasStrongEventEvidence || eventEvidence.active
-        ? "medium"
-        : "low";
-    const scoreMode = hasLiveEvidence || hasStrongEventEvidence ? "live" : "forecast";
-    const trendLabel = livePresenceCount >= 2
-      ? "Verified activity building"
-      : livePresenceCount === 1
-        ? "Live activity reported"
-        : eventEvidence.active
-          ? "Event in progress"
-          : eventEvidence.points > 0
-            ? "Event approaching"
-            : "Forecast only";
-
-    // Place Photos are fetched by Google Place ID. The old photo_source gate was
-    // left over from a Street View implementation and incorrectly hid valid photos.
+    const snapshot = scoreMap.get(venue.id);
+    const buzzScore = snapshot ? clamp(Number(snapshot.score), 0, 100) : fallbackScore;
+    const confidence = snapshot?.confidence || (livePresenceCount >= 4 || (livePresenceCount >= 2 && eventEvidence.active) ? "high" : livePresenceCount >= 1 || fallbackStrongEvent || eventEvidence.active ? "medium" : "low");
+    const scoreMode = snapshot?.score_mode || (fallbackLive || fallbackStrongEvent ? "live" : "forecast");
+    const trendLabel = snapshot?.explanation || (livePresenceCount >= 2 ? "Verified activity building" : livePresenceCount === 1 ? "Live activity reported" : eventEvidence.active ? "Event in progress" : eventEvidence.points > 0 ? "Event approaching" : "Forecast only");
     const photoUrl = venue.google_place_id ? `/api/venue-photo?placeId=${encodeURIComponent(String(venue.google_place_id))}` : null;
 
     return [{
@@ -181,7 +185,7 @@ export async function GET(request: Request) {
       category: String(venue.category || venue.type || "Local spot"),
       kind,
       photoUrl,
-      reason: event?.name || venue.ai_summary || `A ${venue.type || venue.category || "place"} you can do right now`,
+      reason: event?.name || snapshot?.explanation || venue.ai_summary || `A ${venue.type || venue.category || "place"} you can do right now`,
       openNow: null,
       phone: venue.phone || null,
       website: venue.website || null,
@@ -189,11 +193,18 @@ export async function GET(request: Request) {
       distanceMiles: distance === null ? null : Number(distance.toFixed(2)),
       activity: {
         score: buzzScore,
-        label: buzzScore >= 88 ? "On Fire" : buzzScore >= 76 ? "Heating Up" : buzzScore >= 60 ? "Active" : "Chill",
+        label: snapshot?.label || (buzzScore >= 88 ? "On Fire" : buzzScore >= 76 ? "Heating Up" : buzzScore >= 60 ? "Active" : "Chill"),
         trendLabel,
         confidence,
         scoreMode,
-        signals: {
+        updatedAt: snapshot?.computed_at || now.toISOString(),
+        expiresAt: snapshot?.expires_at || null,
+        evidenceAgeMinutes: snapshot?.evidence_age_minutes ?? null,
+        scoreVersion: snapshot?.version || "buzz-v0.2-fallback",
+        sourceFamilies: snapshot?.source_families || [],
+        explanation: snapshot?.explanation || trendLabel,
+        factors: snapshot?.factors || null,
+        signals: snapshot ? undefined : {
           expectedPrior: Math.round(expectedPrior),
           livePresenceCount,
           livePresencePoints,
@@ -218,9 +229,9 @@ export async function GET(request: Request) {
 
   return NextResponse.json({
     success: true,
-    generatedAt: new Date().toISOString(),
-    scoreVersion: "buzz-v0.2",
-    scoreNotice: "High Buzz scores require timely live presence or strong active-event evidence. Distance and ratings do not change a venue's Buzz score.",
+    generatedAt: now.toISOString(),
+    scoreVersion: scoreMap.size ? "buzz-v1" : "buzz-v0.2-fallback",
+    scoreNotice: "Live scores use expiring evidence. Forecast-only scores are capped and cannot claim a venue is currently packed.",
     scope,
     resultCount: ranked.length,
     picks: venues.slice(0, 40),
