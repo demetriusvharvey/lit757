@@ -1,63 +1,76 @@
 "use client";
 
-import mapboxgl from "mapbox-gl";
-
-let installed=false;
-
-const HIT_LAYERS:Record<string,string>={
-  "mobile-live-dot":"mobile-live-hit",
-  "mobile-venue-pins":"mobile-venue-hit",
-};
+import { useEffect } from "react";
+import type mapboxgl from "mapbox-gl";
+import { useMapController } from "./map-controller";
 
 export default function MapLayerGuard(){
-  if(!installed&&typeof window!=="undefined"){
-    installed=true;
+  const {map,setSelectedVenueId}=useMapController();
 
-    const mapPrototype=mapboxgl.Map.prototype as any;
-    const originalAddLayer=mapPrototype.addLayer;
-    const originalOn=mapPrototype.on;
+  useEffect(()=>{
+    if(!map)return;
+    let cancelled=false;
+    let retryTimer:number|undefined;
 
-    mapPrototype.addLayer=function(layer:any,beforeId?:string){
-      let nextLayer=layer;
-      if(layer?.id==="mobile-clusters"||layer?.id==="mobile-cluster-count")nextLayer={...layer,minzoom:0};
-      if(layer?.id==="mobile-venue-pins")nextLayer={...layer,minzoom:7.5};
-
-      const result=originalAddLayer.call(this,nextLayer,beforeId);
-      const hitLayerId=HIT_LAYERS[nextLayer?.id];
-
-      if(hitLayerId&&!this.getLayer(hitLayerId)){
-        const visualRadius=nextLayer?.id==="mobile-live-dot"?18:20;
-        originalAddLayer.call(this,{
-          id:hitLayerId,
-          type:"circle",
-          source:nextLayer.source,
-          ...(nextLayer["source-layer"]?{"source-layer":nextLayer["source-layer"]}:{}),
-          ...(nextLayer.filter?{filter:nextLayer.filter}:{}),
-          minzoom:nextLayer?.id==="mobile-venue-pins"?7.5:0,
-          maxzoom:nextLayer.maxzoom,
-          paint:{
-            "circle-radius":visualRadius,
-            "circle-color":"rgba(0,0,0,0.01)",
-            "circle-opacity":0.01,
-            "circle-stroke-width":0,
-          },
-        },beforeId);
+    const selectFeature=(feature?:mapboxgl.MapboxGeoJSONFeature)=>{
+      const venueId=String(feature?.properties?.id||"");
+      if(!venueId)return;
+      setSelectedVenueId(venueId);
+      if(feature?.geometry.type==="Point"){
+        map.easeTo({center:feature.geometry.coordinates as [number,number],zoom:Math.max(map.getZoom(),13),duration:500});
       }
-
-      return result;
     };
 
-    mapPrototype.on=function(type:string,layerOrListener:any,listener?:any){
-      const result=originalOn.apply(this,arguments as any);
-      if(typeof layerOrListener==="string"&&typeof listener==="function"){
-        const hitLayerId=HIT_LAYERS[layerOrListener];
-        if(hitLayerId){
-          originalOn.call(this,type,hitLayerId,listener);
-        }
-      }
-      return result;
+    const onLiveClick=(event:mapboxgl.MapLayerMouseEvent)=>selectFeature(event.features?.[0]);
+    const onVenueClick=(event:mapboxgl.MapLayerMouseEvent)=>selectFeature(event.features?.[0]);
+    const onEnter=()=>{map.getCanvas().style.cursor="pointer";};
+    const onLeave=()=>{map.getCanvas().style.cursor="";};
+
+    const install=()=>{
+      if(cancelled)return;
+      const liveSource=map.getSource("mobile-live-dots");
+      const venueSource=map.getSource("mobile-venues");
+      if(!liveSource||!venueSource){retryTimer=window.setTimeout(install,120);return;}
+
+      if(!map.getLayer("mobile-live-hit"))map.addLayer({
+        id:"mobile-live-hit",
+        type:"circle",
+        source:"mobile-live-dots",
+        paint:{"circle-radius":18,"circle-color":"rgba(0,0,0,0.01)","circle-opacity":0.01,"circle-stroke-width":0},
+      });
+      if(!map.getLayer("mobile-venue-hit"))map.addLayer({
+        id:"mobile-venue-hit",
+        type:"circle",
+        source:"mobile-venues",
+        filter:["!",["has","point_count"]],
+        minzoom:7.5,
+        paint:{"circle-radius":20,"circle-color":"rgba(0,0,0,0.01)","circle-opacity":0.01,"circle-stroke-width":0},
+      });
+
+      map.on("click","mobile-live-hit",onLiveClick);
+      map.on("click","mobile-venue-hit",onVenueClick);
+      map.on("mouseenter","mobile-live-hit",onEnter);
+      map.on("mouseleave","mobile-live-hit",onLeave);
+      map.on("mouseenter","mobile-venue-hit",onEnter);
+      map.on("mouseleave","mobile-venue-hit",onLeave);
     };
-  }
+
+    map.isStyleLoaded()?install():map.once("load",install);
+    return()=>{
+      cancelled=true;
+      if(retryTimer)window.clearTimeout(retryTimer);
+      if(map.getLayer("mobile-live-hit")){
+        map.off("click","mobile-live-hit",onLiveClick);
+        map.off("mouseenter","mobile-live-hit",onEnter);
+        map.off("mouseleave","mobile-live-hit",onLeave);
+      }
+      if(map.getLayer("mobile-venue-hit")){
+        map.off("click","mobile-venue-hit",onVenueClick);
+        map.off("mouseenter","mobile-venue-hit",onEnter);
+        map.off("mouseleave","mobile-venue-hit",onLeave);
+      }
+    };
+  },[map,setSelectedVenueId]);
 
   return null;
 }
