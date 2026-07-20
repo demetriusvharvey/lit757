@@ -1,0 +1,1 @@
+validate spatial discovery production build
