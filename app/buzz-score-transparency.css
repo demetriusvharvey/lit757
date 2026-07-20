@@ -1,0 +1,18 @@
+@media (max-width:1023px){
+  .buzz-proof-badge{display:inline-flex;align-items:center;gap:5px;width:max-content;max-width:100%;min-height:20px;margin-top:3px;padding:0 7px;border:1px solid rgba(255,255,255,.12);border-radius:999px;background:rgba(255,255,255,.05);color:#aeb6c2;font-size:7px;font-weight:900;letter-spacing:.08em;line-height:1;white-space:nowrap}
+  .buzz-proof-badge:before{content:"";width:6px;height:6px;border-radius:50%;background:#89919e}
+  .buzz-proof-badge[data-mode="live"]{border-color:rgba(61,220,151,.3);background:rgba(61,220,151,.1);color:#83efbd}.buzz-proof-badge[data-mode="live"]:before{background:#3ddc97;box-shadow:0 0 0 3px rgba(61,220,151,.12)}
+  .buzz-proof-badge[data-mode="forecast"]{border-color:rgba(196,181,253,.25);background:rgba(139,92,246,.08);color:#c4b5fd}.buzz-proof-badge[data-mode="forecast"]:before{background:#9d7bf4}
+  .buzz-proof-badge[data-confidence="low"]{opacity:.82}
+  .buzz-map-preview .buzz-proof-badge{grid-column:2;margin-top:4px}
+  .buzz-detail-sheet .buzz-proof-badge{margin-top:8px;font-size:8px;min-height:23px}
+  .buzz-score-legend{display:flex;align-items:center;gap:8px;margin:8px 2px 0;color:#8e96a3;font-size:8px;line-height:1.35}.buzz-score-legend b{color:#d6dae1}.buzz-score-legend i{width:6px;height:6px;border-radius:50%;background:#3ddc97}
+}
+
+@media (min-width:1024px){
+  .buzz-proof-badge{display:inline-flex;align-items:center;gap:6px;width:max-content;min-height:23px;margin-top:8px;padding:0 8px;border:1px solid rgba(255,255,255,.12);border-radius:999px;background:rgba(255,255,255,.05);color:#aeb6c2;font-size:8px;font-weight:900;letter-spacing:.08em;white-space:nowrap}.buzz-proof-badge:before{content:"";width:6px;height:6px;border-radius:50%;background:#89919e}
+  .buzz-proof-badge[data-mode="live"]{border-color:rgba(61,220,151,.3);background:rgba(61,220,151,.1);color:#83efbd}.buzz-proof-badge[data-mode="live"]:before{background:#3ddc97;box-shadow:0 0 0 3px rgba(61,220,151,.12)}
+  .buzz-proof-badge[data-mode="forecast"]{border-color:rgba(196,181,253,.25);background:rgba(139,92,246,.08);color:#c4b5fd}.buzz-proof-badge[data-mode="forecast"]:before{background:#9d7bf4}
+  .buzz-desktop-detail .buzz-proof-badge{margin:8px 0 3px}
+  .buzz-score-legend{display:flex;align-items:center;gap:8px;margin-top:8px;color:#8e96a3;font-size:9px}.buzz-score-legend b{color:#d6dae1}.buzz-score-legend i{width:6px;height:6px;border-radius:50%;background:#3ddc97}
+}
