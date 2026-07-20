@@ -13,7 +13,7 @@ declare global {
 
 const LOCATION_STORAGE_KEY = "lit757-user-location";
 const LOCATION_MODE_KEY = "lit757-location-enabled";
-const LOCATION_ZOOM = 14.8;
+const LOCATION_ZOOM = 14.2;
 
 export default function LocationExperience() {
   useEffect(() => {
@@ -21,20 +21,14 @@ export default function LocationExperience() {
     let controlsHost: HTMLDivElement | null = null;
     let watchId: number | null = null;
     let centerTimers: number[] = [];
+    let userMovedMap = false;
+    let mapListenersInstalled = false;
 
-    /*
-     * Capture the live map through Mapbox's instance methods. Patching the
-     * constructor is unreliable in bundled Safari builds because the export can
-     * be immutable. Every map uses resize/easeTo/fitBounds, so these wrappers
-     * reliably register the real instance without touching MobileHome state.
-     */
     if (!window.__lit757MapCaptureInstalled) {
       window.__lit757MapCaptureInstalled = true;
-      const proto = mapboxgl.Map.prototype as mapboxgl.Map & Record<string, unknown>;
       const originalResize = mapboxgl.Map.prototype.resize;
       const originalEaseTo = mapboxgl.Map.prototype.easeTo;
       const originalJumpTo = mapboxgl.Map.prototype.jumpTo;
-      const originalFitBounds = mapboxgl.Map.prototype.fitBounds;
 
       mapboxgl.Map.prototype.resize = function (...args) {
         window.__lit757Map = this;
@@ -48,20 +42,6 @@ export default function LocationExperience() {
         window.__lit757Map = this;
         return originalJumpTo.apply(this, args);
       };
-      mapboxgl.Map.prototype.fitBounds = function (...args) {
-        window.__lit757Map = this;
-        const enabled = localStorage.getItem(LOCATION_MODE_KEY) === "true";
-        const saved = window.__lit757UserLocation;
-        if (enabled && saved) {
-          originalJumpTo.call(this, {
-            center: [saved.longitude, saved.latitude],
-            zoom: LOCATION_ZOOM,
-          });
-          return this;
-        }
-        return originalFitBounds.apply(this, args);
-      };
-      void proto;
     }
 
     const clearCenterTimers = () => {
@@ -72,17 +52,35 @@ export default function LocationExperience() {
     const discoverMap = () => {
       const map = window.__lit757Map;
       if (map) return map;
-      const canvas = document.querySelector<HTMLCanvasElement>(".mobile-native-map .mapboxgl-canvas");
-      if (!canvas) return undefined;
-      // Triggering a resize event causes the patched resize method to capture
-      // the instance in builds where Mapbox has not animated yet.
+      if (!document.querySelector(".mobile-native-map .mapboxgl-canvas")) return undefined;
       window.dispatchEvent(new Event("resize"));
       return window.__lit757Map;
     };
 
-    const centerMap = (latitude: number, longitude: number, immediate = false) => {
+    const installMapListeners = (map: mapboxgl.Map) => {
+      if (mapListenersInstalled) return;
+      mapListenersInstalled = true;
+      map.on("dragstart", () => {
+        userMovedMap = true;
+        clearCenterTimers();
+      });
+      map.on("zoomstart", event => {
+        if (event.originalEvent) {
+          userMovedMap = true;
+          clearCenterTimers();
+        }
+      });
+      map.on("rotatestart", () => {
+        userMovedMap = true;
+        clearCenterTimers();
+      });
+    };
+
+    const centerMap = (latitude: number, longitude: number, immediate = false, force = false) => {
+      if (userMovedMap && !force) return false;
       const map = discoverMap();
       if (!map) return false;
+      installMapListeners(map);
       map.resize();
       const options = { center: [longitude, latitude] as [number, number], zoom: LOCATION_ZOOM };
       if (immediate) map.jumpTo(options);
@@ -90,18 +88,14 @@ export default function LocationExperience() {
       return true;
     };
 
-    const lockToLocation = (latitude: number, longitude: number) => {
+    const focusLocationOnce = (latitude: number, longitude: number, force = false) => {
       clearCenterTimers();
-      let attempts = 0;
-      const retry = () => {
-        if (destroyed) return;
-        if (!centerMap(latitude, longitude, attempts > 2) && attempts++ < 80) {
-          centerTimers.push(window.setTimeout(retry, 100));
-        }
-      };
-      retry();
-      [250, 600, 1100, 1800, 3000].forEach((delay, index) => {
-        centerTimers.push(window.setTimeout(() => centerMap(latitude, longitude, index >= 2), delay));
+      userMovedMap = false;
+      const attempts = [0, 250, 700, 1400];
+      attempts.forEach((delay, index) => {
+        centerTimers.push(window.setTimeout(() => {
+          if (!destroyed) centerMap(latitude, longitude, index === attempts.length - 1, force);
+        }, delay));
       });
     };
 
@@ -111,14 +105,14 @@ export default function LocationExperience() {
       if (label) label.textContent = text;
     };
 
-    const saveAndCenter = (position: GeolocationPosition) => {
+    const savePosition = (position: GeolocationPosition, shouldFocus = false) => {
       const { latitude, longitude } = position.coords;
       const saved = { latitude, longitude, updatedAt: Date.now() };
       window.__lit757UserLocation = saved;
       localStorage.setItem(LOCATION_STORAGE_KEY, JSON.stringify(saved));
       localStorage.setItem(LOCATION_MODE_KEY, "true");
       setLabel("Near me", true);
-      lockToLocation(latitude, longitude);
+      if (shouldFocus) focusLocationOnce(latitude, longitude, true);
     };
 
     const onLocationError = () => {
@@ -126,23 +120,23 @@ export default function LocationExperience() {
       setLabel("Enable location", false);
     };
 
-    const requestLocation = () => {
+    const requestLocation = (forceFocus = true) => {
       if (!navigator.geolocation) return onLocationError();
       setLabel("Locating…", true);
-      navigator.geolocation.getCurrentPosition(saveAndCenter, onLocationError, {
-        enableHighAccuracy: true,
-        timeout: 15000,
-        maximumAge: 0,
-      });
+      navigator.geolocation.getCurrentPosition(
+        position => savePosition(position, forceFocus),
+        onLocationError,
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+      );
     };
 
     const startWatching = () => {
       if (!navigator.geolocation || watchId !== null) return;
-      watchId = navigator.geolocation.watchPosition(saveAndCenter, () => undefined, {
-        enableHighAccuracy: true,
-        timeout: 20000,
-        maximumAge: 15000,
-      });
+      watchId = navigator.geolocation.watchPosition(
+        position => savePosition(position, false),
+        () => undefined,
+        { enableHighAccuracy: true, timeout: 20000, maximumAge: 15000 }
+      );
     };
 
     const installControls = () => {
@@ -163,7 +157,7 @@ export default function LocationExperience() {
         mapSection.appendChild(controlsHost);
       }
 
-      controlsHost.querySelector(".location-center-button")?.addEventListener("click", requestLocation);
+      controlsHost.querySelector(".location-center-button")?.addEventListener("click", () => requestLocation(true));
 
       const savedRaw = localStorage.getItem(LOCATION_STORAGE_KEY);
       const enabled = localStorage.getItem(LOCATION_MODE_KEY) !== "false";
@@ -171,16 +165,15 @@ export default function LocationExperience() {
         try {
           const saved = JSON.parse(savedRaw) as { latitude: number; longitude: number; updatedAt: number };
           window.__lit757UserLocation = saved;
-          localStorage.setItem(LOCATION_MODE_KEY, "true");
           setLabel("Near me", true);
-          lockToLocation(saved.latitude, saved.longitude);
-          requestLocation();
+          focusLocationOnce(saved.latitude, saved.longitude);
+          requestLocation(false);
           startWatching();
           return;
         } catch {}
       }
       if (enabled) {
-        requestLocation();
+        requestLocation(true);
         startWatching();
       }
     };
