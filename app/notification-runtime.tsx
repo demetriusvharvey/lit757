@@ -42,11 +42,12 @@ function venueName(venueId: string) {
   return venues.find(venue => String(venue.id) === String(venueId))?.name || null;
 }
 
-function decodePublicKey(publicKey: string) {
+function decodePublicKey(publicKey: string): ArrayBuffer {
   const padding = "=".repeat((4 - (publicKey.length % 4)) % 4);
   const base64 = (publicKey + padding).replace(/-/g, "+").replace(/_/g, "/");
   const raw = atob(base64);
-  return Uint8Array.from([...raw].map(character => character.charCodeAt(0)));
+  const bytes = Uint8Array.from([...raw].map(character => character.charCodeAt(0)));
+  return bytes.buffer as ArrayBuffer;
 }
 
 async function registerPush(accessToken: string) {
