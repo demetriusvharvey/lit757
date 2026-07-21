@@ -1,0 +1,13 @@
+.buzz-list-photo{background:linear-gradient(145deg,#20193a,#111827)}
+.buzz-list-photo img{width:72%;height:72%;object-fit:contain;padding:6px;border-radius:14px;background:#fff;box-shadow:0 8px 22px rgba(0,0,0,.34)}
+.buzz-detail-photo{background:radial-gradient(circle at 50% 42%,rgba(139,92,246,.28),transparent 50%),linear-gradient(145deg,#171224,#0d131c)}
+.buzz-detail-photo img{width:58%;height:58%;object-fit:contain;padding:12px;border-radius:28px;background:#fff;box-shadow:0 18px 45px rgba(0,0,0,.42)}
+.buzz-truth-note{display:flex;gap:10px;margin-top:10px;padding:12px 13px;border:1px solid #294253;border-radius:15px;background:linear-gradient(145deg,rgba(56,189,248,.08),rgba(15,23,42,.52))}
+.buzz-truth-note svg{flex:0 0 auto;width:17px;color:#38bdf8}
+.buzz-truth-note strong{display:block;font-size:10px}
+.buzz-truth-note p{margin:4px 0 0;color:#9facba;font-size:9px;line-height:1.5}
+
+@media(max-width:900px){
+  .buzz-map-mode{top:54px;right:auto;left:10px;transform:none}
+  .buzz-detail-photo img{width:54%;height:54%;padding:10px;border-radius:23px}
+}
