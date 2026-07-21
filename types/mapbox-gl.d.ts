@@ -6,4 +6,8 @@ declare module "mapbox-gl" {
     type: "styleimagemissing";
     target: Map;
   }
+
+  export interface Map {
+    loadImage(url: string): Promise<{ data: any }>;
+  }
 }
