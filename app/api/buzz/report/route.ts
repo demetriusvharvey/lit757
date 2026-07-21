@@ -29,6 +29,37 @@ function meters(lat1: number, lng1: number, lat2: number, lng2: number) {
   return 6_371_000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+async function awardBuzzPoints(userId: string, venueId: string, reportId: string, firstVerifiedReport: boolean) {
+  const rows = [{
+    user_id: userId,
+    action: "verified_crowd_vote",
+    points: 10,
+    reference_key: reportId,
+    metadata: { venueId },
+  }];
+  if (firstVerifiedReport) rows.push({
+    user_id: userId,
+    action: "first_verified_crowd_vote",
+    points: 15,
+    reference_key: reportId,
+    metadata: { venueId },
+  });
+
+  const { error } = await db.from("points_ledger").insert(rows);
+  if (error) {
+    console.error("Could not award Buzz Points", error.message);
+    return { pointsAwarded: 0, totalPoints: null as number | null };
+  }
+
+  const { error: refreshError } = await db.rpc("refresh_member_points", { target_user: userId });
+  if (refreshError) console.error("Could not refresh member points", refreshError.message);
+  const { data: profile } = await db.from("member_profiles").select("points").eq("user_id", userId).maybeSingle();
+  return {
+    pointsAwarded: firstVerifiedReport ? 25 : 10,
+    totalPoints: profile?.points == null ? null : Number(profile.points),
+  };
+}
+
 export async function POST(request: Request) {
   const member = await getRequestUser(request);
   if (!member) return NextResponse.json({ success: false, error: "Sign in to verify live activity" }, { status: 401 });
@@ -68,11 +99,11 @@ export async function POST(request: Request) {
     .gte("observed_at", tenMinutesAgo)
     .limit(1)
     .maybeSingle();
-  if (duplicate) return NextResponse.json({ success: false, error: "You already reported this place recently" }, { status: 429 });
+  if (duplicate) return NextResponse.json({ success: false, error: "You already voted on this place recently" }, { status: 429 });
 
   const observedAt = new Date();
   const expiresAt = new Date(observedAt.getTime() + 45 * 60 * 1000);
-  const { error: insertError } = await db.from("buzz_user_reports").insert({
+  const { data: insertedReport, error: insertError } = await db.from("buzz_user_reports").insert({
     venue_id: venueId,
     user_id: member.id,
     crowd_level: crowdLevel,
@@ -83,11 +114,11 @@ export async function POST(request: Request) {
     verified_nearby: verifiedNearby,
     observed_at: observedAt.toISOString(),
     expires_at: expiresAt.toISOString(),
-  });
+  }).select("id").single();
   if (insertError) return NextResponse.json({ success: false, error: insertError.message }, { status: 500 });
 
   if (!verifiedNearby) {
-    return NextResponse.json({ success: true, accepted: true, verifiedNearby: false, distanceMeters: Math.round(distance), message: "Saved, but not used in Buzz because the location could not be verified nearby." });
+    return NextResponse.json({ success: true, accepted: true, verifiedNearby: false, distanceMeters: Math.round(distance), message: "Vote saved, but it was not close enough to affect Buzz or earn points." });
   }
 
   const since = new Date(Date.now() - 45 * 60 * 1000).toISOString();
@@ -131,6 +162,16 @@ export async function POST(request: Request) {
   });
 
   await saveBuzzSignals(db, venueId, signals);
-  const score = await recomputeBuzzScore(db, venue as VenueForBuzz);
-  return NextResponse.json({ success: true, accepted: true, verifiedNearby: true, distanceMeters: Math.round(distance), reportCount: reports?.length || 1, buzz: score });
+  const buzz = await recomputeBuzzScore(db, venue as VenueForBuzz);
+  const points = await awardBuzzPoints(member.id, venueId, String(insertedReport.id), (reports?.length || 0) === 1);
+
+  return NextResponse.json({
+    success: true,
+    accepted: true,
+    verifiedNearby: true,
+    distanceMeters: Math.round(distance),
+    reportCount: reports?.length || 1,
+    buzz,
+    ...points,
+  });
 }
