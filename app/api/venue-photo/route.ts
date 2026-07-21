@@ -101,13 +101,16 @@ function searchPoints(latitude: number, longitude: number) {
 }
 
 async function findPanorama(apiKey: string, latitude: number, longitude: number) {
-  const results = await Promise.all(searchPoints(latitude, longitude).map(async ([lat, lng]) => {
+  const settled = await Promise.allSettled(searchPoints(latitude, longitude).map(async ([lat, lng]) => {
     const metadataUrl = new URL("https://maps.googleapis.com/maps/api/streetview/metadata");
     metadataUrl.searchParams.set("location", `${lat},${lng}`);
     metadataUrl.searchParams.set("radius", "70");
     metadataUrl.searchParams.set("source", "outdoor");
     metadataUrl.searchParams.set("key", apiKey);
-    const response = await fetch(metadataUrl, { next: { revalidate: 2_592_000 } });
+    const response = await fetch(metadataUrl, {
+      next: { revalidate: 2_592_000 },
+      signal: AbortSignal.timeout(5_000),
+    });
     if (!response.ok) return null;
     const metadata = await response.json() as StreetViewMetadata;
     const panoLat = Number(metadata.location?.lat);
@@ -119,8 +122,9 @@ async function findPanorama(apiKey: string, latitude: number, longitude: number)
   }));
 
   const unique = new Map<string, PanoramaCandidate>();
-  for (const result of results) {
-    if (!result) continue;
+  for (const item of settled) {
+    if (item.status !== "fulfilled" || !item.value) continue;
+    const result = item.value;
     const current = unique.get(result.panoId);
     if (!current || result.distance < current.distance) unique.set(result.panoId, result);
   }
@@ -132,48 +136,67 @@ async function findPanorama(apiKey: string, latitude: number, longitude: number)
 }
 
 async function fetchStorefrontImage(apiKey: string, latitude: number, longitude: number) {
-  const panorama = await findPanorama(apiKey, latitude, longitude);
-  if (!panorama) return null;
-  const imageUrl = new URL("https://maps.googleapis.com/maps/api/streetview");
-  imageUrl.searchParams.set("size", "1280x720");
-  imageUrl.searchParams.set("pano", panorama.panoId);
-  imageUrl.searchParams.set("heading", headingTo(panorama.lat, panorama.lng, latitude, longitude).toFixed(1));
-  imageUrl.searchParams.set("pitch", "3");
-  imageUrl.searchParams.set("fov", panorama.distance < 18 ? "82" : panorama.distance > 55 ? "58" : "68");
-  imageUrl.searchParams.set("return_error_code", "true");
-  imageUrl.searchParams.set("key", apiKey);
-  const imageResponse = await fetch(imageUrl, { next: { revalidate: 2_592_000 } });
-  if (!imageResponse.ok || !(imageResponse.headers.get("content-type") || "").startsWith("image/")) return null;
-  return { imageResponse, panorama };
+  try {
+    const panorama = await findPanorama(apiKey, latitude, longitude);
+    if (!panorama) return null;
+    const imageUrl = new URL("https://maps.googleapis.com/maps/api/streetview");
+    imageUrl.searchParams.set("size", "1280x720");
+    imageUrl.searchParams.set("pano", panorama.panoId);
+    imageUrl.searchParams.set("heading", headingTo(panorama.lat, panorama.lng, latitude, longitude).toFixed(1));
+    imageUrl.searchParams.set("pitch", "3");
+    imageUrl.searchParams.set("fov", panorama.distance < 18 ? "82" : panorama.distance > 55 ? "58" : "68");
+    imageUrl.searchParams.set("return_error_code", "true");
+    imageUrl.searchParams.set("key", apiKey);
+    const imageResponse = await fetch(imageUrl, {
+      next: { revalidate: 2_592_000 },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!imageResponse.ok || !(imageResponse.headers.get("content-type") || "").startsWith("image/")) return null;
+    return { imageResponse, panorama };
+  } catch {
+    return null;
+  }
 }
 
 async function fetchPlacePhoto(apiKey: string, place: GooglePlaceDetails) {
-  const photo = chooseBestPhoto(place.photos || []);
-  if (!photo?.name) return null;
-  const mediaResponse = await fetch(
-    `https://places.googleapis.com/v1/${photo.name}/media?maxWidthPx=1280&maxHeightPx=840&skipHttpRedirect=true`,
-    { headers: { "X-Goog-Api-Key": apiKey }, next: { revalidate: 604800 } },
-  );
-  if (!mediaResponse.ok) return null;
-  const payload = await mediaResponse.json() as { photoUri?: string };
-  if (!payload.photoUri) return null;
-  const imageResponse = await fetch(payload.photoUri, { next: { revalidate: 604800 } });
-  return imageResponse.ok ? imageResponse : null;
+  try {
+    const photo = chooseBestPhoto(place.photos || []);
+    if (!photo?.name) return null;
+    const mediaResponse = await fetch(
+      `https://places.googleapis.com/v1/${photo.name}/media?maxWidthPx=1280&maxHeightPx=840&skipHttpRedirect=true`,
+      {
+        headers: { "X-Goog-Api-Key": apiKey },
+        next: { revalidate: 604800 },
+        signal: AbortSignal.timeout(8_000),
+      },
+    );
+    if (!mediaResponse.ok) return null;
+    const payload = await mediaResponse.json() as { photoUri?: string };
+    if (!payload.photoUri) return null;
+    const imageResponse = await fetch(payload.photoUri, {
+      next: { revalidate: 604800 },
+      signal: AbortSignal.timeout(10_000),
+    });
+    return imageResponse.ok && (imageResponse.headers.get("content-type") || "").startsWith("image/") ? imageResponse : null;
+  } catch {
+    return null;
+  }
 }
 
 function escapeXml(value: string) {
   return value.replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" }[character] || character));
 }
 
-function fallbackImage(name: string, category: string) {
+function fallbackImage(name: string, category: string, reason = "fallback") {
   const selected = FALLBACKS[category] || FALLBACKS.other;
   const safeName = escapeXml(name || selected.label);
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#151821"/><stop offset="1" stop-color="#292235"/></linearGradient><radialGradient id="r"><stop stop-color="#8b5cf6" stop-opacity=".28"/><stop offset="1" stop-color="#8b5cf6" stop-opacity="0"/></radialGradient></defs><rect width="1280" height="720" fill="url(#g)"/><circle cx="1000" cy="80" r="500" fill="url(#r)"/><text x="90" y="250" fill="#b9a4ff" font-size="96" font-family="Arial, sans-serif">${selected.glyph}</text><text x="90" y="390" fill="#fff" font-size="54" font-weight="700" font-family="Arial, sans-serif">${safeName}</text><text x="90" y="455" fill="#aab0bd" font-size="28" font-family="Arial, sans-serif">${selected.label}</text><text x="90" y="620" fill="#817e8b" font-size="21" font-family="Arial, sans-serif">BUZZ · PHOTO COMING SOON</text></svg>`;
   return new Response(svg, {
     headers: {
       "Content-Type": "image/svg+xml; charset=utf-8",
-      "Cache-Control": "public, s-maxage=86400, stale-while-revalidate=604800",
+      "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=86400",
       "X-Venue-Photo-Source": "buzz-category-fallback",
+      "X-Venue-Photo-Reason": encodeURIComponent(reason.slice(0, 120)),
     },
   });
 }
@@ -188,44 +211,50 @@ export async function GET(request: Request) {
   const requestedLat = Number(url.searchParams.get("lat"));
   const requestedLng = Number(url.searchParams.get("lng"));
 
-  if (!placesKey || !isValidPlaceId(placeId)) return fallbackImage(name, category);
+  if (!placesKey) return fallbackImage(name, category, "google-places-key-missing");
+  if (!isValidPlaceId(placeId)) return fallbackImage(name, category, "google-place-id-missing-or-invalid");
 
-  const detailsResponse = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
-    headers: { "X-Goog-Api-Key": placesKey, "X-Goog-FieldMask": "id,displayName,location,photos" },
-    next: { revalidate: 604800 },
-  });
-  if (!detailsResponse.ok) return fallbackImage(name, category);
+  try {
+    const detailsResponse = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
+      headers: { "X-Goog-Api-Key": placesKey, "X-Goog-FieldMask": "id,displayName,location,photos" },
+      next: { revalidate: 604800 },
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!detailsResponse.ok) return fallbackImage(name, category, `place-details-${detailsResponse.status}`);
 
-  const place = await detailsResponse.json() as GooglePlaceDetails;
-  const placeLat = Number(place.location?.latitude);
-  const placeLng = Number(place.location?.longitude);
-  const latitude = Number.isFinite(placeLat) ? placeLat : requestedLat;
-  const longitude = Number.isFinite(placeLng) ? placeLng : requestedLng;
+    const place = await detailsResponse.json() as GooglePlaceDetails;
+    const placeLat = Number(place.location?.latitude);
+    const placeLng = Number(place.location?.longitude);
+    const latitude = Number.isFinite(placeLat) ? placeLat : requestedLat;
+    const longitude = Number.isFinite(placeLng) ? placeLng : requestedLng;
 
-  if (streetViewKey && Number.isFinite(latitude) && Number.isFinite(longitude)) {
-    const storefront = await fetchStorefrontImage(streetViewKey, latitude, longitude);
-    if (storefront) {
-      return new Response(await storefront.imageResponse.arrayBuffer(), {
-        headers: {
-          "Content-Type": storefront.imageResponse.headers.get("content-type") || "image/jpeg",
-          "Cache-Control": "public, s-maxage=2592000, stale-while-revalidate=7776000",
-          "X-Venue-Photo-Source": "google-street-view-storefront",
-          "X-Street-View-Date": storefront.panorama.date,
-          "X-Street-View-Distance": storefront.panorama.distance.toFixed(1),
-          "X-Venue-Name": encodeURIComponent(place.displayName?.text || name),
-        },
-      });
+    if (streetViewKey && Number.isFinite(latitude) && Number.isFinite(longitude)) {
+      const storefront = await fetchStorefrontImage(streetViewKey, latitude, longitude);
+      if (storefront) {
+        return new Response(await storefront.imageResponse.arrayBuffer(), {
+          headers: {
+            "Content-Type": storefront.imageResponse.headers.get("content-type") || "image/jpeg",
+            "Cache-Control": "public, s-maxage=2592000, stale-while-revalidate=7776000",
+            "X-Venue-Photo-Source": "google-street-view-storefront",
+            "X-Street-View-Date": storefront.panorama.date,
+            "X-Street-View-Distance": storefront.panorama.distance.toFixed(1),
+            "X-Venue-Name": encodeURIComponent(place.displayName?.text || name),
+          },
+        });
+      }
     }
-  }
 
-  const placePhoto = await fetchPlacePhoto(placesKey, place);
-  if (!placePhoto) return fallbackImage(place.displayName?.text || name, category);
-  return new Response(await placePhoto.arrayBuffer(), {
-    headers: {
-      "Content-Type": placePhoto.headers.get("content-type") || "image/jpeg",
-      "Cache-Control": "public, s-maxage=604800, stale-while-revalidate=2592000",
-      "X-Venue-Photo-Source": "google-place-photo-ranked",
-      "X-Venue-Name": encodeURIComponent(place.displayName?.text || name),
-    },
-  });
+    const placePhoto = await fetchPlacePhoto(placesKey, place);
+    if (!placePhoto) return fallbackImage(place.displayName?.text || name, category, "no-usable-google-image");
+    return new Response(await placePhoto.arrayBuffer(), {
+      headers: {
+        "Content-Type": placePhoto.headers.get("content-type") || "image/jpeg",
+        "Cache-Control": "public, s-maxage=604800, stale-while-revalidate=2592000",
+        "X-Venue-Photo-Source": "google-place-photo-ranked",
+        "X-Venue-Name": encodeURIComponent(place.displayName?.text || name),
+      },
+    });
+  } catch (error) {
+    return fallbackImage(name, category, error instanceof Error ? error.message : "google-provider-error");
+  }
 }
