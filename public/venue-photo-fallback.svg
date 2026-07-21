@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
+  <title id="title">Buzz venue photo coming soon</title>
+  <desc id="desc">A branded Buzz placeholder used when a verified venue photo is unavailable.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#10151d"/>
+      <stop offset="1" stop-color="#281d3e"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="80%" cy="15%" r="65%">
+      <stop offset="0" stop-color="#8b5cf6" stop-opacity=".38"/>
+      <stop offset="1" stop-color="#8b5cf6" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1280" height="720" fill="url(#bg)"/>
+  <rect width="1280" height="720" fill="url(#glow)"/>
+  <circle cx="118" cy="114" r="44" fill="#ff6b43"/>
+  <path d="M98 115h40M118 95v40" stroke="#fff" stroke-width="9" stroke-linecap="round"/>
+  <text x="88" y="315" fill="#fff" font-size="88" font-weight="800" font-family="Arial, Helvetica, sans-serif">BUZZ</text>
+  <text x="88" y="390" fill="#bbc2ce" font-size="34" font-family="Arial, Helvetica, sans-serif">Verified venue photo coming soon</text>
+  <text x="88" y="610" fill="#777f8c" font-size="25" font-family="Arial, Helvetica, sans-serif">Real place photos only · No random imagery</text>
+</svg>
