@@ -30,6 +30,7 @@ function signalPoints(signal: BuzzSignal) {
     case "ticket_inventory": return Math.max(clamp(value / 100, 0, 1) * 20, scarcity(signal.metadata) * 0.2);
     case "ticket_scans": return clamp(value / 100, 0, 1) * 65;
     case "predicted_attendance": return clamp(value / 100, 0, 1) * 10;
+    case "traffic_congestion": return clamp(value / 100, 0, 1) * 8;
     default: return 0;
   }
 }
@@ -45,6 +46,7 @@ function signalLabel(signal: BuzzSignal) {
     ticket_inventory: "Ticket scarcity",
     ticket_scans: "Entry scans",
     predicted_attendance: "Predicted attendance",
+    traffic_congestion: "Nearby traffic congestion",
   };
   return labels[signal.type];
 }
