@@ -28,6 +28,7 @@ export function getVenueImage(venue: VenueImageInput) {
   const params = new URLSearchParams({
     name: normalizedText(venue.name) || "Local place",
     category: imageCategory(venue),
+    v: "3",
   });
 
   const placeId = normalizedText(venue.googlePlaceId);

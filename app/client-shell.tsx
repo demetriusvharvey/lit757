@@ -6,6 +6,7 @@ import { MapControllerProvider } from "./map-controller";
 
 // The unified map is the primary production discovery experience.
 const BuzzMapApp = dynamic(() => import("./buzz-map-app"), { ssr: false });
+const VenuePhotoRuntime = dynamic(() => import("./venue-photo-runtime"), { ssr: false });
 const NotificationRuntime = dynamic(() => import("./notification-runtime"), { ssr: false });
 const NotificationAuth = dynamic(() => import("./notification-auth"), { ssr: false });
 
@@ -18,6 +19,7 @@ export default function ClientShell() {
       {!isDistrictExperience && (
         <>
           <BuzzMapApp />
+          <VenuePhotoRuntime />
           <NotificationRuntime />
           <NotificationAuth />
         </>
