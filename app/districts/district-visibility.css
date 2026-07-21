@@ -1,0 +1,18 @@
+/* The desktop Buzz shell hides the legacy route wrapper globally.
+   Districts is a dedicated route rendered inside that wrapper, so explicitly
+   restore it whenever the district page is present. */
+.legacy-app-shell:has(.district-shell) {
+  display: block !important;
+}
+
+@media (max-width: 1023px) {
+  html,
+  body {
+    overflow: auto !important;
+  }
+
+  html.mobile-home-mounted .legacy-app-shell:has(.district-shell),
+  .legacy-app-shell:has(.district-shell) {
+    display: block !important;
+  }
+}
