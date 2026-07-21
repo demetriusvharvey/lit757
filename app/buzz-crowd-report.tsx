@@ -122,9 +122,13 @@ export default function BuzzCrowdReport() {
           setTone("error");
         } else {
           const scoreText = payload.buzz?.score != null ? ` Buzz is now ${payload.buzz.score}.` : "";
-          setMessage(`Verified. Thanks for making Buzz more accurate.${scoreText}`);
+          const proofText = payload.reportCount === 1 ? " You’re the first verified report." : ` ${payload.reportCount} verified reports are now active.`;
+          setMessage(`Verified. Thanks for making Buzz more accurate.${scoreText}${proofText}`);
           setTone("success");
-          window.setTimeout(() => setDismissedId(selected.id), 2600);
+          window.dispatchEvent(new CustomEvent("lit757:buzz-report-saved", {
+            detail: { venueId: selected.id, reportCount: payload.reportCount, buzz: payload.buzz },
+          }));
+          window.setTimeout(() => setDismissedId(selected.id), 3200);
         }
       } catch (error) {
         setMessage(error instanceof Error ? error.message : "Could not submit that report");
