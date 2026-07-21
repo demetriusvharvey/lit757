@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { MapControllerProvider } from "./map-controller";
 
+// The unified map is the primary production discovery experience.
 const BuzzMapApp = dynamic(() => import("./buzz-map-app"), { ssr: false });
 const NotificationRuntime = dynamic(() => import("./notification-runtime"), { ssr: false });
 const NotificationAuth = dynamic(() => import("./notification-auth"), { ssr: false });
