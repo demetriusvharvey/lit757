@@ -1,0 +1,36 @@
+name: Event discovery sync
+
+on:
+  schedule:
+    - cron: "23 */4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: event-discovery-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Sync ticketed and local events
+        env:
+          BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          : "${BASE_URL:?Add BUZZ_PRODUCTION_URL as a GitHub Actions secret}"
+          : "${CRON_SECRET:?Add CRON_SECRET as a GitHub Actions secret}"
+          BASE_URL="${BASE_URL%/}"
+
+          curl --silent --show-error --fail-with-body --retry 2 --max-time 55 \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${BASE_URL}/api/fetch-events"
+
+          curl --silent --show-error --fail-with-body --retry 2 --max-time 55 \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${BASE_URL}/api/events/local-calendar"

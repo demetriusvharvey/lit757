@@ -1,0 +1,36 @@
+name: Buzz quarter-hour refresh
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: buzz-quarter-hour-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Refresh traffic and first-party signals
+        env:
+          BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          : "${BASE_URL:?Add BUZZ_PRODUCTION_URL as a GitHub Actions secret}"
+          : "${CRON_SECRET:?Add CRON_SECRET as a GitHub Actions secret}"
+          BASE_URL="${BASE_URL%/}"
+
+          curl --silent --show-error --fail-with-body --retry 2 --max-time 55 \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${BASE_URL}/api/buzz/traffic"
+
+          curl --silent --show-error --fail-with-body --retry 2 --max-time 55 \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${BASE_URL}/api/buzz/refresh?provider=first_party&limit=100"

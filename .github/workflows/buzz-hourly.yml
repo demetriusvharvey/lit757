@@ -1,0 +1,38 @@
+name: Buzz hourly provider refresh
+
+on:
+  schedule:
+    - cron: "7 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: buzz-hourly-provider-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Refresh optional provider signals
+        env:
+          BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          : "${BASE_URL:?Add BUZZ_PRODUCTION_URL as a GitHub Actions secret}"
+          : "${CRON_SECRET:?Add CRON_SECRET as a GitHub Actions secret}"
+          BASE_URL="${BASE_URL%/}"
+
+          for endpoint in \
+            "/api/buzz/refresh?provider=besttime&limit=25" \
+            "/api/buzz/refresh?provider=ticketmaster&limit=100" \
+            "/api/buzz/refresh?provider=predicthq&limit=10"
+          do
+            curl --silent --show-error --fail-with-body --retry 2 --max-time 55 \
+              -H "Authorization: Bearer ${CRON_SECRET}" \
+              "${BASE_URL}${endpoint}"
+          done

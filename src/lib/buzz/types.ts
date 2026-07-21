@@ -3,7 +3,8 @@ export type BuzzSignalFamily =
   | "verified_users"
   | "first_party_occupancy"
   | "commercial_demand"
-  | "event_forecast";
+  | "event_forecast"
+  | "mobility";
 
 export type BuzzSignalType =
   | "besttime_live"
@@ -14,7 +15,8 @@ export type BuzzSignalType =
   | "reservation_inventory"
   | "ticket_inventory"
   | "ticket_scans"
-  | "predicted_attendance";
+  | "predicted_attendance"
+  | "traffic_congestion";
 
 export type BuzzConfidence = "low" | "medium" | "high";
 export type BuzzScoreMode = "live" | "forecast";
