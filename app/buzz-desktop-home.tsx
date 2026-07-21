@@ -5,6 +5,7 @@ import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import "./buzz-desktop.css";
 import "./buzz-desktop-map-first.css";
+import "./buzz-area-picker.css";
 import {
   Bell,
   CalendarDays,
@@ -13,6 +14,7 @@ import {
   Heart,
   LocateFixed,
   MapPin,
+  MapPinned,
   Music2,
   Navigation,
   Search,
@@ -59,6 +61,16 @@ type LocationResult = {
   bbox: number[] | null;
 };
 
+type District = {
+  id: string;
+  shortName: string;
+  label: string;
+  score: number;
+  arrivalLabel: string;
+  radiusMiles: number;
+  center: { lat: number; lng: number };
+};
+
 type LoadRequest = { lat?: number; lng?: number; radius?: number; label?: string; bounds?: string };
 
 const categories = [
@@ -72,6 +84,7 @@ const categories = [
 ] as const;
 
 const FAVORITES_KEY = "lit757-mobile-favorites";
+const DEFAULT_CENTER: [number, number] = [-76.17, 36.88];
 const score = (venue: Venue) => venue.activity?.score ?? 70;
 const coords = (venue: Venue): [number, number] => [Number(venue.lng), Number(venue.lat)];
 const valid = (venue: Venue) => {
@@ -90,9 +103,12 @@ const categoryFor = (venue: Venue) => {
 };
 const statusFor = (venue: Venue) => score(venue) >= 88 ? "On fire" : score(venue) >= 76 ? "Heating up" : score(venue) >= 60 ? "Active" : "Chill";
 const distanceLabel = (value?: number | null) => value == null ? null : value < 0.1 ? "Here" : value < 10 ? `${value.toFixed(1)} mi` : `${Math.round(value)} mi`;
+const areaStatus = (district: District) => district.score >= 84 ? "Hot" : district.score >= 70 ? "Busy" : district.score >= 54 ? "Building" : "Calm";
 
 export default function BuzzDesktopHome() {
   const [venues, setVenues] = useState<Venue[]>([]);
+  const [districts, setDistricts] = useState<District[]>([]);
+  const [selectedDistrictId, setSelectedDistrictId] = useState<string | null>(null);
   const [active, setActive] = useState("All");
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -110,6 +126,11 @@ export default function BuzzDesktopHome() {
   const listRef = useRef<HTMLElement | null>(null);
   const mapSectionRef = useRef<HTMLDivElement | null>(null);
   const selectedRef = useRef<(venueId: string) => void>(() => undefined);
+
+  const selectedDistrict = useMemo(
+    () => districts.find(district => district.id === selectedDistrictId) || null,
+    [districts, selectedDistrictId],
+  );
 
   const loadNearby = useCallback(async (request: LoadRequest = {}) => {
     setLoading(true);
@@ -141,6 +162,25 @@ export default function BuzzDesktopHome() {
     }
     void loadNearby();
   }, [loadNearby]);
+
+  useEffect(() => {
+    let mounted = true;
+    const loadDistricts = async () => {
+      try {
+        const response = await fetch("/api/districts", { cache: "no-store" });
+        const payload = await response.json() as { districts?: District[] };
+        if (mounted) setDistricts(payload.districts || []);
+      } catch {
+        if (mounted) setDistricts([]);
+      }
+    };
+    void loadDistricts();
+    const interval = window.setInterval(loadDistricts, 5 * 60 * 1000);
+    return () => {
+      mounted = false;
+      window.clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     if (!searchOpen || query.trim().length < 2) {
@@ -187,7 +227,7 @@ export default function BuzzDesktopHome() {
     const map = new mapboxgl.Map({
       container: mapEl.current,
       style: "mapbox://styles/mapbox/dark-v11",
-      center: [-76.17, 36.88],
+      center: DEFAULT_CENTER,
       zoom: 9,
       minZoom: 3,
       maxZoom: 17,
@@ -264,12 +304,32 @@ export default function BuzzDesktopHome() {
     });
   }
 
+  async function chooseDistrict(district: District | null) {
+    setSelectedDistrictId(district?.id || null);
+    setActive("All");
+    setQuery("");
+    setSearchOpen(false);
+    if (!district) {
+      mapRef.current?.easeTo({ center: DEFAULT_CENTER, zoom: 9, duration: 650 });
+      await loadNearby();
+      return;
+    }
+    mapRef.current?.easeTo({ center: [district.center.lng, district.center.lat], zoom: 12.1, duration: 650 });
+    await loadNearby({
+      lat: district.center.lat,
+      lng: district.center.lng,
+      radius: Math.max(2, district.radiusMiles),
+      label: `in ${district.shortName}`,
+    });
+  }
+
   function useLocation() {
     if (!navigator.geolocation) {
       setError("Location is not available in this browser.");
       return;
     }
     setLoading(true);
+    setSelectedDistrictId(null);
     navigator.geolocation.getCurrentPosition(
       position => {
         const latitude = position.coords.latitude;
@@ -288,6 +348,7 @@ export default function BuzzDesktopHome() {
   async function chooseLocation(result: LocationResult) {
     setSearchOpen(false);
     setQuery("");
+    setSelectedDistrictId(null);
     if (result.bbox?.length === 4) {
       mapRef.current?.fitBounds([[result.bbox[0], result.bbox[1]], [result.bbox[2], result.bbox[3]]], { padding: 70, maxZoom: 13.5, duration: 700 });
     } else {
@@ -299,6 +360,7 @@ export default function BuzzDesktopHome() {
   function searchThisMap() {
     const bounds = mapRef.current?.getBounds();
     if (!bounds) return;
+    setSelectedDistrictId(null);
     void loadNearby({ bounds: [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()].join(","), label: "in this map area" });
   }
 
@@ -339,11 +401,24 @@ export default function BuzzDesktopHome() {
 
         <section className="buzz-desktop-discovery">
           <section ref={listRef} className="buzz-desktop-list">
-            <div className="buzz-section-heading"><div><span>HAPPENING NOW</span><h2>Things to do nearby</h2><p>{loading ? "Refreshing live activity…" : `${filtered.length} places ${scopeLabel}`}</p></div><button type="button" onClick={() => setSearchOpen(true)}>Search all <ChevronRight /></button></div>
+            {districts.length > 0 && (
+              <div className="buzz-area-picker">
+                <div className="buzz-area-picker-head"><span><MapPinned /> PICK AN AREA</span><small>Choose an area to see places there.</small></div>
+                <div className="buzz-area-picker-rail">
+                  <button type="button" className={!selectedDistrict ? "active" : ""} onClick={() => void chooseDistrict(null)}><strong>All 757</strong><small>Everywhere</small></button>
+                  {districts.map(district => (
+                    <button type="button" key={district.id} className={selectedDistrictId === district.id ? "active" : ""} onClick={() => void chooseDistrict(district)}>
+                      <strong>{district.shortName}</strong><small>{areaStatus(district)}</small>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="buzz-section-heading"><div><span>{selectedDistrict ? "IN THIS AREA" : "HAPPENING NOW"}</span><h2>{selectedDistrict?.shortName || "Things to do nearby"}</h2><p>{loading ? "Refreshing activity…" : `${filtered.length} places ${scopeLabel}`}</p></div><button type="button" onClick={() => setSearchOpen(true)}>Search all <ChevronRight /></button></div>
             {filtered.length ? <div className="buzz-desktop-card-grid">{filtered.slice(0, 12).map((venue, index) => <article key={venue.id} onClick={() => selectVenue(venue.id)}><div className="buzz-card-photo">{venue.photoUrl ? <img src={venue.photoUrl} alt="" /> : <span>{venue.name[0]}</span>}<div><b>{score(venue)}</b><small>BUZZ</small></div>{index === 0 && <em>BEST NOW</em>}</div><div className="buzz-card-copy"><small>{categoryFor(venue)} · {distanceLabel(venue.distanceMiles) || venue.city || "Nearby"}</small><h3>{venue.name}</h3><p>{venue.event?.name || venue.reason || "Available to do right now"}</p><span>{statusFor(venue)} · {venue.activity?.trendLabel || "Steady"}</span></div><button type="button" className={favoriteIds.has(venue.id) ? "saved" : ""} onClick={event => toggleFavorite(event, venue)} aria-label={favoriteIds.has(venue.id) ? `Remove ${venue.name} from saved places` : `Save ${venue.name}`}><Heart fill={favoriteIds.has(venue.id) ? "currentColor" : "none"} /></button></article>)}</div> : <div className="buzz-desktop-empty"><Search /><strong>No places match this view</strong><p>Try another category, clear the search, or choose a different area.</p></div>}
           </section>
 
-          <div ref={mapSectionRef} className="buzz-desktop-map-wrap"><div className="buzz-map-toolbar"><button type="button" onClick={useLocation}><LocateFixed /> Near me</button><button type="button" onClick={searchThisMap}><Search /> Search this map</button><span>{filtered.length} places</span></div><div className="buzz-desktop-map-hint">Click a place to see what is happening now</div><div ref={mapEl} className="buzz-desktop-map" /></div>
+          <div ref={mapSectionRef} className="buzz-desktop-map-wrap"><div className="buzz-map-toolbar"><button type="button" onClick={useLocation}><LocateFixed /> Near me</button><button type="button" onClick={searchThisMap}><Search /> Search this map</button><span>{selectedDistrict?.shortName || `${filtered.length} places`}</span></div><div className="buzz-desktop-map-hint">Click a place to see what is happening now</div><div ref={mapEl} className="buzz-desktop-map" /></div>
         </section>
       </main>
 
