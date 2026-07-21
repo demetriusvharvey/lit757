@@ -116,7 +116,7 @@ body.buzz-map-active{overflow:hidden;background:#080b10}
 @media(max-width:480px){
   .buzz-map-header{grid-template-columns:auto minmax(0,1fr) 38px}
   .buzz-map-header-actions button:first-child{display:none}.buzz-map-header-actions button:last-child{display:grid}
-  .buzz-map-search input::placeholder{font-size:0}.buzz-map-search input::placeholder:after{content:"Search"}
+  .buzz-map-search input::placeholder{font-size:10px}
   .buzz-map-list:not(.expanded) .buzz-map-list-scroll article{flex-basis:calc(100vw - 30px)}
   .buzz-vote-card>div button{font-size:7px}.buzz-vote-card>div button span{font-size:16px}
   .buzz-detail-actions{grid-template-columns:repeat(2,1fr)}
