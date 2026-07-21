@@ -13,7 +13,6 @@ const BuzzScoreTransparency = dynamic(() => import("./buzz-score-transparency"),
 const BuzzCrowdReport = dynamic(() => import("./buzz-crowd-report"), { ssr: false });
 const BuzzCommunityProof = dynamic(() => import("./buzz-community-proof"), { ssr: false });
 const DesktopHome = dynamic(() => import("./buzz-desktop-home"), { ssr: false });
-const DistrictLauncher = dynamic(() => import("./district-launcher"), { ssr: false });
 const NotificationRuntime = dynamic(() => import("./notification-runtime"), { ssr: false });
 const NotificationAuth = dynamic(() => import("./notification-auth"), { ssr: false });
 const NotificationTestButton = dynamic(() => import("./notification-test-button"), { ssr: false });
@@ -35,7 +34,6 @@ export default function ClientShell() {
           <BuzzCrowdReport />
           <BuzzCommunityProof />
           <DesktopHome />
-          <DistrictLauncher />
           <NotificationRuntime />
           <NotificationAuth />
           <NotificationTestButton />
