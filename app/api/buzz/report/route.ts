@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getRequestUser } from "../../../../src/lib/server-auth";
-import { recomputeBuzzScore, saveBuzzSignals } from "../../../../src/lib/buzz/repository";
+import { loadActiveSignals, recomputeBuzzScore, saveBuzzSignals } from "../../../../src/lib/buzz/repository";
+import { calculateBuzzScore } from "../../../../src/lib/buzz/score-v1";
 import type { BuzzSignal, VenueForBuzz } from "../../../../src/lib/buzz/types";
 
 export const dynamic = "force-dynamic";
@@ -14,11 +15,35 @@ const db = createClient(
 
 const allowedLevels = new Set(["quiet", "steady", "busy", "packed"]);
 
+type ScoreBeforeVote = {
+  score: number;
+  label: string;
+  mode: string;
+  confidence: string;
+  version: string;
+  computedAt: string;
+};
+
+type ReportRow = {
+  user_id?: string | null;
+  crowd_level: string;
+  observed_at: string;
+  expires_at: string;
+  metadata?: Record<string, unknown> | null;
+};
+
 function levelValue(level: string) {
   if (level === "packed") return 95;
   if (level === "busy") return 75;
   if (level === "steady") return 45;
   return 15;
+}
+
+function occupancyBand(value: number) {
+  if (value >= 85) return "packed";
+  if (value >= 60) return "busy";
+  if (value >= 30) return "steady";
+  return "quiet";
 }
 
 function meters(lat1: number, lng1: number, lat2: number, lng2: number) {
@@ -27,6 +52,48 @@ function meters(lat1: number, lng1: number, lat2: number, lng2: number) {
   const dLng = radians(lng2 - lng1);
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(radians(lat1)) * Math.cos(radians(lat2)) * Math.sin(dLng / 2) ** 2;
   return 6_371_000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+async function scoreBeforeVote(venue: VenueForBuzz, now: Date): Promise<ScoreBeforeVote> {
+  const { data: snapshot } = await db
+    .from("buzz_score_snapshots")
+    .select("score,label,score_mode,confidence,version,computed_at")
+    .eq("venue_id", venue.id)
+    .maybeSingle();
+
+  if (snapshot) {
+    return {
+      score: Number(snapshot.score),
+      label: String(snapshot.label),
+      mode: String(snapshot.score_mode),
+      confidence: String(snapshot.confidence),
+      version: String(snapshot.version),
+      computedAt: String(snapshot.computed_at),
+    };
+  }
+
+  try {
+    const signals = await loadActiveSignals(db, venue.id, now);
+    const calculated = calculateBuzzScore(venue, signals, now);
+    return {
+      score: calculated.score,
+      label: calculated.label,
+      mode: calculated.mode,
+      confidence: calculated.confidence,
+      version: calculated.version,
+      computedAt: calculated.computedAt,
+    };
+  } catch {
+    const baseline = calculateBuzzScore(venue, [], now);
+    return {
+      score: baseline.score,
+      label: baseline.label,
+      mode: baseline.mode,
+      confidence: baseline.confidence,
+      version: baseline.version,
+      computedAt: baseline.computedAt,
+    };
+  }
 }
 
 async function awardBuzzPoints(userId: string, venueId: string, reportId: string, firstVerifiedReport: boolean) {
@@ -60,6 +127,61 @@ async function awardBuzzPoints(userId: string, venueId: string, reportId: string
   };
 }
 
+async function recordConsensusGroundTruth(args: {
+  venueId: string;
+  reports: ReportRow[];
+  average: number;
+  consensus: number;
+  uniqueUsers: number;
+  observedAt: Date;
+}) {
+  if (args.uniqueUsers < 2 || args.reports.length < 2 || args.consensus < 0.65) return false;
+
+  const duplicateWindow = new Date(args.observedAt.getTime() - 20 * 60 * 1000).toISOString();
+  const { data: recent } = await db
+    .from("buzz_ground_truth")
+    .select("id")
+    .eq("venue_id", args.venueId)
+    .eq("observer_type", "verified_user_consensus")
+    .gte("observed_at", duplicateWindow)
+    .limit(1)
+    .maybeSingle();
+  if (recent) return false;
+
+  const predictionReport = [...args.reports]
+    .reverse()
+    .find(report => Number.isFinite(Number(report.metadata?.predictedScoreBefore)));
+  const metadata = predictionReport?.metadata || {};
+  const predictedScore = Number(metadata.predictedScoreBefore);
+
+  const { error } = await db.from("buzz_ground_truth").insert({
+    venue_id: args.venueId,
+    observed_at: args.observedAt.toISOString(),
+    occupancy_band: occupancyBand(args.average),
+    occupancy_pct: Math.round(args.average),
+    observer_type: "verified_user_consensus",
+    notes: `${args.uniqueUsers} verified nearby users with ${Math.round(args.consensus * 100)}% consensus`,
+    metadata: {
+      reportCount: args.reports.length,
+      uniqueUsers: args.uniqueUsers,
+      consensus: Number(args.consensus.toFixed(3)),
+      averageCrowdValue: Number(args.average.toFixed(1)),
+      predictedScore: Number.isFinite(predictedScore) ? predictedScore : null,
+      predictedLabel: metadata.predictedLabelBefore || null,
+      predictedMode: metadata.predictedModeBefore || null,
+      predictedConfidence: metadata.predictedConfidenceBefore || null,
+      predictedVersion: metadata.predictedVersionBefore || null,
+      predictedAt: metadata.predictedAtBefore || null,
+    },
+  });
+
+  if (error) {
+    console.error("Could not record Buzz ground truth", error.message);
+    return false;
+  }
+  return true;
+}
+
 export async function POST(request: Request) {
   const member = await getRequestUser(request);
   if (!member) return NextResponse.json({ success: false, error: "Sign in to verify live activity" }, { status: 401 });
@@ -88,9 +210,11 @@ export async function POST(request: Request) {
     .maybeSingle();
   if (venueError || !venue) return NextResponse.json({ success: false, error: "Venue not found" }, { status: 404 });
 
+  const observedAt = new Date();
+  const previous = await scoreBeforeVote(venue as VenueForBuzz, observedAt);
   const distance = meters(latitude, longitude, Number(venue.lat), Number(venue.lng));
   const verifiedNearby = accuracy <= 250 && distance <= Math.max(220, Math.min(500, accuracy * 2.2));
-  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const tenMinutesAgo = new Date(observedAt.getTime() - 10 * 60 * 1000).toISOString();
   const { data: duplicate } = await db
     .from("buzz_user_reports")
     .select("id")
@@ -101,7 +225,6 @@ export async function POST(request: Request) {
     .maybeSingle();
   if (duplicate) return NextResponse.json({ success: false, error: "You already voted on this place recently" }, { status: 429 });
 
-  const observedAt = new Date();
   const expiresAt = new Date(observedAt.getTime() + 45 * 60 * 1000);
   const { data: insertedReport, error: insertError } = await db.from("buzz_user_reports").insert({
     venue_id: venueId,
@@ -114,6 +237,14 @@ export async function POST(request: Request) {
     verified_nearby: verifiedNearby,
     observed_at: observedAt.toISOString(),
     expires_at: expiresAt.toISOString(),
+    metadata: {
+      predictedScoreBefore: previous.score,
+      predictedLabelBefore: previous.label,
+      predictedModeBefore: previous.mode,
+      predictedConfidenceBefore: previous.confidence,
+      predictedVersionBefore: previous.version,
+      predictedAtBefore: previous.computedAt,
+    },
   }).select("id").single();
   if (insertError) return NextResponse.json({ success: false, error: insertError.message }, { status: 500 });
 
@@ -121,10 +252,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, accepted: true, verifiedNearby: false, distanceMeters: Math.round(distance), message: "Vote saved, but it was not close enough to affect Buzz or earn points." });
   }
 
-  const since = new Date(Date.now() - 45 * 60 * 1000).toISOString();
-  const { data: reports, error: reportError } = await db
+  const since = new Date(observedAt.getTime() - 45 * 60 * 1000).toISOString();
+  const { data: reportData, error: reportError } = await db
     .from("buzz_user_reports")
-    .select("user_id,crowd_level,observed_at,expires_at")
+    .select("user_id,crowd_level,observed_at,expires_at,metadata")
     .eq("venue_id", venueId)
     .eq("verified_nearby", true)
     .gte("observed_at", since)
@@ -132,12 +263,13 @@ export async function POST(request: Request) {
     .limit(100);
   if (reportError) return NextResponse.json({ success: false, error: reportError.message }, { status: 500 });
 
-  const identities = new Set((reports || []).map(report => report.user_id).filter(Boolean));
-  const values = (reports || []).map(report => levelValue(report.crowd_level));
+  const reports = (reportData || []) as ReportRow[];
+  const identities = new Set(reports.map(report => report.user_id).filter(Boolean));
+  const values = reports.map(report => levelValue(report.crowd_level));
   const average = values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length);
   const variance = values.reduce((sum, value) => sum + (value - average) ** 2, 0) / Math.max(1, values.length);
   const consensus = Math.max(0.35, Math.min(1, 1 - Math.sqrt(variance) / 100));
-  const latest = reports?.[0] || { observed_at: observedAt.toISOString(), expires_at: expiresAt.toISOString() };
+  const latest = reports[0] || { observed_at: observedAt.toISOString(), expires_at: expiresAt.toISOString() };
   const signals: BuzzSignal[] = [{
     source: "lit757_users",
     family: "verified_users",
@@ -147,30 +279,39 @@ export async function POST(request: Request) {
     confidence: Math.min(0.9, 0.45 + identities.size * 0.1),
     observedAt: latest.observed_at,
     expiresAt: latest.expires_at,
-    metadata: { uniqueDevices: identities.size, reportCount: reports?.length || 1 },
+    metadata: { uniqueDevices: identities.size, reportCount: reports.length },
   }];
-  if ((reports?.length || 0) >= 2) signals.push({
+  if (reports.length >= 2) signals.push({
     source: "lit757_users",
     family: "verified_users",
     type: "crowd_report",
     value: average,
     isLive: true,
-    confidence: Math.min(0.9, consensus * (0.55 + Math.min(0.35, (reports?.length || 0) * 0.05))),
+    confidence: Math.min(0.9, consensus * (0.55 + Math.min(0.35, reports.length * 0.05))),
     observedAt: latest.observed_at,
     expiresAt: latest.expires_at,
-    metadata: { consensus, reportCount: reports?.length || 0 },
+    metadata: { consensus, reportCount: reports.length },
   });
 
   await saveBuzzSignals(db, venueId, signals);
+  const groundTruthRecorded = await recordConsensusGroundTruth({
+    venueId,
+    reports,
+    average,
+    consensus,
+    uniqueUsers: identities.size,
+    observedAt,
+  });
   const buzz = await recomputeBuzzScore(db, venue as VenueForBuzz);
-  const points = await awardBuzzPoints(member.id, venueId, String(insertedReport.id), (reports?.length || 0) === 1);
+  const points = await awardBuzzPoints(member.id, venueId, String(insertedReport.id), reports.length === 1);
 
   return NextResponse.json({
     success: true,
     accepted: true,
     verifiedNearby: true,
     distanceMeters: Math.round(distance),
-    reportCount: reports?.length || 1,
+    reportCount: reports.length,
+    groundTruthRecorded,
     buzz,
     ...points,
   });
