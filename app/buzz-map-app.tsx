@@ -12,6 +12,7 @@ import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import "./buzz-map-app.css";
+import "./buzz-map-notifications.css";
 import {
   Bell,
   CalendarDays,
@@ -113,6 +114,7 @@ const crowdOptions: Array<{ level: CrowdLevel; label: string; emoji: string }> =
 ];
 
 const FAVORITES_KEY = "lit757-mobile-favorites";
+const ALERTS_KEY = "lit757-mobile-alerts";
 const VENUE_ALERTS_KEY = "lit757-venue-alerts";
 const DEFAULT_CENTER: [number, number] = [-76.17, 36.88];
 const score = (venue: Venue) => Math.max(0, Math.min(100, Number(venue.activity?.score ?? 35)));
@@ -181,14 +183,17 @@ export default function BuzzMapApp() {
   const [session, setSession] = useState<Session | null>(null);
   const [voting, setVoting] = useState(false);
   const [voteMessage, setVoteMessage] = useState("");
+  const [watchMessage, setWatchMessage] = useState("");
   const [reward, setReward] = useState<{ points: number; total: number | null } | null>(null);
 
   const mapEl = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const selectedRef = useRef<(id: string) => void>(() => undefined);
   const authRef = useRef<SupabaseClient | null>(null);
+  const requestSequenceRef = useRef(0);
 
   const loadNearby = useCallback(async (request: LoadRequest = {}) => {
+    const sequence = ++requestSequenceRef.current;
     setLoading(true);
     setError("");
     try {
@@ -200,13 +205,15 @@ export default function BuzzMapApp() {
       const response = await fetch(`/api/nearby?${params.toString()}`, { cache: "no-store" });
       const payload = await response.json() as NearbyPayload;
       if (!response.ok || payload.success === false) throw new Error(payload.error || "Could not load places");
+      if (sequence !== requestSequenceRef.current) return;
       setVenues(payload.venues || payload.picks || []);
       setScopeLabel(request.label || payload.scope?.label || "Hampton Roads");
       window.dispatchEvent(new CustomEvent("activity757:discovery", { detail: payload }));
     } catch (loadError) {
+      if (sequence !== requestSequenceRef.current) return;
       setError(loadError instanceof Error ? loadError.message : "Could not load places");
     } finally {
-      setLoading(false);
+      if (sequence === requestSequenceRef.current) setLoading(false);
     }
   }, []);
 
@@ -262,6 +269,7 @@ export default function BuzzMapApp() {
     if (!venue) return;
     setSelected(venue);
     setVoteMessage("");
+    setWatchMessage("");
     if (validVenue(venue)) mapRef.current?.easeTo({ center: coordinates(venue), zoom: Math.max(13.2, mapRef.current.getZoom()), duration: 500 });
   }, [venues]);
   selectedRef.current = selectVenue;
@@ -434,14 +442,37 @@ export default function BuzzMapApp() {
     });
   }
 
-  function toggleWatch(venue: Venue) {
-    setWatchedIds(current => {
-      const next = new Set(current);
-      next.has(venue.id) ? next.delete(venue.id) : next.add(venue.id);
-      const rows = [...next].map(venueId => ({ venueId, threshold: 80 }));
-      localStorage.setItem(VENUE_ALERTS_KEY, JSON.stringify(rows));
-      return next;
-    });
+  async function enableNotifications() {
+    if (!session) {
+      window.dispatchEvent(new Event("lit757:open-notification-auth"));
+      setWatchMessage("Sign in to finish connecting alerts to this device.");
+      return false;
+    }
+    if (typeof Notification === "undefined") {
+      setWatchMessage("Notifications are not supported in this browser. On iPhone, install Buzz to your Home Screen first.");
+      return false;
+    }
+    const permission = Notification.permission === "default" ? await Notification.requestPermission() : Notification.permission;
+    if (permission !== "granted") {
+      setWatchMessage("Notifications are blocked. Allow them in your browser settings to receive Buzz alerts.");
+      return false;
+    }
+    localStorage.setItem(ALERTS_KEY, "true");
+    setWatchMessage("Alerts are enabled. Buzz will notify you when this place meaningfully heats up.");
+    return true;
+  }
+
+  async function toggleWatch(venue: Venue) {
+    const next = new Set(watchedIds);
+    const removing = next.has(venue.id);
+    removing ? next.delete(venue.id) : next.add(venue.id);
+    setWatchedIds(next);
+    localStorage.setItem(VENUE_ALERTS_KEY, JSON.stringify([...next].map(venueId => ({ venueId, threshold: 80 }))));
+    if (removing) {
+      setWatchMessage("Alert removed for this place.");
+      return;
+    }
+    await enableNotifications();
   }
 
   async function useMyLocation() {
@@ -535,7 +566,7 @@ export default function BuzzMapApp() {
         <label className="buzz-map-search"><Search /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search places, events, or neighborhoods" />{query && <button type="button" onClick={() => setQuery("")} aria-label="Clear search"><X /></button>}</label>
         <div className="buzz-map-header-actions">
           <button type="button" onClick={() => void useMyLocation()}><LocateFixed /><span>Near me</span></button>
-          <button type="button" aria-label="Buzz alerts"><Bell /></button>
+          <button type="button" aria-label="Enable Buzz alerts" onClick={() => void enableNotifications()}><Bell /></button>
           <button type="button" aria-label="Profile"><UserRound /></button>
         </div>
       </header>
@@ -601,11 +632,12 @@ export default function BuzzMapApp() {
             </section>
 
             <div className="buzz-detail-actions">
-              <button type="button" onClick={() => toggleWatch(selected)}><Bell fill={watchedIds.has(selected.id) ? "currentColor" : "none"} />{watchedIds.has(selected.id) ? "Watching" : "Alert me"}</button>
+              <button type="button" onClick={() => void toggleWatch(selected)}><Bell fill={watchedIds.has(selected.id) ? "currentColor" : "none"} />{watchedIds.has(selected.id) ? "Watching" : "Alert me"}</button>
               <button type="button" onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(selectedAddress || `${selected.lat},${selected.lng}`)}`, "_blank")}><Navigation />Directions</button>
               {selectedPhone && <a href={`tel:${selectedPhone}`}><Phone />Call</a>}
               {selectedWebsite && <a href={selectedWebsite} target="_blank" rel="noreferrer">Website</a>}
             </div>
+            {watchMessage && <p className="buzz-watch-status">{watchMessage}</p>}
           </div>
         </aside>
       )}
