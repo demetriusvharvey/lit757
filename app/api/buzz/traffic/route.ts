@@ -14,11 +14,7 @@ const db = createClient(
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
-type VenueRow = VenueForBuzz & {
-  lat: number | string | null;
-  lng: number | string | null;
-};
-
+type VenueRow = VenueForBuzz & { lat: number | string | null; lng: number | string | null };
 type TomTomFlow = {
   currentSpeed?: number;
   freeFlowSpeed?: number;
@@ -28,7 +24,6 @@ type TomTomFlow = {
   roadClosure?: boolean;
   frc?: string;
 };
-
 type TrafficPoint = { lat: number; lng: number; label: string };
 type TrafficZone = {
   id: string;
@@ -38,10 +33,17 @@ type TrafficZone = {
   radiusMiles: number;
   points: TrafficPoint[];
 };
+type HistoricalTrafficRow = { value: number; observed_at: string };
+type TrafficBaseline = {
+  ready: boolean;
+  value: number | null;
+  anomaly: number | null;
+  percentile: number | null;
+  sampleSize: number;
+};
 
 // Three road samples across eight activity districts = 24 calls per run.
-// At a 15-minute cadence this is 2,304 calls/day, below TomTom's current
-// 2,500 daily non-tile request freemium allowance.
+// At a 15-minute cadence this stays below the pilot's TomTom daily allowance.
 const TRAFFIC_ZONES: TrafficZone[] = [
   {
     id: "virginia-beach-oceanfront",
@@ -174,7 +176,6 @@ async function fetchFlow(apiKey: string, point: TrafficPoint) {
   url.searchParams.set("key", apiKey);
   url.searchParams.set("point", `${point.lat},${point.lng}`);
   url.searchParams.set("unit", "MPH");
-
   const response = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(10_000) });
   if (!response.ok) throw new Error(`TomTom traffic request failed (${response.status})`);
   const payload = await response.json() as { flowSegmentData?: TomTomFlow };
@@ -192,7 +193,61 @@ function congestionFor(flow: TomTomFlow) {
   return flow.roadClosure ? 100 : clamp(Math.max(speedCongestion, delayCongestion), 0, 100);
 }
 
-function zoneSignal(zone: TrafficZone, samples: Array<{ point: TrafficPoint; flow: TomTomFlow }>, observedAt = new Date()): BuzzSignal {
+function localBucket(value: string | Date) {
+  const date = value instanceof Date ? value : new Date(value);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    hour: "numeric",
+    hour12: false,
+  }).formatToParts(date);
+  const weekday = parts.find(part => part.type === "weekday")?.value || "Mon";
+  const hour = Number(parts.find(part => part.type === "hour")?.value || 0) % 24;
+  return { hour, weekend: weekday === "Fri" || weekday === "Sat" || weekday === "Sun" };
+}
+
+function hourDistance(left: number, right: number) {
+  const difference = Math.abs(left - right);
+  return Math.min(difference, 24 - difference);
+}
+
+function median(values: number[]) {
+  const sorted = [...values].sort((left, right) => left - right);
+  if (!sorted.length) return null;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function trafficBaseline(rows: HistoricalTrafficRow[], current: number, observedAt: Date): TrafficBaseline {
+  const deduped = [...new Map(rows
+    .filter(row => Number.isFinite(Number(row.value)) && Number.isFinite(new Date(row.observed_at).getTime()))
+    .map(row => [row.observed_at, { value: Number(row.value), observed_at: row.observed_at }])).values()];
+  const bucket = localBucket(observedAt);
+  const matched = deduped.filter(row => {
+    const candidate = localBucket(row.observed_at);
+    return candidate.weekend === bucket.weekend && hourDistance(candidate.hour, bucket.hour) <= 1;
+  });
+  const candidates = matched.length >= 6 ? matched : deduped.length >= 12 ? deduped : [];
+  const values = candidates.map(row => row.value);
+  const baseline = median(values);
+  if (baseline === null || values.length < 6) {
+    return { ready: false, value: null, anomaly: null, percentile: null, sampleSize: values.length };
+  }
+  return {
+    ready: true,
+    value: Number(baseline.toFixed(1)),
+    anomaly: Number((current - baseline).toFixed(1)),
+    percentile: Number((values.filter(value => value <= current).length / values.length).toFixed(3)),
+    sampleSize: values.length,
+  };
+}
+
+function zoneSignal(
+  zone: TrafficZone,
+  samples: Array<{ point: TrafficPoint; flow: TomTomFlow }>,
+  baseline: TrafficBaseline,
+  observedAt = new Date(),
+): BuzzSignal {
   const values = samples.map(sample => congestionFor(sample.flow));
   const average = values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length);
   const peak = Math.max(...values, 0);
@@ -204,7 +259,6 @@ function zoneSignal(zone: TrafficZone, samples: Array<{ point: TrafficPoint; flo
     family: "mobility",
     type: "traffic_congestion",
     value: Number(congestion.toFixed(1)),
-    // Current road traffic is indirect evidence, not proof of people inside venues.
     isLive: false,
     confidence: Number((providerConfidence * 0.65).toFixed(3)),
     observedAt: observedAt.toISOString(),
@@ -216,6 +270,11 @@ function zoneSignal(zone: TrafficZone, samples: Array<{ point: TrafficPoint; flo
       city: zone.city,
       averageCongestion: Number(average.toFixed(1)),
       peakCongestion: Number(peak.toFixed(1)),
+      baselineReady: baseline.ready,
+      baselineCongestion: baseline.value,
+      anomaly: baseline.anomaly,
+      percentile: baseline.percentile,
+      sampleSize: baseline.sampleSize,
       sampleCount: samples.length,
       points: samples.map(({ point, flow }, index) => ({
         label: point.label,
@@ -228,20 +287,24 @@ function zoneSignal(zone: TrafficZone, samples: Array<{ point: TrafficPoint; flo
   };
 }
 
-function zoneLabel(value: number) {
-  if (value >= 65) return "Heavy arrival traffic";
-  if (value >= 40) return "Busy arrival traffic";
-  if (value >= 20) return "Some arrival pressure";
+function zoneLabel(signal: BuzzSignal) {
+  const metadata = signal.metadata || {};
+  const anomaly = Number(metadata.anomaly);
+  if (metadata.baselineReady === true && Number.isFinite(anomaly)) {
+    if (anomaly >= 22) return "Far above normal arrival traffic";
+    if (anomaly >= 14) return "Above normal arrival traffic";
+    if (anomaly >= 8) return "Arrivals building above normal";
+    return "Traffic near its normal pattern";
+  }
+  if (signal.value >= 65) return "Heavy traffic; baseline learning";
+  if (signal.value >= 40) return "Busy traffic; baseline learning";
   return "Roads moving normally";
 }
 
 async function run(request: Request) {
   if (!authorized(request)) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
-
   const apiKey = process.env.TOMTOM_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json({ success: true, provider: "tomtom", skipped: true, message: "TOMTOM_API_KEY is not configured" });
-  }
+  if (!apiKey) return NextResponse.json({ success: true, provider: "tomtom", skipped: true, message: "TOMTOM_API_KEY is not configured" });
 
   const { data, error } = await db
     .from("venues")
@@ -249,10 +312,11 @@ async function run(request: Request) {
     .not("lat", "is", null)
     .not("lng", "is", null)
     .limit(2500);
-
   if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+
   const venues = ((data || []) as VenueRow[]).filter(venue => Number.isFinite(Number(venue.lat)) && Number.isFinite(Number(venue.lng)));
   const generatedAt = new Date();
+  const historyStart = new Date(generatedAt.getTime() - 14 * 24 * 60 * 60 * 1000).toISOString();
   const zoneResults: Array<Record<string, unknown>> = [];
   let calls = 0;
   let failedCalls = 0;
@@ -268,24 +332,35 @@ async function run(request: Request) {
         failedCalls += 1;
       }
     });
-
     if (!samples.length) {
       zoneResults.push({ id: zone.id, name: zone.name, city: zone.city, status: "error", samples: 0 });
       return;
     }
 
-    const signal = zoneSignal(zone, samples, generatedAt);
+    const rawValues = samples.map(sample => congestionFor(sample.flow));
+    const rawAverage = rawValues.reduce((sum, value) => sum + value, 0) / rawValues.length;
+    const rawPeak = Math.max(...rawValues, 0);
+    const rawCongestion = clamp(rawAverage * 0.7 + rawPeak * 0.3, 0, 100);
+    const { data: historyData, error: historyError } = await db
+      .from("buzz_signal_snapshots")
+      .select("value,observed_at")
+      .eq("source", `tomtom:${zone.id}`)
+      .gte("observed_at", historyStart)
+      .lt("observed_at", generatedAt.toISOString())
+      .order("observed_at", { ascending: false })
+      .limit(1000);
+    if (historyError) console.error(`TomTom baseline unavailable for ${zone.id}`, historyError.message);
+    const baseline = trafficBaseline((historyData || []) as HistoricalTrafficRow[], rawCongestion, generatedAt);
+    const signal = zoneSignal(zone, samples, baseline, generatedAt);
+
     const coveredVenues = venues
       .map(venue => ({ venue, distance: miles(zone.center.lat, zone.center.lng, Number(venue.lat), Number(venue.lng)) }))
       .filter(item => item.distance <= zone.radiusMiles)
-      .sort((left, right) => right.venue.ai_score! - left.venue.ai_score! || left.distance - right.distance)
+      .sort((left, right) => Number(right.venue.ai_score || 0) - Number(left.venue.ai_score || 0) || left.distance - right.distance)
       .slice(0, 5);
 
     await mapLimit(coveredVenues, 3, async ({ venue, distance }) => {
-      await saveBuzzSignals(db, venue.id, [{
-        ...signal,
-        metadata: { ...signal.metadata, venueDistanceMiles: Number(distance.toFixed(2)) },
-      }]);
+      await saveBuzzSignals(db, venue.id, [{ ...signal, metadata: { ...signal.metadata, venueDistanceMiles: Number(distance.toFixed(2)) } }]);
       await recomputeBuzzScore(db, venue);
       await db.from("buzz_provider_venues").upsert({
         venue_id: venue.id,
@@ -306,7 +381,8 @@ async function run(request: Request) {
       city: zone.city,
       status: "covered",
       congestion: signal.value,
-      label: zoneLabel(signal.value),
+      baseline,
+      label: zoneLabel(signal),
       samples: samples.length,
       venuesSupported: coveredVenues.length,
     });
@@ -316,8 +392,8 @@ async function run(request: Request) {
     success: true,
     provider: "tomtom",
     generatedAt: generatedAt.toISOString(),
-    model: "activity-district-arrival-pressure-v1",
-    truthNote: "Road traffic is supporting arrival evidence, not direct foot traffic or venue occupancy.",
+    model: "activity-district-arrival-anomaly-v2",
+    truthNote: "Traffic only supports a forecast. Buzz now compares congestion with the district's normal pattern before applying meaningful weight.",
     calls,
     failedCalls,
     venueSignals,
@@ -325,10 +401,5 @@ async function run(request: Request) {
   });
 }
 
-export async function GET(request: Request) {
-  return run(request);
-}
-
-export async function POST(request: Request) {
-  return run(request);
-}
+export async function GET(request: Request) { return run(request); }
+export async function POST(request: Request) { return run(request); }
