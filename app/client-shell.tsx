@@ -10,6 +10,7 @@ const BuzzPinRestorer = dynamic(() => import("./buzz-pin-restorer"), { ssr: fals
 const BuzzProductPositioning = dynamic(() => import("./buzz-product-positioning"), { ssr: false });
 const BuzzScoreTransparency = dynamic(() => import("./buzz-score-transparency"), { ssr: false });
 const BuzzCrowdReport = dynamic(() => import("./buzz-crowd-report"), { ssr: false });
+const BuzzCommunityProof = dynamic(() => import("./buzz-community-proof"), { ssr: false });
 const DesktopHome = dynamic(() => import("./buzz-desktop-home"), { ssr: false });
 const NotificationRuntime = dynamic(() => import("./notification-runtime"), { ssr: false });
 const NotificationAuth = dynamic(() => import("./notification-auth"), { ssr: false });
@@ -25,6 +26,7 @@ export default function ClientShell() {
       <BuzzProductPositioning />
       <BuzzScoreTransparency />
       <BuzzCrowdReport />
+      <BuzzCommunityProof />
       <DesktopHome />
       <NotificationRuntime />
       <NotificationAuth />
