@@ -1,16 +1,2 @@
-@media(min-width:1024px){
-  .buzz-area-picker{margin:0 0 18px;padding:14px;border:1px solid #252c36;border-radius:18px;background:linear-gradient(180deg,#11161d,#0d1117)}
-  .buzz-area-picker-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:11px}
-  .buzz-area-picker-head span{display:flex;align-items:center;gap:7px;color:#d5ccff;font-size:9px;font-weight:900;letter-spacing:.14em}
-  .buzz-area-picker-head span svg{width:15px}
-  .buzz-area-picker-head small{color:#808996;font-size:9px}
-  .buzz-area-picker-rail{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px;scrollbar-width:none}
-  .buzz-area-picker-rail::-webkit-scrollbar{display:none}
-  .buzz-area-picker-rail button{flex:0 0 auto;min-width:105px;padding:10px 12px;border:1px solid #2a323d;border-radius:13px;background:#151b23;color:#fff;text-align:left;transition:.16s ease}
-  .buzz-area-picker-rail button:hover{border-color:#6d5bb8;background:#1b2130}
-  .buzz-area-picker-rail button.active{border-color:#8b5cf6;background:rgba(139,92,246,.17);box-shadow:inset 0 0 0 1px rgba(139,92,246,.2)}
-  .buzz-area-picker-rail strong,.buzz-area-picker-rail small{display:block;white-space:nowrap}
-  .buzz-area-picker-rail strong{font-size:11px}
-  .buzz-area-picker-rail small{margin-top:4px;color:#8f98a5;font-size:8px}
-  .buzz-area-picker-rail button.active small{color:#c8bcff}
-}
+/* District intelligence is an automatic ranking input, not a user-facing mode. */
+.buzz-area-picker{display:none!important}
