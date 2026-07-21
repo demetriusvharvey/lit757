@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { MapControllerProvider } from "./map-controller";
+import "./mapbox-load-image-adapter";
 import "./buzz-logo-overrides.css";
 
 // The unified map is the primary production discovery experience.
