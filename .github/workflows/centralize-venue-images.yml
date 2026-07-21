@@ -1,11 +1,13 @@
 name: Centralize venue images
 
 on:
-  push:
+  pull_request:
     branches:
-      - fix/centralize-venue-images
-    paths:
-      - .github/workflows/centralize-venue-images.yml
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
 
 permissions:
   contents: write
