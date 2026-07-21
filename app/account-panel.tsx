@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState, type ReactNode } from "react";
+import Image from "next/image";
 import type { Session } from "@supabase/supabase-js";
 import {
   ArrowLeft,
@@ -248,7 +249,13 @@ export default function AccountPanel({
                 {savedPlaces.length ? savedPlaces.slice(0, 4).map((place) => (
                   <div key={place.id} className="rounded-[1.35rem] border border-black/[0.07] bg-white/72 p-3">
                     <button type="button" onClick={() => onSelectSaved(place)} className="flex w-full items-center gap-3 text-left">
-                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] bg-black/[0.055] text-[13px] font-semibold text-black/42">{place.name.slice(0, 1).toUpperCase()}</span>
+                      <span className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-[12px] bg-black/[0.055] text-[13px] font-semibold text-black/42">
+                        {place.photoUrl ? (
+                          <Image src={place.photoUrl} alt={`${place.name} venue`} fill unoptimized sizes="40px" className="object-cover" />
+                        ) : (
+                          place.name.slice(0, 1).toUpperCase()
+                        )}
+                      </span>
                       <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-semibold text-black/76">{place.name}</span><span className="mt-0.5 block truncate text-[10px] text-black/38">{place.city} · {place.type}</span></span>
                       <ChevronRight size={15} className="text-black/28" />
                     </button>

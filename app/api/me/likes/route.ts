@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getRequestUser } from "../../../../src/lib/server-auth";
+import { getVenueImage } from "../../../../src/lib/venue-image";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -31,7 +32,7 @@ export async function GET(request: Request) {
 
   const { data: venues, error: venuesError } = await supabaseAdmin
     .from("venues")
-    .select("id,name,city,type,google_place_id,photo_source")
+    .select("id,name,city,type,category,lat,lng,google_place_id,photo_source")
     .in("id", venueIds);
 
   if (venuesError) return NextResponse.json({ error: venuesError.message }, { status: 500 });
@@ -45,10 +46,14 @@ export async function GET(request: Request) {
       name: venue.name,
       city: venue.city || "757",
       type: venue.type || "Local spot",
-      photoUrl:
-        venue.photo_source === "google_streetview" && venue.google_place_id
-          ? `/api/venue-photo?placeId=${encodeURIComponent(venue.google_place_id)}`
-          : null,
+      photoUrl: getVenueImage({
+        name: venue.name,
+        category: venue.category,
+        type: venue.type,
+        googlePlaceId: venue.google_place_id,
+        lat: venue.lat,
+        lng: venue.lng,
+      }),
     }];
   });
 

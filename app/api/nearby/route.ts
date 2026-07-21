@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getVenueImage } from "../../../src/lib/venue-image";
 
 export const dynamic = "force-dynamic";
 
@@ -172,14 +173,15 @@ export async function GET(request: Request) {
     const confidence = snapshot?.confidence || (livePresenceCount >= 4 || (livePresenceCount >= 2 && eventEvidence.active) ? "high" : livePresenceCount >= 1 || fallbackStrongEvent || eventEvidence.active ? "medium" : "low");
     const scoreMode = snapshot?.score_mode || (fallbackLive || fallbackStrongEvent ? "live" : "forecast");
     const trendLabel = snapshot?.explanation || (livePresenceCount >= 2 ? "Verified activity building" : livePresenceCount === 1 ? "Live activity reported" : eventEvidence.active ? "Event in progress" : eventEvidence.points > 0 ? "Event approaching" : "Forecast only");
-    const imageParams = new URLSearchParams({
-      name: String(venue.name || "Local place"),
-      category: kind,
-      lat: String(venueLat),
-      lng: String(venueLng),
+    const photoUrl = getVenueImage({
+      name: venue.name,
+      kind,
+      category: venue.category,
+      type: venue.type,
+      googlePlaceId: venue.google_place_id,
+      lat: venueLat,
+      lng: venueLng,
     });
-    if (venue.google_place_id) imageParams.set("placeId", String(venue.google_place_id));
-    const photoUrl = `/api/venue-photo?${imageParams.toString()}`;
 
     return [{
       id: venue.id,

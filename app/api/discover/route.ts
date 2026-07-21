@@ -2,6 +2,7 @@ import { after, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getRequestUser } from "../../../src/lib/server-auth";
 import { inferInterestTags } from "../../../src/lib/interest-tags";
+import { getVenueImage } from "../../../src/lib/venue-image";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -785,10 +786,15 @@ function eventsNeedRefresh(timestamp?: string | null) {
 }
 
 function publicVenue(venue: RankedVenue, index?: number) {
-  const photoUrl =
-    venue.photo_source === "google_streetview" && venue.google_place_id
-      ? `/api/venue-photo?placeId=${encodeURIComponent(venue.google_place_id)}`
-      : null;
+  const photoUrl = getVenueImage({
+    name: venue.name,
+    kind: venue.kind,
+    category: venue.category,
+    type: venue.type,
+    googlePlaceId: venue.google_place_id,
+    lat: venue.lat,
+    lng: venue.lng,
+  });
   const label = venue.event
     ? venue.eventHours !== null && venue.eventHours <= 1.5
       ? "Starting soon"
