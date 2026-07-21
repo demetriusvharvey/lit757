@@ -164,6 +164,11 @@ function mobilityPoints(factors: unknown) {
   }, 0);
 }
 
+function addVenueEvent(map: Map<string, EventRow[]>, venueId: string, event: EventRow) {
+  const current = map.get(venueId) || [];
+  if (!current.some((candidate) => candidate.id === event.id)) map.set(venueId, [...current, event]);
+}
+
 function chooseEvent(events: EventRow[]) {
   return [...events].sort((left, right) => {
     const leftHours = Math.abs(hoursFromNow(left.start_time) ?? 9999);
@@ -211,12 +216,12 @@ export async function GET(request: Request) {
   for (const mapping of (mappingResult.data || []) as EventMappingRow[]) {
     if (!mapping.venue_id) continue;
     const event = eventsById.get(mapping.event_id);
-    if (event) eventsByVenueId.set(mapping.venue_id, [...(eventsByVenueId.get(mapping.venue_id) || []), event]);
+    if (event) addVenueEvent(eventsByVenueId, mapping.venue_id, event);
   }
 
   for (const event of eventRows) {
     const venueId = venueByCanonical.get(canonical(event.venue_name));
-    if (venueId) eventsByVenueId.set(venueId, [...(eventsByVenueId.get(venueId) || []), event]);
+    if (venueId) addVenueEvent(eventsByVenueId, venueId, event);
   }
 
   const presence = new Map<string, Set<string>>();
