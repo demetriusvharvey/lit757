@@ -4,6 +4,7 @@ import { MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "r
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import "./buzz-desktop.css";
+import "./buzz-desktop-map-first.css";
 import {
   Bell,
   CalendarDays,
@@ -309,7 +310,7 @@ export default function BuzzDesktopHome() {
   return (
     <div className="buzz-desktop">
       <header className="buzz-desktop-header">
-        <button type="button" className="buzz-desktop-logo" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}><b>BUZZ</b><span>LIVE NEARBY</span></button>
+        <button type="button" className="buzz-desktop-logo" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}><b>BUZZ</b><span>THINGS TO DO NOW</span></button>
         <div className="buzz-desktop-search"><Search /><input value={query} onChange={event => { setQuery(event.target.value); setSearchOpen(true); }} onFocus={() => setSearchOpen(true)} placeholder="Search places, events, neighborhoods, or ZIP codes" /><button type="button" onClick={useLocation}><LocateFixed /> Near me</button></div>
         <nav><button type="button" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>Explore</button><button type="button" onClick={() => { setActive("Events"); listRef.current?.scrollIntoView({ behavior: "smooth" }); }}>Events</button><button type="button" onClick={() => listRef.current?.scrollIntoView({ behavior: "smooth" })}>Trending</button><button type="button" onClick={() => mapSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })}>Map</button><button type="button" aria-label="Buzz alerts"><Bell /></button><button type="button" className="buzz-desktop-avatar" aria-label="Profile"><UserRound /></button></nav>
       </header>
@@ -326,7 +327,7 @@ export default function BuzzDesktopHome() {
 
       <main>
         <section className="buzz-desktop-hero">
-          <div><span className="buzz-eyebrow"><i /> LIVE ACTIVITY AROUND YOU</span><h1>See where the energy is—<em>right now.</em></h1><p>Buzz shows restaurants, events, nightlife, and local places gaining momentum near you, so you know where to go before the crowd moves.</p><div className="buzz-hero-actions"><button type="button" onClick={() => setSearchOpen(true)}><Search /> Search what’s happening</button><button type="button" onClick={useLocation}><LocateFixed /> Use my location</button></div></div>
+          <div><span className="buzz-eyebrow"><i /> LIVE ACTIVITY AROUND YOU</span><h1>See where the energy is—<em>right now.</em></h1><p>Buzz helps you discover things to do in the moment.</p><div className="buzz-hero-actions"><button type="button" onClick={() => setSearchOpen(true)}><Search /> Search what’s happening</button><button type="button" onClick={useLocation}><LocateFixed /> Use my location</button></div></div>
           <button type="button" className="buzz-desktop-best" onClick={() => hottest && selectVenue(hottest.id)} disabled={!hottest}><span>BEST MOVE RIGHT NOW</span><strong>{hottest?.name || "Finding your move…"}</strong><small>{hottest?.city || scopeLabel} · {hottest ? statusFor(hottest) : "Loading"}</small><b>{hottest ? score(hottest) : "--"}<em>BUZZ</em></b><ChevronRight /></button>
         </section>
 
@@ -338,11 +339,11 @@ export default function BuzzDesktopHome() {
 
         <section className="buzz-desktop-discovery">
           <section ref={listRef} className="buzz-desktop-list">
-            <div className="buzz-section-heading"><div><span>TRENDING BY BUZZ</span><h2>Places worth leaving home for</h2><p>{loading ? "Refreshing live activity…" : `${filtered.length} places ${scopeLabel}`}</p></div><button type="button" onClick={() => setSearchOpen(true)}>Search all <ChevronRight /></button></div>
-            {filtered.length ? <div className="buzz-desktop-card-grid">{filtered.slice(0, 8).map((venue, index) => <article key={venue.id} onClick={() => selectVenue(venue.id)}><div className="buzz-card-photo">{venue.photoUrl ? <img src={venue.photoUrl} alt="" /> : <span>{venue.name[0]}</span>}<div><b>{score(venue)}</b><small>BUZZ</small></div>{index === 0 && <em>BEST MOVE</em>}</div><div className="buzz-card-copy"><small>{categoryFor(venue)} · {distanceLabel(venue.distanceMiles) || venue.city || "Nearby"}</small><h3>{venue.name}</h3><p>{venue.event?.name || venue.reason || "Popular nearby right now"}</p><span>{statusFor(venue)} · {venue.activity?.trendLabel || "Steady"}</span></div><button type="button" className={favoriteIds.has(venue.id) ? "saved" : ""} onClick={event => toggleFavorite(event, venue)} aria-label={favoriteIds.has(venue.id) ? `Remove ${venue.name} from saved places` : `Save ${venue.name}`}><Heart fill={favoriteIds.has(venue.id) ? "currentColor" : "none"} /></button></article>)}</div> : <div className="buzz-desktop-empty"><Search /><strong>No places match this view</strong><p>Try another category, clear the search, or choose a different area.</p></div>}
+            <div className="buzz-section-heading"><div><span>HAPPENING NOW</span><h2>Things to do nearby</h2><p>{loading ? "Refreshing live activity…" : `${filtered.length} places ${scopeLabel}`}</p></div><button type="button" onClick={() => setSearchOpen(true)}>Search all <ChevronRight /></button></div>
+            {filtered.length ? <div className="buzz-desktop-card-grid">{filtered.slice(0, 12).map((venue, index) => <article key={venue.id} onClick={() => selectVenue(venue.id)}><div className="buzz-card-photo">{venue.photoUrl ? <img src={venue.photoUrl} alt="" /> : <span>{venue.name[0]}</span>}<div><b>{score(venue)}</b><small>BUZZ</small></div>{index === 0 && <em>BEST NOW</em>}</div><div className="buzz-card-copy"><small>{categoryFor(venue)} · {distanceLabel(venue.distanceMiles) || venue.city || "Nearby"}</small><h3>{venue.name}</h3><p>{venue.event?.name || venue.reason || "Available to do right now"}</p><span>{statusFor(venue)} · {venue.activity?.trendLabel || "Steady"}</span></div><button type="button" className={favoriteIds.has(venue.id) ? "saved" : ""} onClick={event => toggleFavorite(event, venue)} aria-label={favoriteIds.has(venue.id) ? `Remove ${venue.name} from saved places` : `Save ${venue.name}`}><Heart fill={favoriteIds.has(venue.id) ? "currentColor" : "none"} /></button></article>)}</div> : <div className="buzz-desktop-empty"><Search /><strong>No places match this view</strong><p>Try another category, clear the search, or choose a different area.</p></div>}
           </section>
 
-          <div ref={mapSectionRef} className="buzz-desktop-map-wrap"><div className="buzz-map-toolbar"><button type="button" onClick={useLocation}><LocateFixed /> Near me</button><button type="button" onClick={searchThisMap}><Search /> Search this map</button><span>{filtered.length} places</span></div><div className="buzz-desktop-map-hint">Tap a pin to preview · hotter colors mean more activity</div><div ref={mapEl} className="buzz-desktop-map" /></div>
+          <div ref={mapSectionRef} className="buzz-desktop-map-wrap"><div className="buzz-map-toolbar"><button type="button" onClick={useLocation}><LocateFixed /> Near me</button><button type="button" onClick={searchThisMap}><Search /> Search this map</button><span>{filtered.length} places</span></div><div className="buzz-desktop-map-hint">Click a place to see what is happening now</div><div ref={mapEl} className="buzz-desktop-map" /></div>
         </section>
       </main>
 
