@@ -398,7 +398,7 @@ export default function BuzzMapApp() {
       paint: { "circle-radius": 28, "circle-color": "rgba(0,0,0,.01)", "circle-opacity": 0.01 },
     });
 
-    const onStyleImageMissing = (event: mapboxgl.MapStyleImageMissingEvent) => {
+    const onStyleImageMissing = (event: { id: string }) => {
       const id = event.id;
       if (!id.startsWith("venue-logo-") || map.hasImage(id) || loadingLogosRef.current.has(id)) return;
       const logoUrl = logoUrlsRef.current.get(id);
