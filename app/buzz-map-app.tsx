@@ -27,6 +27,7 @@ import {
   Navigation,
   Phone,
   Search,
+  ShieldCheck,
   ShoppingBag,
   Sparkles,
   TreePine,
@@ -35,6 +36,7 @@ import {
   Wine,
   X,
 } from "lucide-react";
+import { getVenueLogo } from "../src/lib/venue-logo";
 
 type CrowdLevel = "quiet" | "steady" | "busy" | "packed";
 type Venue = {
@@ -93,7 +95,6 @@ type VotePayload = {
 };
 
 type LoadRequest = { lat?: number; lng?: number; radius?: number; bounds?: string; label?: string };
-
 type Category = typeof categories[number][0];
 
 const categories = [
@@ -135,6 +136,8 @@ const categoryFor = (venue: Venue): Category => {
   if (/shop|mall|market|store/.test(text)) return "Shopping";
   return "All";
 };
+const logoKeyFor = (venue: Venue) => `venue-logo-${String(venue.id).replace(/[^a-zA-Z0-9_-]/g, "")}`;
+const logoUrlFor = (venue: Pick<Venue, "name" | "website">) => getVenueLogo({ name: venue.name, website: venue.website });
 
 function formatEventTime(value?: string | null) {
   if (!value) return null;
@@ -191,6 +194,8 @@ export default function BuzzMapApp() {
   const selectedRef = useRef<(id: string) => void>(() => undefined);
   const authRef = useRef<SupabaseClient | null>(null);
   const requestSequenceRef = useRef(0);
+  const logoUrlsRef = useRef(new Map<string, string>());
+  const loadingLogosRef = useRef(new Set<string>());
 
   const loadNearby = useCallback(async (request: LoadRequest = {}) => {
     const sequence = ++requestSequenceRef.current;
@@ -355,10 +360,10 @@ export default function BuzzMapApp() {
       source: "buzz-map-venues",
       minzoom: 10.5,
       paint: {
-        "circle-radius": ["case", ["==", ["get", "selected"], true], 25, ["interpolate", ["linear"], ["get", "score"], 20, 10, 100, 21]],
+        "circle-radius": ["case", ["==", ["get", "selected"], true], 27, ["interpolate", ["linear"], ["get", "score"], 20, 12, 100, 23]],
         "circle-color": buzzColor,
-        "circle-opacity": ["case", ["==", ["get", "selected"], true], 0.45, 0.22],
-        "circle-blur": 0.82,
+        "circle-opacity": ["case", ["==", ["get", "selected"], true], 0.5, 0.28],
+        "circle-blur": 0.78,
       },
     });
     map.addLayer({
@@ -367,28 +372,45 @@ export default function BuzzMapApp() {
       source: "buzz-map-venues",
       minzoom: 10.5,
       paint: {
-        "circle-radius": ["case", ["==", ["get", "selected"], true], 13, ["interpolate", ["linear"], ["zoom"], 10.5, 7, 15, 11]],
-        "circle-color": buzzColor,
-        "circle-stroke-width": ["case", ["==", ["get", "selected"], true], 3.5, 2],
-        "circle-stroke-color": "#ffffff",
+        "circle-radius": ["case", ["==", ["get", "selected"], true], 17, ["interpolate", ["linear"], ["zoom"], 10.5, 12, 15, 15]],
+        "circle-color": "#ffffff",
+        "circle-stroke-width": ["case", ["==", ["get", "selected"], true], 4, 3],
+        "circle-stroke-color": buzzColor,
       },
     });
     map.addLayer({
-      id: "buzz-pin-score",
+      id: "buzz-pin-logo",
       type: "symbol",
       source: "buzz-map-venues",
-      minzoom: 11.6,
-      layout: { "text-field": ["to-string", ["get", "score"]], "text-size": 9.5, "text-font": ["DIN Pro Bold", "Arial Unicode MS Bold"] },
-      paint: { "text-color": "#ffffff" },
+      minzoom: 10.5,
+      layout: {
+        "icon-image": ["get", "logoKey"],
+        "icon-size": ["interpolate", ["linear"], ["zoom"], 10.5, 0.2, 15, 0.25],
+        "icon-allow-overlap": true,
+        "icon-ignore-placement": true,
+      },
     });
     map.addLayer({
       id: "buzz-pin-hitbox",
       type: "circle",
       source: "buzz-map-venues",
       minzoom: 10.2,
-      paint: { "circle-radius": 25, "circle-color": "rgba(0,0,0,.01)", "circle-opacity": 0.01 },
+      paint: { "circle-radius": 28, "circle-color": "rgba(0,0,0,.01)", "circle-opacity": 0.01 },
     });
 
+    const onStyleImageMissing = (event: { id: string }) => {
+      const id = event.id;
+      if (!id.startsWith("venue-logo-") || map.hasImage(id) || loadingLogosRef.current.has(id)) return;
+      const logoUrl = logoUrlsRef.current.get(id);
+      if (!logoUrl) return;
+      loadingLogosRef.current.add(id);
+      void map.loadImage(logoUrl)
+        .then(image => {
+          if (!map.hasImage(id)) map.addImage(id, image.data, { pixelRatio: 2 });
+        })
+        .catch(() => undefined)
+        .finally(() => loadingLogosRef.current.delete(id));
+    };
     const onVenueClick = (event: mapboxgl.MapLayerMouseEvent) => {
       const id = String(event.features?.[0]?.properties?.id || "");
       if (id) selectedRef.current(id);
@@ -399,6 +421,7 @@ export default function BuzzMapApp() {
     };
     const enter = () => { map.getCanvas().style.cursor = "pointer"; };
     const leave = () => { map.getCanvas().style.cursor = ""; };
+    map.on("styleimagemissing", onStyleImageMissing);
     map.on("click", "buzz-pin-hitbox", onVenueClick);
     map.on("click", "buzz-area-heat", onHeatClick);
     map.on("mouseenter", "buzz-pin-hitbox", enter);
@@ -406,6 +429,7 @@ export default function BuzzMapApp() {
     map.on("mouseenter", "buzz-area-heat", enter);
     map.on("mouseleave", "buzz-area-heat", leave);
     return () => {
+      map.off("styleimagemissing", onStyleImageMissing);
       if (!map.getLayer("buzz-pin-hitbox")) return;
       map.off("click", "buzz-pin-hitbox", onVenueClick);
       map.off("click", "buzz-area-heat", onHeatClick);
@@ -419,16 +443,23 @@ export default function BuzzMapApp() {
   useEffect(() => {
     const source = mapRef.current?.getSource("buzz-map-venues") as mapboxgl.GeoJSONSource | undefined;
     if (!source) return;
-    const features: GeoJSON.Feature<GeoJSON.Point>[] = filtered.filter(validVenue).map(venue => ({
-      type: "Feature",
-      geometry: { type: "Point", coordinates: coordinates(venue) },
-      properties: {
-        id: venue.id,
-        score: score(venue),
-        selected: venue.id === selected?.id,
-        category: categoryFor(venue),
-      },
-    }));
+    const nextLogoUrls = new Map<string, string>();
+    const features: GeoJSON.Feature<GeoJSON.Point>[] = filtered.filter(validVenue).map(venue => {
+      const logoKey = logoKeyFor(venue);
+      nextLogoUrls.set(logoKey, logoUrlFor(venue));
+      return {
+        type: "Feature",
+        geometry: { type: "Point", coordinates: coordinates(venue) },
+        properties: {
+          id: venue.id,
+          score: score(venue),
+          selected: venue.id === selected?.id,
+          category: categoryFor(venue),
+          logoKey,
+        },
+      };
+    });
+    logoUrlsRef.current = nextLogoUrls;
     source.setData({ type: "FeatureCollection", features });
   }, [filtered, selected?.id, mapReady]);
 
@@ -582,12 +613,12 @@ export default function BuzzMapApp() {
           </button>
           <div className="buzz-map-list-head">
             <div><small>HIGHEST BUZZ FIRST</small><h1>{active === "All" ? "Places buzzing now" : active}</h1><p>{loading ? "Updating activity…" : `${filtered.length} places ${scopeLabel}`}</p></div>
-            <span className="buzz-heat-key"><i /> Heat map <b>→</b> pins</span>
+            <span className="buzz-heat-key"><i /> Heat map <b>→</b> logo pins</span>
           </div>
           <div className="buzz-map-list-scroll">
             {filtered.map((venue, index) => (
               <article key={venue.id} className={selected?.id === venue.id ? "selected" : ""} onClick={() => selectVenue(venue.id)}>
-                <div className="buzz-list-photo">{venue.photoUrl ? <img src={venue.photoUrl} alt="" /> : <span>{venue.name.slice(0, 1)}</span>}<b>{score(venue)}</b></div>
+                <div className="buzz-list-photo"><img src={logoUrlFor(venue)} alt={`${venue.name} logo`} loading="lazy" decoding="async" /><b>{score(venue)}</b></div>
                 <div className="buzz-list-copy"><small>{index === 0 ? "BEST NOW" : `#${index + 1}`} · {categoryFor(venue)} · {milesLabel(venue.distanceMiles) || venue.city || "Nearby"}</small><strong>{venue.name}</strong><p>{venue.event?.name || venue.reason || "Available right now"}</p><span className={`buzz-status s${Math.floor(score(venue) / 20)}`}>{statusFor(venue)}{venue.activity?.scoreMode === "live" ? " · Live" : " · Forecast"}</span></div>
                 <button type="button" className={favoriteIds.has(venue.id) ? "saved" : ""} onClick={event => toggleFavorite(event, venue)} aria-label={`Save ${venue.name}`}><Heart fill={favoriteIds.has(venue.id) ? "currentColor" : "none"} /></button>
               </article>
@@ -603,7 +634,7 @@ export default function BuzzMapApp() {
             <button type="button" onClick={() => void searchThisMap()}><Search /> Search this map</button>
           </div>
           <div className="buzz-map-mode">
-            {mapZoom < 10.5 ? <><Sparkles /><span>Area heat</span><small>Tap a hot zone or zoom in for venues</small></> : <><MapPin /><span>Venue pins</span><small>Color shows each place’s Buzz</small></>}
+            {mapZoom < 10.5 ? <><Sparkles /><span>Area heat</span><small>Tap a hot zone or zoom in for venues</small></> : <><MapPin /><span>Logo pins</span><small>The ring color shows each place’s Buzz</small></>}
           </div>
           {loading && <div className="buzz-map-loading"><i /> Updating Buzz</div>}
           {error && <button type="button" className="buzz-map-error" onClick={() => void loadNearby()}>{error} · Retry</button>}
@@ -613,11 +644,12 @@ export default function BuzzMapApp() {
       {selected && (
         <aside className="buzz-venue-detail">
           <button type="button" className="buzz-detail-close" onClick={() => setSelected(null)} aria-label="Close venue"><X /></button>
-          <div className="buzz-detail-photo">{selected.photoUrl ? <img src={selected.photoUrl} alt={selected.name} /> : <span>{selected.name.slice(0, 1)}</span>}<div><b>{score(selected)}</b><small>BUZZ</small></div></div>
+          <div className="buzz-detail-photo"><img src={getVenueLogo({ name: selected.name, website: selectedWebsite })} alt={`${selected.name} logo`} /><div><b>{score(selected)}</b><small>BUZZ</small></div></div>
           <div className="buzz-detail-body">
             <div className="buzz-detail-title"><div><small>{statusFor(selected).toUpperCase()} · {selected.activity?.scoreMode === "live" ? "LIVE" : "FORECAST"}</small><h2>{selected.name}</h2><p><MapPin /> {milesLabel(selected.distanceMiles) || selected.city || "Nearby"}{selected.area?.shortName ? ` · ${selected.area.shortName}` : ""}</p></div><button type="button" className={favoriteIds.has(selected.id) ? "saved" : ""} onClick={event => toggleFavorite(event, selected)}><Heart fill={favoriteIds.has(selected.id) ? "currentColor" : "none"} /></button></div>
 
             <div className="buzz-detail-reason"><Sparkles /><div><strong>Why Buzz thinks this</strong><p>{selected.reason || "Buzz is combining current activity signals for this place."}</p></div></div>
+            <div className="buzz-truth-note"><ShieldCheck /><div><strong>What this score can prove</strong><p>Buzz creates a useful forecast from hours, events, ticket demand, traffic patterns, provider data, and nearby phones. Exact physical occupancy still requires ticket scans, POS activity, door counters, or another direct venue feed.</p></div></div>
 
             <div className="buzz-detail-facts">
               <div><small>HOURS</small><strong>{selectedHours}</strong></div>
@@ -626,7 +658,7 @@ export default function BuzzMapApp() {
             </div>
 
             <section className="buzz-vote-card">
-              <header><div><small>VERIFY THE BUZZ</small><strong>How crowded is it?</strong><p>Nearby votes make this score more accurate.</p></div><em>+10 Buzz Points</em></header>
+              <header><div><small>OPTIONAL VERIFICATION</small><strong>How crowded is it?</strong><p>Buzz works without votes. Nearby votes verify and calibrate it faster.</p></div><em>+10 Buzz Points</em></header>
               <div>{crowdOptions.map(option => <button type="button" key={option.level} disabled={voting} onClick={() => void submitVote(option.level)}><span>{option.emoji}</span>{option.label}</button>)}</div>
               {voteMessage && <p>{voting && <i />}{voteMessage}</p>}
             </section>
