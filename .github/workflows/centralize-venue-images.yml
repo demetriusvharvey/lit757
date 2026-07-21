@@ -21,14 +21,7 @@ jobs:
           ref: fix/centralize-venue-images
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
       - run: node scripts/patch-venue-image-consumers.mjs
-      - run: npm ci
-      - run: npm run lint
 
       - name: Commit migrated consumers
         run: |
