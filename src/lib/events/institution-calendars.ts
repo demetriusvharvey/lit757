@@ -5,6 +5,7 @@ import {
   type CityCalendarSource,
   type NormalizedCityEvent,
 } from "./city-calendars";
+import { parseVenueListingEvents } from "./venue-listing";
 
 const EASTERN_TIME_ZONE = "America/New_York";
 const WINDOW_DAYS = 120;
@@ -432,6 +433,7 @@ function fallbackVenueDetail(source: InstitutionCalendarSource, html: string, ur
 async function fetchVenueHtml(source: InstitutionCalendarSource) {
   const listing = await fetchHtml(source.url);
   const listingEvents = parseCityCalendarJsonLd(listing, sourceAdapter(source));
+  const listingFallbackEvents = parseVenueListingEvents(listing, source);
   const links = extractInstitutionDetailLinks(listing, source);
   const detailEvents = (await mapLimit(links, DETAIL_CONCURRENCY, async link => {
     try {
@@ -444,7 +446,7 @@ async function fetchVenueHtml(source: InstitutionCalendarSource) {
       return [] as NormalizedCityEvent[];
     }
   })).flat();
-  const events = [...listingEvents, ...detailEvents];
+  const events = [...listingEvents, ...listingFallbackEvents, ...detailEvents];
   if (!events.length && !links.length) throw new Error("Official venue page exposed no event detail links or structured events");
   if (!events.length) throw new Error("Official venue event pages contained no parseable dates");
   return events;
