@@ -28,6 +28,7 @@ export type NormalizedCityEvent = {
   source_url: string | null;
   image_url: string | null;
   ticket_status: string | null;
+  cancelled?: boolean;
 };
 
 export type CityCalendarProvider = {
@@ -74,7 +75,7 @@ const VB_DETAIL_CONCURRENCY = 6;
 const VB_DETAIL_PAGE_LIMIT = 18;
 const RECURRENCE_WINDOW_PAST_MS = 24 * 60 * 60 * 1000;
 const RECURRENCE_WINDOW_FUTURE_MS = 121 * 24 * 60 * 60 * 1000;
-const MAX_RECURRENCE_ITERATIONS = 20_000;
+const MAX_RECURRENCE_ITERATIONS = 100_000;
 const MAX_RECURRENCE_OCCURRENCES = 2_000;
 const DAY_CODE_TO_UTC_DAY: Record<string, number> = {
   SU: 0,
@@ -208,6 +209,37 @@ function zonedDateTimeToIso(
     return new Date(candidate).toISOString();
   } catch {
     return null;
+  }
+}
+
+function calendarDateForInstant(timestamp: number, timeZone: string, zulu: boolean) {
+  if (zulu) return new Date(timestamp);
+  try {
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat("en-US", {
+        timeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hourCycle: "h23",
+      })
+        .formatToParts(new Date(timestamp))
+        .filter(part => part.type !== "literal")
+        .map(part => [part.type, Number(part.value)]),
+    );
+    return new Date(Date.UTC(
+      Number(parts.year),
+      Number(parts.month) - 1,
+      Number(parts.day),
+      Number(parts.hour),
+      Number(parts.minute),
+      Number(parts.second),
+    ));
+  } catch {
+    return new Date(timestamp);
   }
 }
 
@@ -501,9 +533,7 @@ function parseRRule(value: string | null): ParsedRRule | null {
 
   const interval = Math.max(1, Number.parseInt(String(fields.INTERVAL || "1"), 10) || 1);
   const rawCount = Number.parseInt(String(fields.COUNT || ""), 10);
-  const count = Number.isFinite(rawCount) && rawCount > 0
-    ? Math.min(rawCount, MAX_RECURRENCE_OCCURRENCES)
-    : null;
+  const count = Number.isFinite(rawCount) && rawCount > 0 ? rawCount : null;
   const byDay = String(fields.BYDAY || "")
     .split(",")
     .map(value => value.trim().toUpperCase())
@@ -598,7 +628,6 @@ function recurrenceCalendarDates(
   const windowStart = Date.now() - RECURRENCE_WINDOW_PAST_MS;
   const windowEnd = Date.now() + RECURRENCE_WINDOW_FUTURE_MS;
   const until = untilMilliseconds(rule, timeZone);
-  const bounded = rule.count !== null || until !== null;
   let occurrenceNumber = 0;
   let iterations = 0;
 
@@ -608,17 +637,26 @@ function recurrenceCalendarDates(
     if (!iso) return true;
     const timestamp = new Date(iso).getTime();
     if (until !== null && timestamp > until) return false;
-    if (!bounded && timestamp > windowEnd) return false;
+    if (timestamp > windowEnd) return false;
 
     occurrenceNumber += 1;
     if (rule.count !== null && occurrenceNumber > rule.count) return false;
-    if (bounded || timestamp >= windowStart) output.push(new Date(candidate));
+    if (timestamp >= windowStart) output.push(new Date(candidate));
     if (output.length >= MAX_RECURRENCE_OCCURRENCES) return false;
     return rule.count === null || occurrenceNumber < rule.count;
   }
 
   if (rule.freq === "DAILY") {
-    for (let offset = 0; iterations < MAX_RECURRENCE_ITERATIONS; offset += rule.interval) {
+    let firstOffset = 0;
+    const localWindow = calendarDateForInstant(windowStart, timeZone, startParts.zulu);
+    const daysToWindow = Math.floor((localWindow.getTime() - start.getTime()) / (24 * 60 * 60 * 1000));
+    if (daysToWindow > 0) {
+      const skippedIntervals = Math.max(0, Math.floor(daysToWindow / rule.interval) - 1);
+      firstOffset = skippedIntervals * rule.interval;
+      occurrenceNumber = skippedIntervals;
+    }
+
+    for (let offset = firstOffset; iterations < MAX_RECURRENCE_ITERATIONS; offset += rule.interval) {
       iterations += 1;
       const candidate = new Date(start);
       candidate.setUTCDate(candidate.getUTCDate() + offset);
@@ -695,14 +733,11 @@ function recurrenceCalendarDates(
   return output;
 }
 
-function recurrenceIdentity(
-  uid: string | null,
-  occurrenceIso: string,
-) {
+function recurrenceIdentity(uid: string | null, occurrenceIso: string) {
   return `${uid || "recurrence"}|${occurrenceIso}`;
 }
 
-function detachedOccurrenceIdentity(lines: string[], source: CityCalendarSource) {
+function detachedOccurrenceDetails(lines: string[], source: CityCalendarSource) {
   const recurrence = propertyEntry(lines, "RECURRENCE-ID");
   if (!recurrence) return null;
   const parts = parseCompactIcsParts(recurrence.value);
@@ -710,7 +745,9 @@ function detachedOccurrenceIdentity(lines: string[], source: CityCalendarSource)
     || (parts?.zulu ? "UTC" : source.timeZone)
     || EASTERN_TIME_ZONE;
   const iso = parseIcsDate(recurrence.value, timeZone);
-  return iso ? recurrenceIdentity(property(lines, "UID"), iso) : null;
+  return iso
+    ? { identity: recurrenceIdentity(property(lines, "UID"), iso), start: iso }
+    : null;
 }
 
 function exdateInstants(lines: string[], source: CityCalendarSource) {
@@ -768,6 +805,34 @@ function normalizedIcsEvent(
   };
 }
 
+function cancelledIcsEvent(
+  lines: string[],
+  source: CityCalendarSource,
+  identity: string,
+  recurrenceStart: string,
+): NormalizedCityEvent {
+  const name = property(lines, "SUMMARY") || "Cancelled event";
+  const venue = property(lines, "LOCATION") || source.venueName || source.name;
+  return {
+    source_event_id: cityEventFingerprint(source.id, identity, name, recurrenceStart, venue),
+    name,
+    description: property(lines, "DESCRIPTION"),
+    venue_name: venue,
+    address: venue,
+    city: source.city,
+    latitude: null,
+    longitude: null,
+    start_time: recurrenceStart,
+    end_time: null,
+    source: source.id,
+    source_name: source.name,
+    source_url: property(lines, "URL") || source.url,
+    image_url: null,
+    ticket_status: "cancelled",
+    cancelled: true,
+  };
+}
+
 function expandIcsBlock(lines: string[], source: CityCalendarSource) {
   const startProperty = propertyEntry(lines, "DTSTART");
   if (!startProperty) return [] as NormalizedCityEvent[];
@@ -782,11 +847,11 @@ function expandIcsBlock(lines: string[], source: CityCalendarSource) {
   const endParts = endProperty ? parseCompactIcsParts(endProperty.value) : null;
   const endTimeZone = endProperty?.params.TZID || startTimeZone;
   const endIso = endProperty ? parseIcsDate(endProperty.value, endTimeZone) : null;
-  const detachedIdentity = detachedOccurrenceIdentity(lines, source);
-  const rule = detachedIdentity ? null : parseRRule(property(lines, "RRULE"));
+  const detached = detachedOccurrenceDetails(lines, source);
+  const rule = detached ? null : parseRRule(property(lines, "RRULE"));
 
   if (!rule || !startParts) {
-    const externalId = detachedIdentity || property(lines, "UID");
+    const externalId = detached?.identity || property(lines, "UID");
     const event = normalizedIcsEvent(lines, source, startIso, endIso, externalId);
     return event ? [event] : [];
   }
@@ -842,32 +907,31 @@ export function parseCityCalendarIcs(text: string, source: CityCalendarSource): 
   }
 
   const events = new Map<string, { event: NormalizedCityEvent; detached: boolean }>();
-  const cancelled = new Set<string>();
+  const cancelled = new Map<string, NormalizedCityEvent>();
 
   for (const block of blocks) {
-    const detachedIdentity = detachedOccurrenceIdentity(block, source);
-    if (String(property(block, "STATUS") || "").toUpperCase() === "CANCELLED" && detachedIdentity) {
-      const startProperty = propertyEntry(block, "DTSTART");
-      const startParts = startProperty ? parseCompactIcsParts(startProperty.value) : null;
-      const zone = startProperty?.params.TZID
-        || (startParts?.zulu ? "UTC" : source.timeZone)
-        || EASTERN_TIME_ZONE;
-      const start = startProperty ? parseIcsDate(startProperty.value, zone) : null;
-      const title = property(block, "SUMMARY") || "cancelled";
-      const venue = property(block, "LOCATION") || source.venueName || source.name;
-      if (start) cancelled.add(cityEventFingerprint(source.id, detachedIdentity, title, start, venue));
+    const detached = detachedOccurrenceDetails(block, source);
+    if (String(property(block, "STATUS") || "").toUpperCase() === "CANCELLED" && detached) {
+      const cancellation = cancelledIcsEvent(block, source, detached.identity, detached.start);
+      events.delete(cancellation.source_event_id);
+      cancelled.set(cancellation.source_event_id, cancellation);
       continue;
     }
 
-    const detached = Boolean(detachedIdentity);
+    const isDetached = Boolean(detached);
     for (const event of expandIcsBlock(block, source)) {
       if (cancelled.has(event.source_event_id)) continue;
       const existing = events.get(event.source_event_id);
-      if (!existing || detached || !existing.detached) events.set(event.source_event_id, { event, detached });
+      if (!existing || isDetached || !existing.detached) {
+        events.set(event.source_event_id, { event, detached: isDetached });
+      }
     }
   }
 
-  return [...events.values()].map(value => value.event);
+  return [
+    ...[...events.values()].map(value => value.event),
+    ...cancelled.values(),
+  ];
 }
 
 export function parseCityCalendarJsonLd(
