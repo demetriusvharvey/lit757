@@ -77,3 +77,5 @@ jobs:
           git add src/lib/events/institution-calendars.ts
           git commit -m "Register Visit Newport News tourism RSS source"
           git push origin HEAD:feature/visit-newport-news-rss
+
+# Triggered after adapter and fixture tests were added.
