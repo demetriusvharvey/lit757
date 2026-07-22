@@ -86,6 +86,17 @@ test("recurring ICS occurrences receive distinct source event ids", () => {
   assert.notEqual(events[0].source_event_id, events[1].source_event_id);
 });
 
+test("RRULE series expand and respect EXDATE exclusions", () => {
+  const events = parseCityCalendarIcs(`BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:weekly-series\nSUMMARY:Weekly Series\nDTSTART;TZID=America/New_York:20260725T190000\nDTEND;TZID=America/New_York:20260725T210000\nRRULE:FREQ=WEEKLY;COUNT=3\nEXDATE;TZID=America/New_York:20260801T190000\nLOCATION:Town Center\nEND:VEVENT\nEND:VCALENDAR`, icsSource);
+
+  assert.equal(events.length, 2);
+  assert.deepEqual(events.map(event => event.start_time), [
+    "2026-07-25T23:00:00.000Z",
+    "2026-08-08T23:00:00.000Z",
+  ]);
+  assert.notEqual(events[0].source_event_id, events[1].source_event_id);
+});
+
 test("JSON-LD parser remains available for future tourism and venue sources", () => {
   const html = `<script type="application/ld+json">{
     "@context": "https://schema.org",
