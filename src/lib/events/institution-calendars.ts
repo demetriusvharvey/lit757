@@ -161,6 +161,16 @@ export const INSTITUTION_CALENDAR_SOURCES: InstitutionCalendarSource[] = [
     enabled: true,
     coverageNote: "Official destination calendar with local nightlife, food, arts, festivals, sports, classes, and community events.",
   },
+  {
+    id: "visit_hampton_official",
+    name: "Visit Hampton Events",
+    kind: "tourism",
+    city: "Hampton",
+    url: "https://visithampton.com/calendar/",
+    format: "tribe-api",
+    enabled: true,
+    coverageNote: "Official Hampton destination calendar with festivals, waterfront events, arts, sports, tours, food, and community programming.",
+  },
 ];
 
 const FETCH_HEADERS = {
