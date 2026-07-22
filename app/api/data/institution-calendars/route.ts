@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { fetchAllInstitutionCalendars } from "../../../../src/lib/events/institution-calendars";
+import { fetchAllInstitutionCalendarsWithExtensions } from "../../../../src/lib/events/all-institution-calendars";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function GET() {
-  const data = await fetchAllInstitutionCalendars();
+  const data = await fetchAllInstitutionCalendarsWithExtensions();
   const successfulSources = data.results.filter(result => result.status === "ok").length;
   const byKind = data.summary.byKind;
 
