@@ -1,4 +1,10 @@
-export const OVERPASS_ENDPOINT = process.env.OVERPASS_API_URL || "https://overpass-api.de/api/interpreter";
+export const OVERPASS_ENDPOINTS = process.env.OVERPASS_API_URL
+  ? [process.env.OVERPASS_API_URL]
+  : [
+    "https://overpass.maprva.org/api/interpreter",
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+  ];
 
 export const HAMPTON_ROADS_OSM_BOUNDS = {
   south: 36.42,
@@ -213,23 +219,33 @@ export function parseOverpassResponse(payload: unknown) {
 
 export async function fetchOsmVenueCandidates() {
   const query = buildHamptonRoadsOverpassQuery();
-  const response = await fetch(OVERPASS_ENDPOINT, {
-    method: "POST",
-    cache: "no-store",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-      "User-Agent": "Buzz/1.0 (https://lit757.vercel.app; demetriusvharvey@gmail.com)",
-      Referer: "https://lit757.vercel.app/",
-    },
-    body: new URLSearchParams({ data: query }).toString(),
-    signal: AbortSignal.timeout(48_000),
-  });
-  if (!response.ok) {
-    const body = (await response.text()).slice(0, 500);
-    throw new Error(`Overpass request failed (${response.status}): ${body}`);
+  const errors: string[] = [];
+  for (const endpoint of OVERPASS_ENDPOINTS) {
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "User-Agent": "Buzz/1.0 (https://lit757.vercel.app; demetriusvharvey@gmail.com)",
+        },
+        body: `data=${encodeURIComponent(query)}`,
+        signal: AbortSignal.timeout(48_000),
+      });
+      if (!response.ok) {
+        const body = (await response.text()).slice(0, 500);
+        errors.push(`${endpoint} returned ${response.status}: ${body}`);
+        continue;
+      }
+      return {
+        ...parseOverpassResponse(await response.json()),
+        endpoint,
+      };
+    } catch (error) {
+      errors.push(`${endpoint}: ${error instanceof Error ? error.message : "request failed"}`);
+    }
   }
-  return parseOverpassResponse(await response.json());
+  throw new Error(`All Overpass endpoints failed: ${errors.join(" | ")}`);
 }
 
 export function normalizeVenueName(value: unknown) {
