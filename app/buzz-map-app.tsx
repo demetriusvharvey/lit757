@@ -27,6 +27,10 @@ import {
   Navigation,
   Phone,
   Search,
+  Share2,
+  Copy,
+  MessageCircle,
+  Download,
   ShieldCheck,
   ShoppingBag,
   Sparkles,
@@ -37,6 +41,11 @@ import {
   X,
 } from "lucide-react";
 import { getVenueLogo } from "../src/lib/venue-logo";
+import {
+  buildInviteCrewText,
+  buildInviteCrewUrl,
+  buildStoryCardUrl,
+} from "../src/lib/invite-the-crew";
 
 type CrowdLevel = "quiet" | "steady" | "busy" | "packed";
 type Venue = {
@@ -187,6 +196,8 @@ export default function BuzzMapApp() {
   const [voting, setVoting] = useState(false);
   const [voteMessage, setVoteMessage] = useState("");
   const [watchMessage, setWatchMessage] = useState("");
+  const [shareMessage, setShareMessage] = useState("");
+  const [sharing, setSharing] = useState(false);
   const [reward, setReward] = useState<{ points: number; total: number | null } | null>(null);
 
   const mapEl = useRef<HTMLDivElement | null>(null);
@@ -194,6 +205,7 @@ export default function BuzzMapApp() {
   const selectedRef = useRef<(id: string) => void>(() => undefined);
   const authRef = useRef<SupabaseClient | null>(null);
   const requestSequenceRef = useRef(0);
+  const deepLinkHandledRef = useRef(false);
   const logoUrlsRef = useRef(new Map<string, string>());
   const loadingLogosRef = useRef(new Set<string>());
 
@@ -278,6 +290,18 @@ export default function BuzzMapApp() {
     if (validVenue(venue)) mapRef.current?.easeTo({ center: coordinates(venue), zoom: Math.max(13.2, mapRef.current.getZoom()), duration: 500 });
   }, [venues]);
   selectedRef.current = selectVenue;
+
+  useEffect(() => {
+    if (deepLinkHandledRef.current || !venues.length) return;
+    const params = new URLSearchParams(window.location.search);
+    const venueId = params.get("venue");
+    if (!venueId || !venues.some(venue => String(venue.id) === venueId)) return;
+    deepLinkHandledRef.current = true;
+    selectVenue(venueId);
+    if (params.get("invite") === "1") {
+      setShareMessage("This place is ready to share. Tap Invite the Crew to open your phone’s share sheet.");
+    }
+  }, [venues, selectVenue]);
 
   useEffect(() => {
     if (!selected) {
@@ -506,6 +530,98 @@ export default function BuzzMapApp() {
     await enableNotifications();
   }
 
+  function inviteVenue(venue: Venue) {
+    return {
+      id: venue.id,
+      name: venue.name,
+      city: venue.city || venue.area?.shortName || null,
+      latitude: venue.lat,
+      longitude: venue.lng,
+      status: statusFor(venue),
+      trend: venue.activity?.trendLabel || null,
+      mode: venue.activity?.scoreMode || "forecast",
+    };
+  }
+
+  async function copyInviteLink(venue: Venue) {
+    const link = buildInviteCrewUrl(window.location.origin, inviteVenue(venue));
+    try {
+      await navigator.clipboard.writeText(link);
+      setShareMessage("Invite link copied.");
+    } catch {
+      window.prompt("Copy this Buzz invite link", link);
+      setShareMessage("Copy the link above and send it to the crew.");
+    }
+  }
+
+  function textCrew(venue: Venue) {
+    const details = inviteVenue(venue);
+    const link = buildInviteCrewUrl(window.location.origin, details);
+    const body = `${buildInviteCrewText(details)} ${link}`;
+    window.location.href = `sms:?&body=${encodeURIComponent(body)}`;
+    setShareMessage("Opening your messages app…");
+  }
+
+  async function storyCardFile(venue: Venue) {
+    const details = inviteVenue(venue);
+    const response = await fetch(buildStoryCardUrl(window.location.origin, details));
+    if (!response.ok) throw new Error("Could not generate the Story card");
+    const blob = await response.blob();
+    const fileName = `buzz-${venue.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "venue"}.png`;
+    return new File([blob], fileName, { type: "image/png" });
+  }
+
+  async function downloadStoryCard(venue: Venue) {
+    setSharing(true);
+    try {
+      const file = await storyCardFile(venue);
+      const objectUrl = URL.createObjectURL(file);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = file.name;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+      setShareMessage("Story graphic saved. Post it anywhere your crew hangs out.");
+    } catch (shareError) {
+      setShareMessage(shareError instanceof Error ? shareError.message : "Could not save the Story graphic");
+    } finally {
+      setSharing(false);
+    }
+  }
+
+  async function shareWithCrew(venue: Venue) {
+    const details = inviteVenue(venue);
+    const link = buildInviteCrewUrl(window.location.origin, details);
+    const text = buildInviteCrewText(details);
+    setSharing(true);
+    setShareMessage("Generating the crew card…");
+    try {
+      const file = await storyCardFile(venue);
+      const canShareFile = typeof navigator.canShare === "function" && navigator.canShare({ files: [file] });
+      if (typeof navigator.share === "function") {
+        await navigator.share({
+          title: `${venue.name} on Buzz`,
+          text,
+          url: link,
+          ...(canShareFile ? { files: [file] } : {}),
+        });
+        setShareMessage("Shared with the crew.");
+      } else {
+        await copyInviteLink(venue);
+      }
+    } catch (shareError) {
+      if (shareError instanceof DOMException && shareError.name === "AbortError") {
+        setShareMessage("");
+      } else {
+        await copyInviteLink(venue);
+      }
+    } finally {
+      setSharing(false);
+    }
+  }
+
   async function useMyLocation() {
     setLoading(true);
     try {
@@ -663,7 +779,18 @@ export default function BuzzMapApp() {
               {voteMessage && <p>{voting && <i />}{voteMessage}</p>}
             </section>
 
-            <div className="buzz-detail-actions">
+            <section className="buzz-invite-card">
+    <header><div><small>FOMO MODE</small><strong>Bring the crew</strong><p>Share this venue’s surge—not your location—with one tap.</p></div><Share2 /></header>
+    <button type="button" className="buzz-invite-primary" disabled={sharing} onClick={() => void shareWithCrew(selected)}><Share2 />{sharing ? "Building the Story card…" : "Invite the Crew"}</button>
+    <div>
+      <button type="button" onClick={() => void copyInviteLink(selected)}><Copy />Copy link</button>
+      <button type="button" onClick={() => textCrew(selected)}><MessageCircle />Text crew</button>
+      <button type="button" disabled={sharing} onClick={() => void downloadStoryCard(selected)}><Download />Save Story</button>
+    </div>
+    {shareMessage && <p>{shareMessage}</p>}
+  </section>
+
+  <div className="buzz-detail-actions">
               <button type="button" onClick={() => void toggleWatch(selected)}><Bell fill={watchedIds.has(selected.id) ? "currentColor" : "none"} />{watchedIds.has(selected.id) ? "Watching" : "Alert me"}</button>
               <button type="button" onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(selectedAddress || `${selected.lat},${selected.lng}`)}`, "_blank")}><Navigation />Directions</button>
               {selectedPhone && <a href={`tel:${selectedPhone}`}><Phone />Call</a>}
