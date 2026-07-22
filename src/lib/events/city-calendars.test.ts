@@ -6,6 +6,8 @@ import {
   extractEventDetailLinks,
   parseCityCalendarIcs,
   parseCityCalendarJsonLd,
+  parseVirginiaBeachEventDetail,
+  parseVirginiaBeachEventListing,
   type CityCalendarSource,
 } from "./city-calendars";
 
@@ -15,6 +17,16 @@ const icsSource: CityCalendarSource = {
   city: "Virginia Beach",
   url: "https://example.com/events.ics",
   format: "ics",
+  enabled: true,
+  timeZone: "America/New_York",
+};
+
+const jsonLdSource: CityCalendarSource = {
+  id: "test_jsonld",
+  name: "Test JSON-LD",
+  city: "Virginia Beach",
+  url: "https://www.visitvirginiabeach.com/events/",
+  format: "html-jsonld",
   enabled: true,
   timeZone: "America/New_York",
 };
@@ -32,11 +44,11 @@ test("registry includes all seven Hampton Roads cities", () => {
   ]));
 });
 
-test("Virginia Beach uses the official tourism calendar HTML provider", () => {
+test("Virginia Beach uses the official city calendar provider", () => {
   const source = CITY_CALENDAR_SOURCES.find(candidate => candidate.city === "Virginia Beach");
-  assert.equal(source?.format, "html-jsonld");
+  assert.equal(source?.format, "vb-city-html");
   assert.equal(source?.enabled, true);
-  assert.equal(source?.url, "https://www.visitvirginiabeach.com/events/");
+  assert.equal(source?.url, "https://virginiabeach.gov/connect/events");
 });
 
 test("parser normalizes an ICS event", () => {
@@ -58,8 +70,7 @@ test("ICS parser respects TZID instead of using the server timezone", () => {
   assert.equal(events[0].end_time, "2026-07-26T01:00:00.000Z");
 });
 
-test("JSON-LD parser normalizes Visit Virginia Beach event metadata", () => {
-  const source = CITY_CALENDAR_SOURCES[0];
+test("JSON-LD parser remains available for future tourism and venue sources", () => {
   const html = `<script type="application/ld+json">{
     "@context": "https://schema.org",
     "@type": "Event",
@@ -82,7 +93,7 @@ test("JSON-LD parser normalizes Visit Virginia Beach event metadata", () => {
     }
   }</script>`;
 
-  const events = parseCityCalendarJsonLd(html, source);
+  const events = parseCityCalendarJsonLd(html, jsonLdSource);
   assert.equal(events.length, 1);
   assert.equal(events[0].name, "Oceanfront Concert");
   assert.equal(events[0].description, "Free & live music");
@@ -93,18 +104,67 @@ test("JSON-LD parser normalizes Visit Virginia Beach event metadata", () => {
   assert.equal(events[0].image_url, "https://example.com/concert.jpg");
 });
 
-test("event detail link discovery keeps only official event pages", () => {
-  const source = CITY_CALENDAR_SOURCES[0];
+test("generic event detail discovery stays scoped to its configured host", () => {
   const links = extractEventDetailLinks(`
     <a href="/event/oceanfront-concert/12345/">Concert</a>
     <a href="https://www.visitvirginiabeach.com/event/other-event/67890/?tracking=1">Other</a>
     <a href="https://example.com/event/not-official/999/">External</a>
-  `, source);
+  `, jsonLdSource);
 
   assert.deepEqual(links, [
     "https://www.visitvirginiabeach.com/event/oceanfront-concert/12345/",
     "https://www.visitvirginiabeach.com/event/other-event/67890/",
   ]);
+});
+
+test("Virginia Beach listing parser finds only dated official event links", () => {
+  const source = CITY_CALENDAR_SOURCES[0];
+  const events = parseVirginiaBeachEventListing(`
+    <a href="/connect/events/community-meeting/2026-07-29">Community Meeting</a>
+    <a href="https://virginiabeach.gov/connect/events/live-music/2026-08-01">Live Music</a>
+    <a href="/connect/events">All Events</a>
+    <a href="https://example.com/connect/events/external/2026-08-02">External</a>
+  `, source);
+
+  assert.deepEqual(events, [
+    {
+      name: "Community Meeting",
+      date: "2026-07-29",
+      url: "https://virginiabeach.gov/connect/events/community-meeting/2026-07-29",
+    },
+    {
+      name: "Live Music",
+      date: "2026-08-01",
+      url: "https://virginiabeach.gov/connect/events/live-music/2026-08-01",
+    },
+  ]);
+});
+
+test("Virginia Beach detail parser normalizes time, venue, address and description", () => {
+  const source = CITY_CALENDAR_SOURCES[0];
+  const listing = {
+    name: "Community Meeting",
+    date: "2026-07-29",
+    url: "https://virginiabeach.gov/connect/events/community-meeting/2026-07-29",
+  };
+  const event = parseVirginiaBeachEventDetail(`
+    <h1>Community Meeting</h1>
+    <h3>Date &amp; Time</h3>
+    <div>Wednesday, July 29, 2026<br>6:00p.m. - 7:30p.m.</div>
+    <h3>Location</h3>
+    <div>Convention and Visitors Bureau Office<br>600 22nd St., Suite 200, Virginia Beach, Virginia 23451</div>
+    <p><strong>Event Details:</strong></p>
+    <p>Open to the public.</p>
+    <h3>Event Contact</h3>
+  `, listing, source);
+
+  assert.equal(event.name, "Community Meeting");
+  assert.equal(event.start_time, "2026-07-29T22:00:00.000Z");
+  assert.equal(event.end_time, "2026-07-29T23:30:00.000Z");
+  assert.equal(event.venue_name, "Convention and Visitors Bureau Office");
+  assert.equal(event.address, "600 22nd St., Suite 200, Virginia Beach, Virginia 23451");
+  assert.equal(event.description, "Open to the public.");
+  assert.equal(event.source_url, listing.url);
 });
 
 test("fingerprint prefers external id and has deterministic fallback", () => {
