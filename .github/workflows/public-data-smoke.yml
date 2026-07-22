@@ -109,8 +109,10 @@ jobs:
           calendars = None
           city_health = {}
           for attempt in range(1, 4):
+              probe = int(time.time() * 1000)
+              path = f"/api/data/city-calendars?smokeAttempt={attempt}&probe={probe}"
               calendars = get(
-                  "/api/data/city-calendars",
+                  path,
                   timeout=120,
                   report_key=f"/api/data/city-calendars#attempt-{attempt}",
               )
@@ -134,7 +136,7 @@ jobs:
                   time.sleep(12)
           else:
               raise AssertionError(
-                  "Official city calendars remained unhealthy after 3 attempts: "
+                  "Official city calendars remained unhealthy after 3 independent attempts: "
                   + json.dumps(calendar_attempts)
               )
 
