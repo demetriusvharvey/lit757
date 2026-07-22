@@ -1,0 +1,139 @@
+name: Apply recurrence review fixes
+
+on:
+  push:
+    branches:
+      - feature/hampton-roads-city-calendar-ingestion
+    paths:
+      - .github/workflows/apply-recurrence-review-fixes.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/hampton-roads-city-calendar-ingestion
+          fetch-depth: 0
+      - name: Patch recurrence behavior
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/lib/events/city-calendars.ts")
+          text = path.read_text()
+
+          old_daily = '''  if (rule.freq === "DAILY") {
+            let firstOffset = 0;
+            const localWindow = calendarDateForInstant(windowStart, timeZone, startParts.zulu);
+            const daysToWindow = Math.floor((localWindow.getTime() - start.getTime()) / (24 * 60 * 60 * 1000));
+            if (daysToWindow > 0) {
+              const skippedIntervals = Math.max(0, Math.floor(daysToWindow / rule.interval) - 1);
+              firstOffset = skippedIntervals * rule.interval;
+              occurrenceNumber = skippedIntervals;
+            }
+
+            for (let offset = firstOffset; iterations < MAX_RECURRENCE_ITERATIONS; offset += rule.interval) {
+              iterations += 1;
+              const candidate = new Date(start);
+              candidate.setUTCDate(candidate.getUTCDate() + offset);
+              if (!addCandidate(candidate)) break;
+            }
+            return output;
+          }'''
+          new_daily = '''  if (rule.freq === "DAILY") {
+            const permittedDays = new Set(
+              rule.byDay
+                .map(token => token.slice(-2))
+                .map(code => DAY_CODE_TO_UTC_DAY[code])
+                .filter(day => day !== undefined),
+            );
+            let firstOffset = 0;
+            const localWindow = calendarDateForInstant(windowStart, timeZone, startParts.zulu);
+            const daysToWindow = Math.floor((localWindow.getTime() - start.getTime()) / (24 * 60 * 60 * 1000));
+            if (daysToWindow > 0 && permittedDays.size === 0) {
+              const skippedIntervals = Math.max(0, Math.floor(daysToWindow / rule.interval) - 1);
+              firstOffset = skippedIntervals * rule.interval;
+              occurrenceNumber = skippedIntervals;
+            }
+
+            for (let offset = firstOffset; iterations < MAX_RECURRENCE_ITERATIONS; offset += rule.interval) {
+              iterations += 1;
+              const candidate = new Date(start);
+              candidate.setUTCDate(candidate.getUTCDate() + offset);
+              if (permittedDays.size && !permittedDays.has(candidate.getUTCDay())) continue;
+              if (!addCandidate(candidate)) break;
+            }
+            return output;
+          }'''
+          if old_daily not in text:
+              raise SystemExit("Expected daily recurrence block was not found")
+          text = text.replace(old_daily, new_daily, 1)
+
+          old_cancel = '''  for (const block of blocks) {
+            const detached = detachedOccurrenceDetails(block, source);
+            if (String(property(block, "STATUS") || "").toUpperCase() === "CANCELLED" && detached) {
+              const cancellation = cancelledIcsEvent(block, source, detached.identity, detached.start);
+              events.delete(cancellation.source_event_id);
+              cancelled.set(cancellation.source_event_id, cancellation);
+              continue;
+            }
+
+            const isDetached = Boolean(detached);
+            for (const event of expandIcsBlock(block, source)) {
+              if (cancelled.has(event.source_event_id)) continue;
+              const existing = events.get(event.source_event_id);
+              if (!existing || isDetached || !existing.detached) {
+                events.set(event.source_event_id, { event, detached: isDetached });
+              }
+            }
+          }'''
+          new_cancel = '''  for (const block of blocks) {
+            const detached = detachedOccurrenceDetails(block, source);
+            const isCancelled = String(property(block, "STATUS") || "").toUpperCase() === "CANCELLED";
+            if (isCancelled && detached) {
+              const cancellation = cancelledIcsEvent(block, source, detached.identity, detached.start);
+              events.delete(cancellation.source_event_id);
+              cancelled.set(cancellation.source_event_id, cancellation);
+              continue;
+            }
+
+            if (isCancelled) {
+              for (const event of expandIcsBlock(block, source)) {
+                const cancellation = {
+                  ...event,
+                  ticket_status: "cancelled",
+                  cancelled: true,
+                };
+                events.delete(cancellation.source_event_id);
+                cancelled.set(cancellation.source_event_id, cancellation);
+              }
+              continue;
+            }
+
+            const isDetached = Boolean(detached);
+            for (const event of expandIcsBlock(block, source)) {
+              if (cancelled.has(event.source_event_id)) continue;
+              const existing = events.get(event.source_event_id);
+              if (!existing || isDetached || !existing.detached) {
+                events.set(event.source_event_id, { event, detached: isDetached });
+              }
+            }
+          }'''
+          if old_cancel not in text:
+              raise SystemExit("Expected cancellation parser block was not found")
+          path.write_text(text.replace(old_cancel, new_cancel, 1))
+          PY
+      - name: Commit recurrence fixes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/events/city-calendars.ts
+          git commit -m "Honor recurrence filters and series cancellations"
+          git push origin HEAD:feature/hampton-roads-city-calendar-ingestion
