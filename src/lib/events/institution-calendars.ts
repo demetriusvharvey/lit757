@@ -358,7 +358,10 @@ async function fetchTribe(source: InstitutionCalendarSource) {
     endpoint.searchParams.set("page", String(page));
     const payload = record(await fetchJson(endpoint.toString()));
     const rows = Array.isArray(payload?.events) ? payload.events : [];
-    events.push(...rows.map(row => tribeEvent(source, row)).filter((event): event is NormalizedCityEvent => Boolean(event)));
+    for (const row of rows) {
+    const event = tribeEvent(source, row);
+    if (event) events.push(event);
+  }
     const totalPages = numberValue(payload?.total_pages || payload?.totalPages);
     if (!rows.length || (totalPages !== null && page >= totalPages) || rows.length < 100) break;
   }
