@@ -46,6 +46,12 @@ import {
   buildInviteCrewUrl,
   buildStoryCardUrl,
 } from "../src/lib/invite-the-crew";
+import {
+  contextualVibe,
+  discoveryDaypart,
+  orderedDiscoveryCategories,
+  type DiscoveryDaypart,
+} from "../src/lib/adaptive-discovery";
 
 type CrowdLevel = "quiet" | "steady" | "busy" | "packed";
 type Venue = {
@@ -189,6 +195,7 @@ export default function BuzzMapApp() {
   const [error, setError] = useState("");
   const [mapReady, setMapReady] = useState(false);
   const [mapZoom, setMapZoom] = useState(8.8);
+  const [daypart, setDaypart] = useState<DiscoveryDaypart>(() => discoveryDaypart());
   const [listExpanded, setListExpanded] = useState(false);
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(() => new Set());
   const [watchedIds, setWatchedIds] = useState<Set<string>>(() => new Set());
@@ -273,6 +280,17 @@ export default function BuzzMapApp() {
     };
   }, [loadNearby]);
 
+  useEffect(() => {
+    const syncDaypart = () => setDaypart(discoveryDaypart());
+    syncDaypart();
+    const timer = window.setInterval(syncDaypart, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const orderedCategories = useMemo(() => orderedDiscoveryCategories(daypart)
+    .map(label => categories.find(([candidate]) => candidate === label))
+    .filter((item): item is typeof categories[number] => Boolean(item)), [daypart]);
+
   const filtered = useMemo(() => {
     const clean = query.trim().toLowerCase();
     return [...venues]
@@ -280,6 +298,15 @@ export default function BuzzMapApp() {
       .filter(venue => !clean || `${venue.name} ${venue.city || ""} ${venue.type || ""} ${venue.category || ""} ${venue.event?.name || ""}`.toLowerCase().includes(clean))
       .sort((left, right) => score(right) - score(left) || (left.distanceMiles ?? 999) - (right.distanceMiles ?? 999));
   }, [venues, active, query]);
+
+  const vibeFor = useCallback((venue: Venue) => contextualVibe({
+    category: categoryFor(venue),
+    type: venue.type || venue.kind,
+    score: score(venue),
+    hasEvent: Boolean(venue.event?.name),
+    trend: venue.activity?.trendLabel,
+    scoreMode: venue.activity?.scoreMode,
+  }, daypart), [daypart]);
 
   const selectVenue = useCallback((id: string) => {
     const venue = venues.find(item => String(item.id) === String(id));
@@ -345,6 +372,16 @@ export default function BuzzMapApp() {
     if (!map || !mapReady || map.getSource("buzz-map-venues")) return;
     const empty: GeoJSON.FeatureCollection<GeoJSON.Point> = { type: "FeatureCollection", features: [] };
     map.addSource("buzz-map-venues", { type: "geojson", data: empty });
+    map.addSource("buzz-map-clusters", {
+      type: "geojson",
+      data: empty,
+      cluster: true,
+      clusterRadius: 64,
+      clusterMaxZoom: 12,
+      clusterProperties: {
+        maxScore: ["max", ["get", "score"]],
+      },
+    } as mapboxgl.GeoJSONSourceSpecification);
 
     const buzzColor: any = [
       "interpolate", ["linear"], ["get", "score"],
@@ -379,34 +416,84 @@ export default function BuzzMapApp() {
     });
 
     map.addLayer({
+      id: "buzz-heat-hub-glow",
+      type: "circle",
+      source: "buzz-map-clusters",
+      minzoom: 9,
+      maxzoom: 13,
+      filter: ["has", "point_count"],
+      paint: {
+        "circle-radius": ["step", ["get", "point_count"], 28, 8, 38, 20, 50],
+        "circle-color": ["interpolate", ["linear"], ["coalesce", ["get", "maxScore"], 40], 35, "#34d399", 60, "#facc15", 78, "#fb923c", 90, "#ef4444"],
+        "circle-opacity": 0.24,
+        "circle-blur": 0.72,
+      },
+    });
+    map.addLayer({
+      id: "buzz-heat-hubs",
+      type: "circle",
+      source: "buzz-map-clusters",
+      minzoom: 9,
+      maxzoom: 13,
+      filter: ["has", "point_count"],
+      paint: {
+        "circle-radius": ["step", ["get", "point_count"], 20, 8, 27, 20, 35],
+        "circle-color": ["interpolate", ["linear"], ["coalesce", ["get", "maxScore"], 40], 35, "#163c38", 60, "#4a4015", 78, "#632d17", 90, "#6f1d27"],
+        "circle-stroke-width": 4,
+        "circle-stroke-color": ["interpolate", ["linear"], ["coalesce", ["get", "maxScore"], 40], 35, "#34d399", 60, "#facc15", 78, "#fb923c", 90, "#ef4444"],
+      },
+    });
+    map.addLayer({
+      id: "buzz-heat-hub-count",
+      type: "symbol",
+      source: "buzz-map-clusters",
+      minzoom: 9,
+      maxzoom: 13,
+      filter: ["has", "point_count"],
+      layout: {
+        "text-field": ["concat", ["get", "point_count_abbreviated"], " SPOTS"],
+        "text-size": ["step", ["get", "point_count"], 9, 10, 10, 25, 11],
+        "text-font": ["DIN Pro Bold", "Arial Unicode MS Bold"],
+        "text-allow-overlap": true,
+      },
+      paint: {
+        "text-color": "#ffffff",
+        "text-halo-color": "rgba(8,11,16,.75)",
+        "text-halo-width": 1,
+      },
+    });
+    map.addLayer({
       id: "buzz-pin-glow",
       type: "circle",
-      source: "buzz-map-venues",
+      source: "buzz-map-clusters",
       minzoom: 10.5,
+      filter: ["!", ["has", "point_count"]],
       paint: {
-        "circle-radius": ["case", ["==", ["get", "selected"], true], 27, ["interpolate", ["linear"], ["get", "score"], 20, 12, 100, 23]],
+        "circle-radius": ["case", ["==", ["get", "selected"], true], 29, ["interpolate", ["linear"], ["get", "score"], 20, 13, 100, 24]],
         "circle-color": buzzColor,
-        "circle-opacity": ["case", ["==", ["get", "selected"], true], 0.5, 0.28],
-        "circle-blur": 0.78,
+        "circle-opacity": ["case", ["==", ["get", "selected"], true], 0.55, 0.32],
+        "circle-blur": 0.76,
       },
     });
     map.addLayer({
       id: "buzz-venue-pins",
       type: "circle",
-      source: "buzz-map-venues",
+      source: "buzz-map-clusters",
       minzoom: 10.5,
+      filter: ["!", ["has", "point_count"]],
       paint: {
-        "circle-radius": ["case", ["==", ["get", "selected"], true], 17, ["interpolate", ["linear"], ["zoom"], 10.5, 12, 15, 15]],
+        "circle-radius": ["case", ["==", ["get", "selected"], true], 18, ["interpolate", ["linear"], ["zoom"], 10.5, 12.5, 15, 15.5]],
         "circle-color": "#ffffff",
-        "circle-stroke-width": ["case", ["==", ["get", "selected"], true], 4, 3],
+        "circle-stroke-width": ["case", ["==", ["get", "selected"], true], 6, 4],
         "circle-stroke-color": buzzColor,
       },
     });
     map.addLayer({
       id: "buzz-pin-logo",
       type: "symbol",
-      source: "buzz-map-venues",
+      source: "buzz-map-clusters",
       minzoom: 10.5,
+      filter: ["!", ["has", "point_count"]],
       layout: {
         "icon-image": ["get", "logoKey"],
         "icon-size": ["interpolate", ["linear"], ["zoom"], 10.5, 0.2, 15, 0.25],
@@ -417,9 +504,10 @@ export default function BuzzMapApp() {
     map.addLayer({
       id: "buzz-pin-hitbox",
       type: "circle",
-      source: "buzz-map-venues",
+      source: "buzz-map-clusters",
       minzoom: 10.2,
-      paint: { "circle-radius": 28, "circle-color": "rgba(0,0,0,.01)", "circle-opacity": 0.01 },
+      filter: ["!", ["has", "point_count"]],
+      paint: { "circle-radius": 30, "circle-color": "rgba(0,0,0,.01)", "circle-opacity": 0.01 },
     });
 
     const onStyleImageMissing = (event: { id: string }) => {
@@ -443,13 +531,19 @@ export default function BuzzMapApp() {
       if (map.getZoom() >= 10.5) return;
       map.easeTo({ center: event.lngLat, zoom: Math.min(12, map.getZoom() + 2.3), duration: 520 });
     };
+    const onHeatHubClick = (event: mapboxgl.MapLayerMouseEvent) => {
+      map.easeTo({ center: event.lngLat, zoom: Math.min(14, map.getZoom() + 2.4), duration: 520 });
+    };
     const enter = () => { map.getCanvas().style.cursor = "pointer"; };
     const leave = () => { map.getCanvas().style.cursor = ""; };
     map.on("styleimagemissing", onStyleImageMissing);
     map.on("click", "buzz-pin-hitbox", onVenueClick);
     map.on("click", "buzz-area-heat", onHeatClick);
+    map.on("click", "buzz-heat-hubs", onHeatHubClick);
     map.on("mouseenter", "buzz-pin-hitbox", enter);
+    map.on("mouseenter", "buzz-heat-hubs", enter);
     map.on("mouseleave", "buzz-pin-hitbox", leave);
+    map.on("mouseleave", "buzz-heat-hubs", leave);
     map.on("mouseenter", "buzz-area-heat", enter);
     map.on("mouseleave", "buzz-area-heat", leave);
     return () => {
@@ -457,16 +551,20 @@ export default function BuzzMapApp() {
       if (!map.getLayer("buzz-pin-hitbox")) return;
       map.off("click", "buzz-pin-hitbox", onVenueClick);
       map.off("click", "buzz-area-heat", onHeatClick);
+      map.off("click", "buzz-heat-hubs", onHeatHubClick);
       map.off("mouseenter", "buzz-pin-hitbox", enter);
       map.off("mouseleave", "buzz-pin-hitbox", leave);
+      map.off("mouseenter", "buzz-heat-hubs", enter);
+      map.off("mouseleave", "buzz-heat-hubs", leave);
       map.off("mouseenter", "buzz-area-heat", enter);
       map.off("mouseleave", "buzz-area-heat", leave);
     };
   }, [mapReady]);
 
   useEffect(() => {
-    const source = mapRef.current?.getSource("buzz-map-venues") as mapboxgl.GeoJSONSource | undefined;
-    if (!source) return;
+    const heatSource = mapRef.current?.getSource("buzz-map-venues") as mapboxgl.GeoJSONSource | undefined;
+    const clusterSource = mapRef.current?.getSource("buzz-map-clusters") as mapboxgl.GeoJSONSource | undefined;
+    if (!heatSource || !clusterSource) return;
     const nextLogoUrls = new Map<string, string>();
     const features: GeoJSON.Feature<GeoJSON.Point>[] = filtered.filter(validVenue).map(venue => {
       const logoKey = logoKeyFor(venue);
@@ -484,7 +582,9 @@ export default function BuzzMapApp() {
       };
     });
     logoUrlsRef.current = nextLogoUrls;
-    source.setData({ type: "FeatureCollection", features });
+    const collection: GeoJSON.FeatureCollection<GeoJSON.Point> = { type: "FeatureCollection", features };
+    heatSource.setData(collection);
+    clusterSource.setData(collection);
   }, [filtered, selected?.id, mapReady]);
 
   function toggleFavorite(event: ReactMouseEvent, venue: Venue) {
@@ -703,9 +803,10 @@ export default function BuzzMapApp() {
   const selectedPhone = detail?.phone || selected?.phone;
   const selectedWebsite = detail?.website || selected?.website;
   const selectedAddress = detail?.address || selected?.address;
+  const selectedVibe = selected ? vibeFor(selected) : null;
 
   return (
-    <div className="buzz-map-app">
+    <div className={`buzz-map-app ${daypart === "day" ? "daytime" : "nighttime"}`}>
       <header className="buzz-map-header">
         <button type="button" className="buzz-map-brand" onClick={() => { mapRef.current?.easeTo({ center: DEFAULT_CENTER, zoom: 8.8, duration: 600 }); void loadNearby(); }}>
           <strong>BUZZ</strong><span>THINGS TO DO NOW</span>
@@ -719,7 +820,7 @@ export default function BuzzMapApp() {
       </header>
 
       <nav className="buzz-map-filters" aria-label="Filter places">
-        {categories.map(([label, Icon]) => <button type="button" key={label} className={active === label ? "active" : ""} onClick={() => setActive(label)} aria-pressed={active === label}><Icon /><span>{label}</span></button>)}
+        {orderedCategories.map(([label, Icon]) => <button type="button" key={label} className={active === label ? "active" : ""} onClick={() => setActive(label)} aria-pressed={active === label}><Icon /><span>{label}</span></button>)}
       </nav>
 
       <main className="buzz-map-layout">
@@ -732,13 +833,16 @@ export default function BuzzMapApp() {
             <span className="buzz-heat-key"><i /> Heat map <b>→</b> logo pins</span>
           </div>
           <div className="buzz-map-list-scroll">
-            {filtered.map((venue, index) => (
-              <article key={venue.id} className={selected?.id === venue.id ? "selected" : ""} onClick={() => selectVenue(venue.id)}>
-                <div className="buzz-list-photo"><img src={logoUrlFor(venue)} alt={`${venue.name} logo`} loading="lazy" decoding="async" /><b>{score(venue)}</b></div>
-                <div className="buzz-list-copy"><small>{index === 0 ? "BEST NOW" : `#${index + 1}`} · {categoryFor(venue)} · {milesLabel(venue.distanceMiles) || venue.city || "Nearby"}</small><strong>{venue.name}</strong><p>{venue.event?.name || venue.reason || "Available right now"}</p><span className={`buzz-status s${Math.floor(score(venue) / 20)}`}>{statusFor(venue)}{venue.activity?.scoreMode === "live" ? " · Live" : " · Forecast"}</span></div>
-                <button type="button" className={favoriteIds.has(venue.id) ? "saved" : ""} onClick={event => toggleFavorite(event, venue)} aria-label={`Save ${venue.name}`}><Heart fill={favoriteIds.has(venue.id) ? "currentColor" : "none"} /></button>
-              </article>
-            ))}
+            {filtered.map((venue, index) => {
+              const vibe = vibeFor(venue);
+              return (
+                <article key={venue.id} className={selected?.id === venue.id ? "selected" : ""} onClick={() => selectVenue(venue.id)}>
+                  <div className="buzz-list-photo"><img src={logoUrlFor(venue)} alt={`${venue.name} logo`} loading="lazy" decoding="async" /><b>{score(venue)}</b></div>
+                  <div className="buzz-list-copy"><small>{index === 0 ? "BEST NOW" : `#${index + 1}`} · {categoryFor(venue)} · {milesLabel(venue.distanceMiles) || venue.city || "Nearby"}</small><strong>{venue.name}</strong><span className={`buzz-vibe-tag ${vibe.truth}`}>{vibe.label}<b>{vibe.truth === "live" ? "LIVE" : "FORECAST"}</b></span><p>{venue.event?.name || venue.reason || "Available right now"}</p><span className={`buzz-status s${Math.floor(score(venue) / 20)}`}>{statusFor(venue)}{venue.activity?.scoreMode === "live" ? " · Live" : " · Forecast"}</span></div>
+                  <button type="button" className={favoriteIds.has(venue.id) ? "saved" : ""} onClick={event => toggleFavorite(event, venue)} aria-label={`Save ${venue.name}`}><Heart fill={favoriteIds.has(venue.id) ? "currentColor" : "none"} /></button>
+                </article>
+              );
+            })}
             {!loading && !filtered.length && <div className="buzz-map-empty"><Search /><strong>No places match this filter</strong><p>Try All or zoom to another area.</p></div>}
           </div>
         </aside>
@@ -750,7 +854,7 @@ export default function BuzzMapApp() {
             <button type="button" onClick={() => void searchThisMap()}><Search /> Search this map</button>
           </div>
           <div className="buzz-map-mode">
-            {mapZoom < 10.5 ? <><Sparkles /><span>Area heat</span><small>Tap a hot zone or zoom in for venues</small></> : <><MapPin /><span>Logo pins</span><small>The ring color shows each place’s Buzz</small></>}
+            {mapZoom < 9.8 ? <><Sparkles /><span>Area heat</span><small>Tap a hot zone or zoom in for venues</small></> : mapZoom < 12.6 ? <><Sparkles /><span>Heat hubs</span><small>Tap a hub to reveal its venues</small></> : <><MapPin /><span>Logo pins</span><small>Thick rings show each place’s Buzz</small></>}
           </div>
           {loading && <div className="buzz-map-loading"><i /> Updating Buzz</div>}
           {error && <button type="button" className="buzz-map-error" onClick={() => void loadNearby()}>{error} · Retry</button>}
@@ -764,6 +868,7 @@ export default function BuzzMapApp() {
           <div className="buzz-detail-body">
             <div className="buzz-detail-title"><div><small>{statusFor(selected).toUpperCase()} · {selected.activity?.scoreMode === "live" ? "LIVE" : "FORECAST"}</small><h2>{selected.name}</h2><p><MapPin /> {milesLabel(selected.distanceMiles) || selected.city || "Nearby"}{selected.area?.shortName ? ` · ${selected.area.shortName}` : ""}</p></div><button type="button" className={favoriteIds.has(selected.id) ? "saved" : ""} onClick={event => toggleFavorite(event, selected)}><Heart fill={favoriteIds.has(selected.id) ? "currentColor" : "none"} /></button></div>
 
+            {selectedVibe && <div className={`buzz-detail-vibe ${selectedVibe.truth}`}><span>{selectedVibe.label}</span><b>{selectedVibe.truth === "live" ? "LIVE" : "FORECAST"}</b></div>}
             <div className="buzz-detail-reason"><Sparkles /><div><strong>Why Buzz thinks this</strong><p>{selected.reason || "Buzz is combining current activity signals for this place."}</p></div></div>
             <div className="buzz-truth-note"><ShieldCheck /><div><strong>What this score can prove</strong><p>Buzz creates a useful forecast from hours, events, ticket demand, traffic patterns, provider data, and nearby phones. Exact physical occupancy still requires ticket scans, POS activity, door counters, or another direct venue feed.</p></div></div>
 
