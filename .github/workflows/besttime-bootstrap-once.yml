@@ -1,0 +1,112 @@
+name: BestTime trial bootstrap once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/besttime-bootstrap-once.yml"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Bootstrap 25 BestTime venues
+        env:
+          BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'status=$?; if [ "$status" -ne 0 ]; then printf "## BestTime trial activation failed\n\nThe one-time GitHub bootstrap did not complete successfully. Check the workflow logs and confirm `BUZZ_PRODUCTION_URL`, `CRON_SECRET`, and the Vercel `BESTTIME_API_KEY_PRIVATE` production variable are available.\n\nCommit: `%s`\n" "$GITHUB_SHA" > besttime-bootstrap-summary.md; fi' EXIT
+
+          : "${BASE_URL:?Add BUZZ_PRODUCTION_URL as a GitHub Actions secret}"
+          : "${CRON_SECRET:?Add CRON_SECRET as a GitHub Actions secret}"
+
+          curl --silent --show-error --fail-with-body --retry 2 --retry-all-errors --max-time 300 \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${BASE_URL%/}/api/buzz/refresh?provider=besttime&action=bootstrap&limit=25" \
+            | tee besttime-bootstrap.json
+
+          python - <<'PY'
+          import json
+          import os
+
+          with open("besttime-bootstrap.json", encoding="utf-8") as source:
+              payload = json.load(source)
+
+          assert payload.get("success") is True, payload
+          results = payload.get("results") or []
+          result = next((item for item in results if item.get("provider") == "besttime"), None)
+          assert result is not None, payload
+
+          details = result.get("details") or []
+          skipped = [item for item in details if item.get("status") == "skipped"]
+          assert not skipped, skipped
+
+          attempted = int(result.get("attempted") or 0)
+          succeeded = int(result.get("succeeded") or 0)
+          failed = int(result.get("failed") or 0)
+          assert attempted > 0, "BestTime bootstrap found no eligible venues"
+          assert succeeded > 0, f"BestTime bootstrap produced no successful venue mappings: {result}"
+
+          coverage = {}
+          for item in details:
+              status = str(item.get("status") or "unknown")
+              coverage[status] = coverage.get(status, 0) + 1
+
+          lines = [
+              "## BestTime trial activation completed",
+              "",
+              f"- Attempted: **{attempted}**",
+              f"- Successful mappings: **{succeeded}**",
+              f"- Failed: **{failed}**",
+              "- Bootstrap limit: **25 venues**",
+              "",
+              "### Coverage returned",
+          ]
+          for status, count in sorted(coverage.items()):
+              lines.append(f"- `{status}`: **{count}**")
+          lines.extend([
+              "",
+              "BestTime evidence was stored server-side and affected venue scores were recomputed. Provider details are preserved in the workflow artifact; no API key is included.",
+              "",
+              f"Commit: `{os.environ.get('GITHUB_SHA', 'unknown')}`",
+          ])
+
+          with open("besttime-bootstrap-summary.md", "w", encoding="utf-8") as output:
+              output.write("\n".join(lines) + "\n")
+
+          print(json.dumps({
+              "attempted": attempted,
+              "succeeded": succeeded,
+              "failed": failed,
+              "coverage": coverage,
+          }, indent=2))
+          PY
+
+      - name: Record activation result on integration issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if [ ! -f besttime-bootstrap-summary.md ]; then
+            printf "## BestTime trial activation failed\n\nThe workflow stopped before it could produce a provider summary. Review this run's logs.\n\nCommit: `%s`\n" "$GITHUB_SHA" > besttime-bootstrap-summary.md
+          fi
+          gh issue comment 68 --repo "$GITHUB_REPOSITORY" --body-file besttime-bootstrap-summary.md
+
+      - name: Upload activation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: besttime-trial-bootstrap-${{ github.run_id }}
+          path: |
+            besttime-bootstrap.json
+            besttime-bootstrap-summary.md
+          if-no-files-found: warn
+          retention-days: 7
