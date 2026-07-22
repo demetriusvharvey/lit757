@@ -49,6 +49,7 @@ test("Virginia Beach uses the official city calendar provider", () => {
   assert.equal(source?.format, "vb-city-html");
   assert.equal(source?.enabled, true);
   assert.equal(source?.url, "https://virginiabeach.gov/connect/events");
+  assert.ok((source?.maxDetailPages || 0) <= 18);
 });
 
 test("parser normalizes an ICS event", () => {
@@ -68,6 +69,21 @@ test("ICS parser respects TZID instead of using the server timezone", () => {
   assert.equal(events.length, 1);
   assert.equal(events[0].start_time, "2026-07-25T23:00:00.000Z");
   assert.equal(events[0].end_time, "2026-07-26T01:00:00.000Z");
+});
+
+test("ICS parser stores all-day dates at local midnight", () => {
+  const events = parseCityCalendarIcs(`BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:vb-all-day\nSUMMARY:All-day Festival\nDTSTART;VALUE=DATE:20260725\nDTEND;VALUE=DATE:20260726\nLOCATION:Oceanfront\nEND:VEVENT\nEND:VCALENDAR`, icsSource);
+
+  assert.equal(events.length, 1);
+  assert.equal(events[0].start_time, "2026-07-25T04:00:00.000Z");
+  assert.equal(events[0].end_time, "2026-07-26T04:00:00.000Z");
+});
+
+test("recurring ICS occurrences receive distinct source event ids", () => {
+  const events = parseCityCalendarIcs(`BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:weekly-show\nRECURRENCE-ID;TZID=America/New_York:20260725T190000\nSUMMARY:Weekly Show\nDTSTART;TZID=America/New_York:20260725T190000\nLOCATION:Town Center\nEND:VEVENT\nBEGIN:VEVENT\nUID:weekly-show\nRECURRENCE-ID;TZID=America/New_York:20260801T190000\nSUMMARY:Weekly Show\nDTSTART;TZID=America/New_York:20260801T190000\nLOCATION:Town Center\nEND:VEVENT\nEND:VCALENDAR`, icsSource);
+
+  assert.equal(events.length, 2);
+  assert.notEqual(events[0].source_event_id, events[1].source_event_id);
 });
 
 test("JSON-LD parser remains available for future tourism and venue sources", () => {
