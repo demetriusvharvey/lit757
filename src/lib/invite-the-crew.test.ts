@@ -14,12 +14,23 @@ test("builds a referral deep link without user location", () => {
     name: "The Barrel Room",
     city: "Norfolk",
     mode: "live",
+    referralId: "ref_12345678",
   }));
   assert.equal(url.origin, "https://lit757.vercel.app");
   assert.equal(url.searchParams.get("venue"), "venue-123");
   assert.equal(url.searchParams.get("source"), "invite-the-crew");
   assert.equal(url.searchParams.get("mode"), "live");
+  assert.equal(url.searchParams.get("ref"), "ref_12345678");
   assert.equal(url.searchParams.has("userLat"), false);
+});
+
+test("rejects malformed referral IDs from shared links", () => {
+  const url = new URL(buildInviteCrewUrl("https://lit757.vercel.app", {
+    id: "venue-123",
+    name: "The Barrel Room",
+    referralId: "bad referral id",
+  }));
+  assert.equal(url.searchParams.has("ref"), false);
 });
 
 test("builds a bounded Story card URL from venue metadata", () => {
