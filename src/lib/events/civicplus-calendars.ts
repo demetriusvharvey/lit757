@@ -273,6 +273,10 @@ async function wait(milliseconds: number) {
   await new Promise(resolve => setTimeout(resolve, milliseconds));
 }
 
+async function wait(milliseconds: number) {
+  await new Promise(resolve => setTimeout(resolve, milliseconds));
+}
+
 async function fetchCalendarText(feed: CivicPlusCalendarFeed) {
   const failures: string[] = [];
   for (let attempt = 1; attempt <= FETCH_ATTEMPTS; attempt += 1) {
