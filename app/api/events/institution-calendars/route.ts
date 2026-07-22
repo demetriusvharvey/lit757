@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
-  fetchAllInstitutionCalendars,
   institutionEventSignature,
 } from "../../../../src/lib/events/institution-calendars";
+import { fetchAllInstitutionCalendarsWithExtensions } from "../../../../src/lib/events/all-institution-calendars";
 import type { NormalizedCityEvent } from "../../../../src/lib/events/city-calendars";
 
 export const dynamic = "force-dynamic";
@@ -75,7 +75,7 @@ async function run(request: Request) {
   const now = Date.now();
   const startIso = new Date(now - WINDOW_PAST_MS).toISOString();
   const endIso = new Date(now + WINDOW_FUTURE_MS).toISOString();
-  const fetched = await fetchAllInstitutionCalendars();
+  const fetched = await fetchAllInstitutionCalendarsWithExtensions();
   const inWindow = fetched.events.filter(event => {
     const start = new Date(event.start_time).getTime();
     return Number.isFinite(start) && start >= now - WINDOW_PAST_MS && start <= now + WINDOW_FUTURE_MS;
