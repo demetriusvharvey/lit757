@@ -1,8 +1,6 @@
 name: Invite the Crew preview smoke
 
 on:
-  push:
-    branches: [feature/invite-the-crew]
   pull_request:
     branches: [main]
 
@@ -12,35 +10,70 @@ permissions:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 12
     steps:
-      - name: Fetch Story card and deep link
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install and build
+        run: npm install --no-audit --no-fund && npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: build-placeholder
+          SUPABASE_URL: https://example.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: build-placeholder
+          NEXT_PUBLIC_MAPBOX_TOKEN: build-placeholder
+      - name: Start production runtime
+        shell: bash
+        run: |
+          npm run start -- --hostname 127.0.0.1 --port 3000 > invite-runtime.log 2>&1 &
+          echo $! > invite-runtime.pid
+          for attempt in $(seq 1 40); do
+            if curl --silent --fail http://127.0.0.1:3000/ >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat invite-runtime.log
+          exit 1
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: build-placeholder
+          SUPABASE_URL: https://example.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: build-placeholder
+          NEXT_PUBLIC_MAPBOX_TOKEN: build-placeholder
+      - name: Render Story card and deep link
         shell: bash
         run: |
           set -euo pipefail
-          BASE_URL="https://lit757-git-feature-invite-the-crew-demetrius-harveys-projects.vercel.app"
-          curl --silent --show-error --fail-with-body --retry 4 --retry-delay 5 --max-time 90 \
+          BASE_URL="http://127.0.0.1:3000"
+          curl --silent --show-error --fail-with-body --max-time 90 \
             "${BASE_URL}/api/share/venue-card?venue=test-venue&name=The%20Barrel%20Room&city=Norfolk&lat=36.8500&lng=-76.2800&status=Heating%20up&trend=Rising%20fast&mode=forecast" \
             --output invite-the-crew-story.png
-          curl --silent --show-error --fail-with-body --retry 4 --retry-delay 5 --max-time 90 \
+          curl --silent --show-error --fail-with-body --max-time 90 \
             "${BASE_URL}/?venue=test-venue&source=invite-the-crew" \
             --output invite-the-crew-deep-link.html
           python - <<'PY'
           from pathlib import Path
           import struct
           image = Path('invite-the-crew-story.png').read_bytes()
-          assert image[:8] == b'\x89PNG\r\n\x1a\n', 'Story card is not PNG'
+          assert image[:8] == b'\x89PNG\r\n\x1a\n', image[:100]
           width, height = struct.unpack('>II', image[16:24])
           assert (width, height) == (1080, 1920), (width, height)
           html = Path('invite-the-crew-deep-link.html').read_text(errors='replace')
           assert '<html' in html.lower(), 'Deep link did not return the app shell'
           print({'width': width, 'height': height, 'bytes': len(image), 'deepLinkBytes': len(html)})
           PY
-      - name: Upload preview validation
+      - name: Upload runtime validation
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: invite-the-crew-preview
           path: |
             invite-the-crew-story.png
             invite-the-crew-deep-link.html
+            invite-runtime.log
+          if-no-files-found: warn
           retention-days: 3
