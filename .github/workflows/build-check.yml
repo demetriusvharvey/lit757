@@ -21,6 +21,13 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+      - name: Test city calendar ingestion
+        id: city_calendar_tests
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npx --yes tsx@4.20.6 --test src/lib/events/city-calendars.test.ts 2>&1 | tee city-calendar-test.log
       - name: Build
         id: production_build
         continue-on-error: true
@@ -34,13 +41,15 @@ jobs:
           SUPABASE_URL: https://example.supabase.co
           SUPABASE_SERVICE_ROLE_KEY: build-placeholder
           NEXT_PUBLIC_MAPBOX_TOKEN: build-placeholder
-      - name: Upload build log
+      - name: Upload validation logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: production-build-log
-          path: production-build.log
+          name: validation-logs
+          path: |
+            city-calendar-test.log
+            production-build.log
           retention-days: 1
-      - name: Fail when production build fails
-        if: steps.production_build.outcome == 'failure'
+      - name: Fail when validation fails
+        if: steps.city_calendar_tests.outcome == 'failure' || steps.production_build.outcome == 'failure'
         run: exit 1
