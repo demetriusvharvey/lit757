@@ -12,11 +12,15 @@ type BestTimeVenueInfo = {
   venue_dwell_time_min?: number;
   venue_dwell_time_max?: number;
   venue_dwell_time_avg?: number;
+  venue_current_localtime_iso?: string;
 };
 
-type BestTimeLiveResponse = {
+export type BestTimeLiveResponse = {
   status?: string;
   message?: string;
+  day_int?: number;
+  epoch_analysis?: number;
+  forecast_updated_on?: string;
   analysis?: {
     venue_forecasted_busyness?: number;
     venue_forecast_busyness_available?: boolean;
@@ -25,6 +29,12 @@ type BestTimeLiveResponse = {
     venue_live_forecasted_delta?: number;
     hour_start?: number;
     hour_end?: number;
+    hour_raw?: number;
+    hour_analysis?: {
+      hour?: number;
+      intensity_nr?: number;
+      intensity_txt?: string;
+    };
   };
   venue_info?: BestTimeVenueInfo;
 };
@@ -33,7 +43,18 @@ type BestTimeForecastResponse = {
   status?: string;
   message?: string;
   epoch_analysis?: number;
+  forecast_updated_on?: string;
   venue_info?: BestTimeVenueInfo;
+};
+
+export type BestTimeAccountVenue = {
+  epoch_analysis?: number;
+  forecast_updated_on?: string;
+  venue_address?: string;
+  venue_forecasted?: boolean;
+  venue_id?: string;
+  venue_name?: string;
+  venue_timezone?: string;
 };
 
 export type BestTimeVenueMapping = {
@@ -45,27 +66,69 @@ export type BestTimeVenueMapping = {
   metadata: Record<string, unknown>;
 };
 
-function apiKey() {
+type BestTimeKeyKind = "private" | "public";
+
+class BestTimeRequestError extends Error {
+  constructor(message: string, readonly statusCode: number) {
+    super(message);
+    this.name = "BestTimeRequestError";
+  }
+}
+
+let accountVenuesPromise: Promise<BestTimeAccountVenue[]> | null = null;
+
+function privateApiKey() {
   return process.env.BESTTIME_API_KEY_PRIVATE || "";
 }
 
-export function isBestTimeConfigured() {
-  return Boolean(apiKey());
+function publicApiKey() {
+  return process.env.BESTTIME_API_KEY_PUBLIC || "";
 }
 
-async function bestTimeRequest<T>(path: string, params: URLSearchParams, method: "GET" | "POST" = "POST") {
+export function isBestTimeConfigured() {
+  return Boolean(privateApiKey());
+}
+
+export function isBestTimeForecastQueryConfigured() {
+  return Boolean(publicApiKey());
+}
+
+function responseMessage(payload: unknown, fallback: string) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return fallback;
+  const record = payload as { message?: unknown; error?: unknown };
+  return String(record.message || record.error || fallback);
+}
+
+async function bestTimeRequest<T>(
+  path: string,
+  params: URLSearchParams,
+  options: { method?: "GET" | "POST"; keyKind?: BestTimeKeyKind } = {},
+) {
+  const method = options.method || "GET";
+  const keyKind = options.keyKind || "private";
+  const key = keyKind === "public" ? publicApiKey() : privateApiKey();
+  const keyName = keyKind === "public" ? "api_key_public" : "api_key_private";
+  if (!key) throw new Error(`${keyName.toUpperCase()} is not configured`);
+
+  const query = new URLSearchParams(params);
+  query.set(keyName, key);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    params.set("api_key_private", apiKey());
-    const response = await fetch(`${BASE_URL}${path}?${params.toString()}`, {
+    const response = await fetch(`${BASE_URL}${path}?${query.toString()}`, {
       method,
       cache: "no-store",
       signal: controller.signal,
     });
-    const payload = await response.json().catch(() => ({})) as T & { status?: string; message?: string };
-    if (!response.ok || payload.status === "Error") {
-      throw new Error(payload.message || `BestTime request failed (${response.status})`);
+    const payload = await response.json().catch(() => ({})) as T;
+    const status = !Array.isArray(payload) && payload && typeof payload === "object"
+      ? String((payload as { status?: unknown }).status || "")
+      : "";
+    if (!response.ok || status.toLowerCase() === "error") {
+      throw new BestTimeRequestError(
+        responseMessage(payload, `BestTime request failed (${response.status})`),
+        response.status,
+      );
     }
     return payload;
   } finally {
@@ -73,12 +136,106 @@ async function bestTimeRequest<T>(path: string, params: URLSearchParams, method:
   }
 }
 
+function normalizeName(value: string | null | undefined) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/^the\s+/, "")
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+}
+
+function normalizeAddress(value: string | null | undefined) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\b(united states|usa)\b/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function streetNumber(value: string | null | undefined) {
+  return normalizeAddress(value).match(/^\d+[a-z]?/)?.[0] || "";
+}
+
+function namesMatch(localName: string, providerName: string) {
+  const local = normalizeName(localName);
+  const provider = normalizeName(providerName);
+  if (!local || !provider) return false;
+  if (local === provider) return true;
+  return Math.min(local.length, provider.length) >= 7 && (local.includes(provider) || provider.includes(local));
+}
+
+export function findBestTimeAccountVenue(venue: VenueForBuzz, accountVenues: BestTimeAccountVenue[]) {
+  const nameMatches = accountVenues.filter(candidate => namesMatch(venue.name, candidate.venue_name || ""));
+  if (!nameMatches.length) return null;
+
+  const localNumber = streetNumber(venue.address);
+  if (localNumber) {
+    const numberMatches = nameMatches.filter(candidate => streetNumber(candidate.venue_address) === localNumber);
+    if (numberMatches.length === 1) return numberMatches[0];
+  }
+
+  const city = normalizeAddress(venue.city);
+  if (city) {
+    const cityMatches = nameMatches.filter(candidate => normalizeAddress(candidate.venue_address).includes(city));
+    if (cityMatches.length === 1) return cityMatches[0];
+  }
+
+  return nameMatches.length === 1 ? nameMatches[0] : null;
+}
+
+export async function listBestTimeAccountVenues() {
+  if (!isBestTimeConfigured()) throw new Error("BESTTIME_API_KEY_PRIVATE is not configured");
+  if (!accountVenuesPromise) {
+    accountVenuesPromise = bestTimeRequest<BestTimeAccountVenue[] | { venues?: BestTimeAccountVenue[] }>(
+      "/venues",
+      new URLSearchParams({ limit: "1000", page: "0" }),
+      { method: "GET", keyKind: "private" },
+    ).then(payload => Array.isArray(payload) ? payload : payload.venues || []);
+  }
+  return accountVenuesPromise;
+}
+
+export function resetBestTimeAccountVenueCacheForTests() {
+  accountVenuesPromise = null;
+}
+
+function mappingFromAccountVenue(venue: VenueForBuzz, accountVenue: BestTimeAccountVenue): BestTimeVenueMapping {
+  if (!accountVenue.venue_id) throw new Error(`BestTime account venue is missing an id for ${venue.name}`);
+  return {
+    venueId: venue.id,
+    providerVenueId: accountVenue.venue_id,
+    providerName: accountVenue.venue_name || null,
+    providerAddress: accountVenue.venue_address || null,
+    timezone: accountVenue.venue_timezone || null,
+    metadata: {
+      epochAnalysis: accountVenue.epoch_analysis || null,
+      forecastUpdatedOn: accountVenue.forecast_updated_on || null,
+      reusedExistingForecast: true,
+    },
+  };
+}
+
 export async function createBestTimeForecast(venue: VenueForBuzz): Promise<BestTimeVenueMapping> {
   if (!isBestTimeConfigured()) throw new Error("BESTTIME_API_KEY_PRIVATE is not configured");
   const address = [venue.address, venue.city].filter(Boolean).join(", ");
   if (!address) throw new Error(`Cannot create BestTime forecast for ${venue.name} without an address`);
+
+  const accountVenue = findBestTimeAccountVenue(venue, await listBestTimeAccountVenues());
+  if (accountVenue) {
+    if (!accountVenue.venue_forecasted) {
+      throw new Error(`BestTime found ${venue.name}, but does not have enough visitor history to forecast it`);
+    }
+    return mappingFromAccountVenue(venue, accountVenue);
+  }
+
   const params = new URLSearchParams({ venue_name: venue.name, venue_address: address });
-  const payload = await bestTimeRequest<BestTimeForecastResponse>("/forecasts", params);
+  const payload = await bestTimeRequest<BestTimeForecastResponse>(
+    "/forecasts",
+    params,
+    { method: "POST", keyKind: "private" },
+  );
   const providerVenueId = payload.venue_info?.venue_id;
   if (!providerVenueId) throw new Error(`BestTime did not return a venue id for ${venue.name}`);
 
@@ -88,19 +245,81 @@ export async function createBestTimeForecast(venue: VenueForBuzz): Promise<BestT
     providerName: payload.venue_info?.venue_name || null,
     providerAddress: payload.venue_info?.venue_address || null,
     timezone: payload.venue_info?.venue_timezone || null,
-    metadata: { epochAnalysis: payload.epoch_analysis || null },
+    metadata: {
+      epochAnalysis: payload.epoch_analysis || null,
+      forecastUpdatedOn: payload.forecast_updated_on || null,
+      reusedExistingForecast: false,
+    },
   };
+}
+
+async function fetchBestTimeForecastNow(providerVenueId: string) {
+  if (!isBestTimeForecastQueryConfigured()) {
+    throw new Error("BESTTIME_API_KEY_PUBLIC is not configured");
+  }
+  return bestTimeRequest<BestTimeLiveResponse>(
+    "/forecasts/now/raw",
+    new URLSearchParams({ venue_id: providerVenueId }),
+    { method: "GET", keyKind: "public" },
+  );
+}
+
+function forecastAsLiveCompatible(payload: BestTimeLiveResponse): BestTimeLiveResponse {
+  const raw = Number(payload.analysis?.hour_raw);
+  const hour = payload.analysis?.hour_analysis?.hour;
+  return {
+    ...payload,
+    analysis: {
+      ...payload.analysis,
+      venue_forecasted_busyness: raw,
+      venue_forecast_busyness_available: Number.isFinite(raw),
+      venue_live_busyness_available: false,
+      hour_start: hour,
+      hour_end: Number.isFinite(Number(hour)) ? (Number(hour) + 1) % 24 : undefined,
+    },
+  };
+}
+
+function noLiveData(error: unknown) {
+  return error instanceof Error && /no live data available/i.test(error.message);
+}
+
+async function requestBestTimeLive(providerVenueId: string) {
+  const params = new URLSearchParams({ venue_id: providerVenueId });
+  try {
+    return await bestTimeRequest<BestTimeLiveResponse>(
+      "/forecasts/live",
+      params,
+      { method: "POST", keyKind: "private" },
+    );
+  } catch (error) {
+    if (!(error instanceof BestTimeRequestError) || error.statusCode !== 404) throw error;
+    return bestTimeRequest<BestTimeLiveResponse>(
+      "/forecast/live",
+      new URLSearchParams({ venue_id: providerVenueId }),
+      { method: "POST", keyKind: "private" },
+    );
+  }
 }
 
 export async function fetchBestTimeLive(providerVenueId: string) {
   if (!isBestTimeConfigured()) throw new Error("BESTTIME_API_KEY_PRIVATE is not configured");
-  const params = new URLSearchParams({ venue_id: providerVenueId });
   try {
-    return await bestTimeRequest<BestTimeLiveResponse>("/forecasts/live", params);
+    return await requestBestTimeLive(providerVenueId);
   } catch (error) {
-    // The documentation has historically shown both singular and plural routes.
-    if (!(error instanceof Error) || !error.message.includes("404")) throw error;
-    return bestTimeRequest<BestTimeLiveResponse>("/forecast/live", new URLSearchParams({ venue_id: providerVenueId }));
+    if (!noLiveData(error)) throw error;
+    if (!isBestTimeForecastQueryConfigured()) {
+      return {
+        status: "OK",
+        message: "No live data available and BESTTIME_API_KEY_PUBLIC is not configured",
+        analysis: {
+          venue_forecast_busyness_available: false,
+          venue_live_busyness_available: false,
+        },
+        venue_info: { venue_id: providerVenueId },
+      } satisfies BestTimeLiveResponse;
+    }
+    return forecastAsLiveCompatible(await fetchBestTimeForecastNow(providerVenueId));
   }
 }
 
@@ -109,8 +328,7 @@ export function bestTimeSignals(payload: BestTimeLiveResponse, observedAt = new 
   const observed = observedAt.toISOString();
   const nextHour = new Date(observedAt);
   nextHour.setMinutes(70, 0, 0);
-  const liveExpires = nextHour.toISOString();
-  const forecastExpires = new Date(observedAt.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const expiresAt = nextHour.toISOString();
   const commonMetadata = {
     providerVenueId: payload.venue_info?.venue_id || null,
     providerName: payload.venue_info?.venue_name || null,
@@ -119,6 +337,9 @@ export function bestTimeSignals(payload: BestTimeLiveResponse, observedAt = new 
     timezone: payload.venue_info?.venue_timezone || null,
     liveForecastDelta: analysis.venue_live_forecasted_delta ?? null,
     dwellMinutes: payload.venue_info?.venue_dwell_time_avg ?? null,
+    forecastUpdatedOn: payload.forecast_updated_on || null,
+    forecastIntensity: analysis.hour_analysis?.intensity_txt || null,
+    localHour: analysis.hour_analysis?.hour ?? analysis.hour_start ?? null,
   };
   const signals: BuzzSignal[] = [];
 
@@ -131,7 +352,7 @@ export function bestTimeSignals(payload: BestTimeLiveResponse, observedAt = new 
       isLive: false,
       confidence: 0.58,
       observedAt: observed,
-      expiresAt: forecastExpires,
+      expiresAt,
       metadata: commonMetadata,
     });
   }
@@ -144,7 +365,7 @@ export function bestTimeSignals(payload: BestTimeLiveResponse, observedAt = new 
       isLive: true,
       confidence: 0.82,
       observedAt: observed,
-      expiresAt: liveExpires,
+      expiresAt,
       metadata: commonMetadata,
     });
   }
