@@ -65,15 +65,6 @@ function safeMetadata(value: unknown) {
   return output;
 }
 
-async function authenticatedUserId(request: Request, db: ReturnType<typeof createClient>) {
-  const header = request.headers.get("authorization");
-  if (!header?.startsWith("Bearer ")) return null;
-  const token = header.slice("Bearer ".length).trim();
-  if (!token) return null;
-  const { data, error } = await db.auth.getUser(token);
-  return error ? null : data.user?.id || null;
-}
-
 export async function POST(request: Request) {
   let body: TrackBody;
   try {
@@ -113,7 +104,16 @@ export async function POST(request: Request) {
   }
 
   const db = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
-  const userId = await authenticatedUserId(request, db);
+  let userId: string | null = null;
+  const authorization = request.headers.get("authorization");
+  if (authorization?.startsWith("Bearer ")) {
+    const token = authorization.slice("Bearer ".length).trim();
+    if (token) {
+      const { data, error } = await db.auth.getUser(token);
+      if (!error) userId = data.user?.id || null;
+    }
+  }
+
   const { error } = await db.from("buzz_conversion_events").insert({
     event_name: eventName,
     venue_id: venueId || null,
