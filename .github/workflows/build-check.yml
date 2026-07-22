@@ -7,133 +7,13 @@ on:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Checkout feature branch
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: feature/hampton-roads-city-calendar-ingestion
-          fetch-depth: 0
-      - name: Apply pending recurrence review fixes
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          path = Path("src/lib/events/city-calendars.ts")
-          lines = path.read_text().splitlines()
-
-          def find_line(target, start=0, end=None):
-              limit = len(lines) if end is None else end
-              for index in range(start, limit):
-                  if lines[index].strip() == target:
-                      return index
-              raise SystemExit(f"Could not find source line: {target}")
-
-          daily_start = find_line('if (rule.freq === "DAILY") {')
-          weekly_start = find_line('if (rule.freq === "WEEKLY") {', daily_start + 1)
-          daily_has_filter = any(
-              "permittedDays.size && !permittedDays.has(candidate.getUTCDay())" in line
-              for line in lines[daily_start:weekly_start]
-          )
-          if not daily_has_filter:
-              indent = lines[daily_start][:-len(lines[daily_start].lstrip())]
-              body = indent + "  "
-              continuation = body + "  "
-              insertion = [
-                  body + "const permittedDays = new Set(",
-                  continuation + "rule.byDay",
-                  continuation + "  .map(token => token.slice(-2))",
-                  continuation + "  .map(code => DAY_CODE_TO_UTC_DAY[code])",
-                  continuation + "  .filter(day => day !== undefined),",
-                  body + ");",
-              ]
-              lines[daily_start + 1:daily_start + 1] = insertion
-              weekly_start += len(insertion)
-
-              days_index = find_line("if (daysToWindow > 0) {", daily_start, weekly_start)
-              days_indent = lines[days_index][:-len(lines[days_index].lstrip())]
-              lines[days_index] = days_indent + "if (daysToWindow > 0 && permittedDays.size === 0) {"
-
-              candidate_index = find_line(
-                  "candidate.setUTCDate(candidate.getUTCDate() + offset);",
-                  daily_start,
-                  weekly_start,
-              )
-              candidate_indent = lines[candidate_index][:-len(lines[candidate_index].lstrip())]
-              lines.insert(
-                  candidate_index + 1,
-                  candidate_indent + "if (permittedDays.size && !permittedDays.has(candidate.getUTCDay())) continue;",
-              )
-
-          cancelled_anchor = find_line("const cancelled = new Map<string, NormalizedCityEvent>();")
-          return_start = find_line("return [", cancelled_anchor)
-          loop_start = find_line("for (const block of blocks) {", cancelled_anchor, return_start)
-          has_master_cancel = any(
-              'const isCancelled = String(property(block, "STATUS")' in line
-              for line in lines[loop_start:return_start]
-          )
-          if not has_master_cancel:
-              detached_index = find_line(
-                  "const detached = detachedOccurrenceDetails(block, source);",
-                  loop_start,
-                  return_start,
-              )
-              detached_indent = lines[detached_index][:-len(lines[detached_index].lstrip())]
-              lines.insert(
-                  detached_index + 1,
-                  detached_indent + 'const isCancelled = String(property(block, "STATUS") || "").toUpperCase() === "CANCELLED";',
-              )
-              return_start += 1
-
-              condition_index = next(
-                  index
-                  for index in range(detached_index + 2, return_start)
-                  if '.toUpperCase() === "CANCELLED" && detached' in lines[index]
-              )
-              condition_indent = lines[condition_index][:-len(lines[condition_index].lstrip())]
-              lines[condition_index] = condition_indent + "if (isCancelled && detached) {"
-
-              set_index = find_line(
-                  "cancelled.set(cancellation.source_event_id, cancellation);",
-                  condition_index,
-                  return_start,
-              )
-              continue_index = find_line("continue;", set_index, return_start)
-              close_index = continue_index + 1
-              if lines[close_index].strip() != "}":
-                  raise SystemExit("Detached cancellation block did not close where expected")
-
-              block_indent = detached_indent
-              child = block_indent + "  "
-              grandchild = child + "  "
-              great_grandchild = grandchild + "  "
-              master_block = [
-                  "",
-                  block_indent + "if (isCancelled) {",
-                  child + "for (const event of expandIcsBlock(block, source)) {",
-                  grandchild + "const cancellation = {",
-                  great_grandchild + "...event,",
-                  great_grandchild + 'ticket_status: "cancelled",',
-                  great_grandchild + "cancelled: true,",
-                  grandchild + "};",
-                  grandchild + "events.delete(cancellation.source_event_id);",
-                  grandchild + "cancelled.set(cancellation.source_event_id, cancellation);",
-                  child + "}",
-                  child + "continue;",
-                  block_indent + "}",
-                  "",
-              ]
-              lines[close_index + 1:close_index + 1] = master_block
-
-          path.write_text("\n".join(lines) + "\n")
-          PY
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -161,18 +41,6 @@ jobs:
           SUPABASE_URL: https://example.supabase.co
           SUPABASE_SERVICE_ROLE_KEY: build-placeholder
           NEXT_PUBLIC_MAPBOX_TOKEN: build-placeholder
-      - name: Commit validated recurrence fixes
-        if: steps.city_calendar_tests.outcome == 'success' && steps.production_build.outcome == 'success'
-        shell: bash
-        run: |
-          if git diff --quiet -- src/lib/events/city-calendars.ts; then
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/lib/events/city-calendars.ts
-          git commit -m "Honor recurrence filters and series cancellations"
-          git push origin HEAD:feature/hampton-roads-city-calendar-ingestion
       - name: Upload validation logs
         if: always()
         uses: actions/upload-artifact@v4
