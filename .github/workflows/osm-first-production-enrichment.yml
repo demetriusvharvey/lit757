@@ -1,15 +1,14 @@
 name: First OSM production enrichment
 
 on:
-  push:
-    branches: [docs/osm-production-validation]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
 
 jobs:
   enrich:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
