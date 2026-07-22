@@ -1,0 +1,31 @@
+name: Apply tourism source patch
+
+on:
+  push:
+    branches: [feature/tourism-calendars]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/tourism-calendars
+          fetch-depth: 0
+      - name: Register official tourism source
+        run: python scripts/apply-tourism-source-patch.py
+      - name: Commit source integration
+        shell: bash
+        run: |
+          rm .github/workflows/apply-tourism-source.yml scripts/apply-tourism-source-patch.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/events/institution-calendars.ts .github/workflows/apply-tourism-source.yml scripts/apply-tourism-source-patch.py
+          git commit -m "Register VisitNorfolk official tourism events"
+          git push origin HEAD:feature/tourism-calendars
