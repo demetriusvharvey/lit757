@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
   CITY_CALENDAR_SOURCES,
-  createIcsCityCalendarProvider,
+  createCityCalendarProvider,
   type NormalizedCityEvent,
 } from "../../../../src/lib/events/city-calendars";
 
@@ -46,19 +46,19 @@ export async function GET(request: Request) {
 
   for (const source of activeSources) {
     try {
-      const provider = createIcsCityCalendarProvider(source);
+      const provider = createCityCalendarProvider(source);
       const events = (await provider.fetchEvents()).filter(event => {
         const start = new Date(event.start_time).getTime();
         return Number.isFinite(start) && start >= now - 6 * 60 * 60 * 1000 && start <= cutoff;
       });
       summary.fetched += events.length;
       collected.push(...events);
-      results.push({ source: source.id, city: source.city, status: "ok", fetched: events.length });
+      results.push({ source: source.id, city: source.city, format: source.format, status: "ok", fetched: events.length });
     } catch (error) {
       summary.failed += 1;
       const message = error instanceof Error ? error.message : "Unknown error";
       console.error("City calendar ingestion failed", { source: source.id, city: source.city, error: message });
-      results.push({ source: source.id, city: source.city, status: "error", error: message });
+      results.push({ source: source.id, city: source.city, format: source.format, status: "error", error: message });
     }
   }
 
@@ -95,7 +95,12 @@ export async function GET(request: Request) {
   return NextResponse.json({
     success: true,
     generatedAt: new Date().toISOString(),
-    registeredSources: CITY_CALENDAR_SOURCES.map(source => ({ id: source.id, city: source.city, enabled: source.enabled })),
+    registeredSources: CITY_CALENDAR_SOURCES.map(source => ({
+      id: source.id,
+      city: source.city,
+      format: source.format,
+      enabled: source.enabled,
+    })),
     summary,
     results,
   });
