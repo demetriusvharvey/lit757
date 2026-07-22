@@ -45,6 +45,10 @@ function rows(value: unknown) {
   return Array.isArray(value) ? value.filter(item => item && typeof item === "object") as UnknownRecord[] : [];
 }
 
+function stringRows(value: unknown) {
+  return Array.isArray(value) ? value.filter(item => typeof item === "string").map(String) : [];
+}
+
 function numberValue(value: unknown) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -132,10 +136,13 @@ export default function ProviderHealthDashboard() {
 
   const failedInstitutions = institutionSources.filter(source => String(source.status) !== "ok");
   const healthyInstitutions = institutionSources.filter(source => String(source.status) === "ok");
-  const warnings = rows(dataHealth.warnings).map(String);
+  const warnings = stringRows(dataHealth.warnings);
   const overallHealthy = Boolean(dataHealth.success)
     && Boolean(cityCalendars.success)
+    && !Boolean(cityCalendars.partial)
     && Boolean(institutions.success)
+    && !Boolean(institutions.partial)
+    && warnings.length === 0
     && payload.errors.length === 0;
 
   return (
