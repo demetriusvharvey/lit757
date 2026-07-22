@@ -6,6 +6,7 @@ import {
   type NormalizedCityEvent,
 } from "./city-calendars";
 import { parseVenueListingEvents } from "./venue-listing";
+import { parseVisitNorfolkEvents } from "./tourism-events";
 
 const EASTERN_TIME_ZONE = "America/New_York";
 const WINDOW_DAYS = 120;
@@ -14,8 +15,8 @@ const LISTING_CONCURRENCY = 4;
 const DETAIL_CONCURRENCY = 6;
 const DETAIL_LIMIT = 45;
 
-export type InstitutionKind = "university" | "arena" | "arts" | "museum" | "festival" | "attraction";
-export type InstitutionFormat = "localist-api" | "tribe-api" | "venue-html" | "jsonld-html";
+export type InstitutionKind = "university" | "arena" | "arts" | "museum" | "festival" | "attraction" | "tourism";
+export type InstitutionFormat = "localist-api" | "tribe-api" | "venue-html" | "jsonld-html" | "embedded-json";
 
 export type InstitutionCalendarSource = {
   id: string;
@@ -149,6 +150,16 @@ export const INSTITUTION_CALENDAR_SOURCES: InstitutionCalendarSource[] = [
     format: "jsonld-html",
     enabled: true,
     venueName: "Portsmouth Museums",
+  },
+  {
+    id: "visit_norfolk_official",
+    name: "VisitNorfolk Events",
+    kind: "tourism",
+    city: "Norfolk",
+    url: "https://www.visitnorfolk.com/events/",
+    format: "embedded-json",
+    enabled: true,
+    coverageNote: "Official destination calendar with local nightlife, food, arts, festivals, sports, classes, and community events.",
   },
 ];
 
@@ -479,6 +490,13 @@ async function fetchJsonLdHtml(source: InstitutionCalendarSource) {
   return events;
 }
 
+async function fetchEmbeddedTourism(source: InstitutionCalendarSource) {
+  const html = await fetchHtml(source.url);
+  const events = parseVisitNorfolkEvents(html, source);
+  if (!events.length) throw new Error("Official tourism page contained no parseable embedded events");
+  return events;
+}
+
 export function institutionEventSignature(event: Pick<NormalizedCityEvent, "name" | "start_time" | "venue_name">) {
   const canonical = (value: string) => value.toLowerCase().normalize("NFKD")
     .replace(/\p{Diacritic}/gu, "")
@@ -507,7 +525,9 @@ export async function fetchInstitutionSource(source: InstitutionCalendarSource):
         ? await fetchTribe(source)
         : source.format === "venue-html"
           ? await fetchVenueHtml(source)
-          : await fetchJsonLdHtml(source);
+          : source.format === "embedded-json"
+            ? await fetchEmbeddedTourism(source)
+            : await fetchJsonLdHtml(source);
     return { source, status: "ok", events: dedupeInstitutionEvents(events), error: null, fetchedAt };
   } catch (error) {
     return {
