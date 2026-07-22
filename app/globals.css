@@ -45,7 +45,7 @@ button,input,select,textarea{font:inherit} button,a,select{-webkit-tap-highlight
   section[aria-label="757 venue map"]:before{content:"";position:absolute;inset:0;z-index:3;pointer-events:none;background:radial-gradient(circle at 79% 38%,rgba(255,35,55,.46),transparent 19%),radial-gradient(circle at 48% 28%,rgba(255,122,0,.36),transparent 18%),radial-gradient(circle at 37% 59%,rgba(0,128,255,.32),transparent 20%),radial-gradient(circle at 67% 71%,rgba(255,180,0,.28),transparent 17%);mix-blend-mode:screen}
   section[aria-label="757 venue map"]:after{content:"Calm  ━━━━━  Very Busy";position:absolute;right:14px;bottom:12px;z-index:12;padding:8px 12px;border:1px solid rgba(255,255,255,.16);border-radius:18px;background:rgba(3,5,8,.82);font-size:9px;color:#fff;backdrop-filter:blur(14px)}
   section[aria-label="757 venue map"] [data-map-pulse]{display:none!important}
-  .mapboxgl-ctrl-top-right{top:12px!important;right:12px!important}.mapboxgl-ctrl-group{border:1px solid rgba(255,255,255,.2)!important;background:rgba(255,255,255,.94)!important}.mapboxgl-ctrl-icon{filter:none!important}
+  .mapboxgl-ctrl-top-right{top:104px!important;right:12px!important}.mapboxgl-ctrl-group{border:1px solid rgba(255,255,255,.2)!important;background:rgba(255,255,255,.94)!important}.mapboxgl-ctrl-icon{filter:none!important}
 
   .approved-category-rail{order:3;display:grid;grid-template-columns:repeat(7,1fr);gap:2px;padding:10px 5px 8px;border:1px solid #242933;border-radius:18px;background:linear-gradient(180deg,#101319,#090b0f)}
   .approved-category-rail button{display:flex;flex-direction:column;align-items:center;gap:4px;border:0;background:transparent;color:#f4f4f4;padding:2px 0;font-size:9px}
