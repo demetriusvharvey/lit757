@@ -1,0 +1,91 @@
+name: Buzz signal refresh
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+    - cron: "7,37 * * * *"
+    - cron: "19 * * * *"
+  workflow_dispatch:
+    inputs:
+      tier:
+        description: Refresh tier
+        required: false
+        default: all
+        type: choice
+        options: [all, first-party, foot-traffic, commercial, forecast]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: buzz-signal-refresh-${{ github.event.schedule || inputs.tier || 'manual' }}
+  cancel-in-progress: false
+
+jobs:
+  first-party:
+    if: github.event_name == 'workflow_dispatch' && (inputs.tier == 'all' || inputs.tier == 'first-party') || github.event.schedule == '*/15 * * * *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Refresh verified reports and partner pulses
+        env:
+          BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          : "${BASE_URL:?Add BUZZ_PRODUCTION_URL as a GitHub Actions secret}"
+          : "${CRON_SECRET:?Add CRON_SECRET as a GitHub Actions secret}"
+          curl --silent --show-error --fail-with-body --retry 2 --retry-all-errors --max-time 90 \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${BASE_URL%/}/api/buzz/refresh?provider=first_party&limit=100"
+
+  foot-traffic:
+    if: github.event_name == 'workflow_dispatch' && (inputs.tier == 'all' || inputs.tier == 'foot-traffic') || github.event.schedule == '7,37 * * * *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Refresh mapped BestTime venues
+        env:
+          BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          : "${BASE_URL:?Add BUZZ_PRODUCTION_URL as a GitHub Actions secret}"
+          : "${CRON_SECRET:?Add CRON_SECRET as a GitHub Actions secret}"
+          curl --silent --show-error --fail-with-body --retry 2 --retry-all-errors --max-time 180 \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${BASE_URL%/}/api/buzz/refresh?provider=besttime&limit=50"
+
+  commercial-demand:
+    if: github.event_name == 'workflow_dispatch' && (inputs.tier == 'all' || inputs.tier == 'commercial') || github.event.schedule == '19 * * * *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Refresh Ticketmaster inventory
+        env:
+          BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          : "${BASE_URL:?Add BUZZ_PRODUCTION_URL as a GitHub Actions secret}"
+          : "${CRON_SECRET:?Add CRON_SECRET as a GitHub Actions secret}"
+          curl --silent --show-error --fail-with-body --retry 2 --retry-all-errors --max-time 180 \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${BASE_URL%/}/api/buzz/refresh?provider=ticketmaster&limit=100"
+
+  event-forecast:
+    if: github.event_name == 'workflow_dispatch' && (inputs.tier == 'all' || inputs.tier == 'forecast') || github.event.schedule == '19 * * * *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Refresh PredictHQ forecast context
+        env:
+          BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          : "${BASE_URL:?Add BUZZ_PRODUCTION_URL as a GitHub Actions secret}"
+          : "${CRON_SECRET:?Add CRON_SECRET as a GitHub Actions secret}"
+          curl --silent --show-error --fail-with-body --retry 2 --retry-all-errors --max-time 180 \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${BASE_URL%/}/api/buzz/refresh?provider=predicthq&limit=10"
