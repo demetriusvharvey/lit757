@@ -16,6 +16,7 @@ const icsSource: CityCalendarSource = {
   url: "https://example.com/events.ics",
   format: "ics",
   enabled: true,
+  timeZone: "America/New_York",
 };
 
 test("registry includes all seven Hampton Roads cities", () => {
@@ -47,6 +48,14 @@ test("parser normalizes an ICS event", () => {
   assert.equal(events[0].venue_name, "17th Street Park, Virginia Beach, VA");
   assert.equal(events[0].source, "test_ics");
   assert.equal(events[0].source_url, "https://example.com/event");
+});
+
+test("ICS parser respects TZID instead of using the server timezone", () => {
+  const events = parseCityCalendarIcs(`BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:vb-tzid\nSUMMARY:Evening Show\nDTSTART;TZID=America/New_York:20260725T190000\nDTEND;TZID=America/New_York:20260725T210000\nLOCATION:Oceanfront Park\nEND:VEVENT\nEND:VCALENDAR`, icsSource);
+
+  assert.equal(events.length, 1);
+  assert.equal(events[0].start_time, "2026-07-25T23:00:00.000Z");
+  assert.equal(events[0].end_time, "2026-07-26T01:00:00.000Z");
 });
 
 test("JSON-LD parser normalizes Visit Virginia Beach event metadata", () => {
