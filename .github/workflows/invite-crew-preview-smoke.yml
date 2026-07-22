@@ -1,4 +1,4 @@
-name: Invite the Crew runtime validation
+name: Invite the Crew final runtime validation
 
 on:
   pull_request:
@@ -70,7 +70,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: invite-the-crew-preview
+          name: invite-the-crew-final
           path: |
             invite-the-crew-story.png
             invite-the-crew-deep-link.html
