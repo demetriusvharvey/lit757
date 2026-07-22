@@ -17,11 +17,28 @@ concurrency:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
     steps:
-      - name: Verify official tourism source
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Verify Visit Hampton source adapter
+        shell: bash
+        run: |
+          npx --yes tsx@4.20.6 -e '
+            import { INSTITUTION_CALENDAR_SOURCES, fetchInstitutionSource } from "./src/lib/events/institution-calendars.ts";
+            (async () => {
+              const source = INSTITUTION_CALENDAR_SOURCES.find(item => item.id === "visit_hampton_official");
+              if (!source) throw new Error("Visit Hampton source is missing from the registry");
+              const result = await fetchInstitutionSource(source);
+              console.log(JSON.stringify({ source: result.source, status: result.status, eventCount: result.events.length, error: result.error }, null, 2));
+              if (result.status !== "ok") throw new Error(result.error || "Visit Hampton source failed");
+              if (result.events.length <= 0) throw new Error("Visit Hampton returned no events");
+            })();
+          '
+      - name: Verify official tourism production sources
         env:
           BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
+          REQUIRE_VISIT_HAMPTON: ${{ github.event_name != 'pull_request' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -34,6 +51,7 @@ jobs:
           import urllib.request
 
           base = os.environ["BASE_URL"].rstrip("/")
+          require_visit_hampton = os.environ.get("REQUIRE_VISIT_HAMPTON", "false").lower() == "true"
           path = "/api/data/institution-calendars?tourismProbe=1"
           request = urllib.request.Request(
               f"{base}{path}",
@@ -72,9 +90,18 @@ jobs:
           assert int(visit_norfolk.get("eventCount") or 0) > 0, "VisitNorfolk returned no events"
           assert visit_norfolk.get("sourceUrl") == "https://www.visitnorfolk.com/events/"
 
+          visit_hampton = next((source for source in sources if source.get("id") == "visit_hampton_official"), None)
+          if require_visit_hampton:
+              assert visit_hampton is not None, "Visit Hampton source is missing in production"
+              assert visit_hampton.get("status") == "ok", json.dumps(visit_hampton)
+              assert int(visit_hampton.get("eventCount") or 0) > 0, "Visit Hampton returned no events"
+              assert visit_hampton.get("sourceUrl") == "https://visithampton.com/calendar/"
+
           print(json.dumps({
               "tourismKind": tourism,
               "visitNorfolk": visit_norfolk,
+              "visitHampton": visit_hampton,
+              "visitHamptonRequired": require_visit_hampton,
               "totalInstitutionEvents": (payload.get("summary") or {}).get("dedupedEvents"),
           }, indent=2))
           PY
