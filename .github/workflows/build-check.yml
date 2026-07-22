@@ -29,108 +29,78 @@ jobs:
           path = Path("src/lib/events/city-calendars.ts")
           text = path.read_text()
 
-          old_daily = '''  if (rule.freq === "DAILY") {
-            let firstOffset = 0;
-            const localWindow = calendarDateForInstant(windowStart, timeZone, startParts.zulu);
-            const daysToWindow = Math.floor((localWindow.getTime() - start.getTime()) / (24 * 60 * 60 * 1000));
-            if (daysToWindow > 0) {
-              const skippedIntervals = Math.max(0, Math.floor(daysToWindow / rule.interval) - 1);
-              firstOffset = skippedIntervals * rule.interval;
-              occurrenceNumber = skippedIntervals;
-            }
-
-            for (let offset = firstOffset; iterations < MAX_RECURRENCE_ITERATIONS; offset += rule.interval) {
-              iterations += 1;
-              const candidate = new Date(start);
-              candidate.setUTCDate(candidate.getUTCDate() + offset);
-              if (!addCandidate(candidate)) break;
-            }
-            return output;
-          }'''
-          new_daily = '''  if (rule.freq === "DAILY") {
+          daily_start = text.index('  if (rule.freq === "DAILY") {')
+          weekly_start = text.index('\n\n  if (rule.freq === "WEEKLY") {', daily_start)
+          daily = text[daily_start:weekly_start]
+          if "permittedDays.size && !permittedDays.has(candidate.getUTCDay())" not in daily:
+              daily = daily.replace(
+                  '  if (rule.freq === "DAILY") {\n    let firstOffset = 0;',
+                  '''  if (rule.freq === "DAILY") {
             const permittedDays = new Set(
               rule.byDay
                 .map(token => token.slice(-2))
                 .map(code => DAY_CODE_TO_UTC_DAY[code])
                 .filter(day => day !== undefined),
             );
-            let firstOffset = 0;
-            const localWindow = calendarDateForInstant(windowStart, timeZone, startParts.zulu);
-            const daysToWindow = Math.floor((localWindow.getTime() - start.getTime()) / (24 * 60 * 60 * 1000));
-            if (daysToWindow > 0 && permittedDays.size === 0) {
-              const skippedIntervals = Math.max(0, Math.floor(daysToWindow / rule.interval) - 1);
-              firstOffset = skippedIntervals * rule.interval;
-              occurrenceNumber = skippedIntervals;
-            }
+            let firstOffset = 0;''',
+                  1,
+              )
+              daily = daily.replace(
+                  '    if (daysToWindow > 0) {',
+                  '    if (daysToWindow > 0 && permittedDays.size === 0) {',
+                  1,
+              )
+              daily = daily.replace(
+                  '      candidate.setUTCDate(candidate.getUTCDate() + offset);\n      if (!addCandidate(candidate)) break;',
+                  '''      candidate.setUTCDate(candidate.getUTCDate() + offset);
+                  if (permittedDays.size && !permittedDays.has(candidate.getUTCDay())) continue;
+                  if (!addCandidate(candidate)) break;''',
+                  1,
+              )
+              if "permittedDays.size && !permittedDays.has(candidate.getUTCDay())" not in daily:
+                  raise SystemExit("Daily BYDAY patch did not apply")
+              text = text[:daily_start] + daily + text[weekly_start:]
 
-            for (let offset = firstOffset; iterations < MAX_RECURRENCE_ITERATIONS; offset += rule.interval) {
-              iterations += 1;
-              const candidate = new Date(start);
-              candidate.setUTCDate(candidate.getUTCDate() + offset);
-              if (permittedDays.size && !permittedDays.has(candidate.getUTCDay())) continue;
-              if (!addCandidate(candidate)) break;
-            }
-            return output;
-          }'''
-          if old_daily in text:
-              text = text.replace(old_daily, new_daily, 1)
-          elif "permittedDays.size && !permittedDays.has(candidate.getUTCDay())" not in text:
-              raise SystemExit("Could not locate the daily recurrence block")
+          cancelled_anchor = text.index('  const cancelled = new Map<string, NormalizedCityEvent>();')
+          loop_start = text.index('  for (const block of blocks) {', cancelled_anchor)
+          loop_end = text.index('\n\n  return [', loop_start)
+          loop = text[loop_start:loop_end]
+          if 'const isCancelled = String(property(block, "STATUS")' not in loop:
+              loop = loop.replace(
+                  '''    const detached = detachedOccurrenceDetails(block, source);
+                  if (String(property(block, "STATUS") || "").toUpperCase() === "CANCELLED" && detached) {''',
+                  '''    const detached = detachedOccurrenceDetails(block, source);
+                  const isCancelled = String(property(block, "STATUS") || "").toUpperCase() === "CANCELLED";
+                  if (isCancelled && detached) {''',
+                  1,
+              )
+              loop = loop.replace(
+                  '''      continue;
+                  }
 
-          old_cancel = '''  for (const block of blocks) {
-            const detached = detachedOccurrenceDetails(block, source);
-            if (String(property(block, "STATUS") || "").toUpperCase() === "CANCELLED" && detached) {
-              const cancellation = cancelledIcsEvent(block, source, detached.identity, detached.start);
-              events.delete(cancellation.source_event_id);
-              cancelled.set(cancellation.source_event_id, cancellation);
-              continue;
-            }
+                  const isDetached = Boolean(detached);''',
+                  '''      continue;
+                  }
 
-            const isDetached = Boolean(detached);
-            for (const event of expandIcsBlock(block, source)) {
-              if (cancelled.has(event.source_event_id)) continue;
-              const existing = events.get(event.source_event_id);
-              if (!existing || isDetached || !existing.detached) {
-                events.set(event.source_event_id, { event, detached: isDetached });
-              }
-            }
-          }'''
-          new_cancel = '''  for (const block of blocks) {
-            const detached = detachedOccurrenceDetails(block, source);
-            const isCancelled = String(property(block, "STATUS") || "").toUpperCase() === "CANCELLED";
-            if (isCancelled && detached) {
-              const cancellation = cancelledIcsEvent(block, source, detached.identity, detached.start);
-              events.delete(cancellation.source_event_id);
-              cancelled.set(cancellation.source_event_id, cancellation);
-              continue;
-            }
+                  if (isCancelled) {
+                    for (const event of expandIcsBlock(block, source)) {
+                      const cancellation = {
+                        ...event,
+                        ticket_status: "cancelled",
+                        cancelled: true,
+                      };
+                      events.delete(cancellation.source_event_id);
+                      cancelled.set(cancellation.source_event_id, cancellation);
+                    }
+                    continue;
+                  }
 
-            if (isCancelled) {
-              for (const event of expandIcsBlock(block, source)) {
-                const cancellation = {
-                  ...event,
-                  ticket_status: "cancelled",
-                  cancelled: true,
-                };
-                events.delete(cancellation.source_event_id);
-                cancelled.set(cancellation.source_event_id, cancellation);
-              }
-              continue;
-            }
-
-            const isDetached = Boolean(detached);
-            for (const event of expandIcsBlock(block, source)) {
-              if (cancelled.has(event.source_event_id)) continue;
-              const existing = events.get(event.source_event_id);
-              if (!existing || isDetached || !existing.detached) {
-                events.set(event.source_event_id, { event, detached: isDetached });
-              }
-            }
-          }'''
-          if old_cancel in text:
-              text = text.replace(old_cancel, new_cancel, 1)
-          elif "const isCancelled = String(property(block, \"STATUS\")" not in text:
-              raise SystemExit("Could not locate the cancellation parser block")
+                  const isDetached = Boolean(detached);''',
+                  1,
+              )
+              if 'const isCancelled = String(property(block, "STATUS")' not in loop or 'if (isCancelled) {' not in loop:
+                  raise SystemExit("Master cancellation patch did not apply")
+              text = text[:loop_start] + loop + text[loop_end:]
 
           path.write_text(text)
           PY
