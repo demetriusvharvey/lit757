@@ -74,6 +74,16 @@ jobs:
           assert isinstance(weather.get("alerts"), list), "NWS alerts must be a list"
           assert weather.get("activityImpact", {}).get("level"), "Weather impact is missing"
 
+          coastal = get("/api/data/coastal?station=virginia-beach", timeout=90)
+          coastal_availability = coastal.get("availability") or {}
+          assert coastal.get("provider") == "NOAA CO-OPS"
+          assert coastal.get("station", {}).get("stationId") == "8638863"
+          assert coastal_availability.get("predictions") is True, "NOAA tide predictions are unavailable"
+          assert len(coastal.get("tidePredictions") or []) > 0, "NOAA tide prediction list is empty"
+          assert coastal.get("nextTide"), "NOAA next tide is missing"
+          assert coastal.get("activityImpact", {}).get("level"), "NOAA coastal impact is missing"
+          assert coastal.get("truthNote"), "NOAA coastal truth rule is missing"
+
           static = get("/api/data/transit/static", timeout=60)
           assert static.get("provider") == "Hampton Roads Transit"
           assert int(static.get("routeCount") or 0) > 0, "HRT route count is zero"
@@ -121,6 +131,11 @@ jobs:
           print(json.dumps({
               "weatherPeriods": len(weather["hourly"]),
               "weatherAlerts": len(weather["alerts"]),
+              "coastalStation": coastal.get("station", {}).get("name"),
+              "coastalTides": len(coastal.get("tidePredictions") or []),
+              "coastalAvailability": coastal_availability,
+              "coastalWind": coastal.get("wind"),
+              "coastalWaterTemperature": coastal.get("waterTemperature"),
               "hrtRoutes": static["routeCount"],
               "hrtStops": static["stopCount"],
               "hrtTripUpdates": len(realtime["tripUpdates"]),
