@@ -1,4 +1,4 @@
-name: Invite the Crew preview smoke
+name: Invite the Crew runtime validation
 
 on:
   pull_request:
