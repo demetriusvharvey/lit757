@@ -1,0 +1,66 @@
+name: Visit Newport News source check
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "17 */4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: visit-newport-news-source-check
+  cancel-in-progress: false
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Fetch and normalize official Newport News events
+        shell: bash
+        run: |
+          set -o pipefail
+          npx --yes tsx@4.20.6 -e '
+            import { fetchSimpleviewRssCalendar } from "./src/lib/events/simpleview-rss.ts";
+            import { VISIT_NEWPORT_NEWS_SOURCE } from "./src/lib/events/all-institution-calendars.ts";
+            (async () => {
+              const events = await fetchSimpleviewRssCalendar(VISIT_NEWPORT_NEWS_SOURCE);
+              const report = {
+                source: VISIT_NEWPORT_NEWS_SOURCE,
+                eventCount: events.length,
+                withCoordinates: events.filter(event => event.latitude != null && event.longitude != null).length,
+                withAddresses: events.filter(event => Boolean(event.address)).length,
+                firstEvents: events.slice(0, 5).map(event => ({
+                  name: event.name,
+                  venue: event.venue_name,
+                  start: event.start_time,
+                  address: event.address,
+                  sourceUrl: event.source_url,
+                })),
+              };
+              console.log(JSON.stringify(report, null, 2));
+              await import("node:fs/promises").then(fs => fs.writeFile("visit-newport-news-source.json", JSON.stringify(report, null, 2)));
+              if (events.length <= 0) throw new Error("Visit Newport News returned no current events");
+              if (report.withAddresses <= 0) throw new Error("Visit Newport News events contain no venue addresses");
+            })();
+          ' 2>&1 | tee visit-newport-news-source.log
+      - name: Upload source result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visit-newport-news-source-result
+          path: |
+            visit-newport-news-source.json
+            visit-newport-news-source.log
+          if-no-files-found: warn
+          retention-days: 3
