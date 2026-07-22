@@ -34,7 +34,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          npx --yes tsx@4.20.6 --test src/lib/integrations/data-sources.test.ts 2>&1 | tee public-data-test.log
+          npx --yes tsx@4.20.6 --test src/lib/integrations/*.test.ts 2>&1 | tee public-data-test.log
       - name: Build
         id: production_build
         continue-on-error: true
