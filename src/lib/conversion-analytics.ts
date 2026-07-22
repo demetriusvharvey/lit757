@@ -57,10 +57,12 @@ export function referralContext(value: string | URL) {
   const referralId = url.searchParams.get("ref");
   const source = url.searchParams.get("source");
   const venueId = url.searchParams.get("venue");
+  const mode = url.searchParams.get("mode");
   return {
     referralId: referralId && /^[a-zA-Z0-9_-]{8,128}$/.test(referralId) ? referralId : null,
     source: source?.slice(0, 80) || null,
     venueId: venueId?.slice(0, 64) || null,
+    truthMode: mode === "live" ? "live" as const : mode === "forecast" ? "forecast" as const : null,
     isInvite: source === "invite-the-crew",
   };
 }
