@@ -1,0 +1,88 @@
+name: Tourism production smoke
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "41 */4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tourism-production-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Verify official tourism source
+        env:
+          BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${BASE_URL:?Add BUZZ_PRODUCTION_URL as a GitHub Actions secret}"
+          BASE_URL="${BASE_URL%/}"
+          python - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          base = os.environ["BASE_URL"].rstrip("/")
+          path = "/api/data/institution-calendars?tourismProbe=1"
+          request = urllib.request.Request(
+              f"{base}{path}",
+              headers={
+                  "User-Agent": "BuzzTourismProductionSmoke/1.0",
+                  "Accept": "application/json",
+              },
+          )
+          report = {}
+          try:
+              response = urllib.request.urlopen(request, timeout=180)
+          except urllib.error.HTTPError as error:
+              body = error.read().decode("utf-8", errors="replace")
+              report = {"httpStatus": error.code, "body": body[:30000]}
+              with open("tourism-production-smoke-output.json", "w", encoding="utf-8") as output:
+                  json.dump(report, output, indent=2)
+              raise AssertionError(f"Tourism endpoint returned HTTP {error.code}: {body[:4000]}") from error
+          with response:
+              payload = json.load(response)
+          report = payload
+          with open("tourism-production-smoke-output.json", "w", encoding="utf-8") as output:
+              json.dump(report, output, indent=2)
+
+          assert response.status == 200, response.status
+          assert payload.get("success") is True, json.dumps(payload)[:4000]
+          by_kind = payload.get("byKind") or {}
+          tourism = by_kind.get("tourism") or {}
+          assert int(tourism.get("registered") or 0) > 0, "No tourism source is registered"
+          assert int(tourism.get("successful") or 0) > 0, "No tourism source is healthy"
+          assert int(tourism.get("events") or 0) > 0, "Tourism sources returned no events"
+
+          sources = payload.get("sources") or []
+          visit_norfolk = next((source for source in sources if source.get("id") == "visit_norfolk_official"), None)
+          assert visit_norfolk is not None, "VisitNorfolk source is missing"
+          assert visit_norfolk.get("status") == "ok", json.dumps(visit_norfolk)
+          assert int(visit_norfolk.get("eventCount") or 0) > 0, "VisitNorfolk returned no events"
+          assert visit_norfolk.get("sourceUrl") == "https://www.visitnorfolk.com/events/"
+
+          print(json.dumps({
+              "tourismKind": tourism,
+              "visitNorfolk": visit_norfolk,
+              "totalInstitutionEvents": (payload.get("summary") or {}).get("dedupedEvents"),
+          }, indent=2))
+          PY
+      - name: Upload tourism smoke output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tourism-production-smoke-output
+          path: tourism-production-smoke-output.json
+          if-no-files-found: warn
+          retention-days: 3
