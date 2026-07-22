@@ -1,0 +1,48 @@
+name: Apply city calendar parser fix
+
+on:
+  push:
+    branches:
+      - feature/hampton-roads-city-calendar-ingestion
+    paths:
+      - .github/workflows/apply-city-calendar-parser-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/hampton-roads-city-calendar-ingestion
+          fetch-depth: 0
+      - name: Trim Virginia Beach location section
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/lib/events/city-calendars.ts")
+          text = path.read_text()
+          old = '''  const locationSection = sectionHtml(html, "Location");
+            const locationLines = locationSection ? htmlLines(locationSection).slice(0, 4) : [];'''
+          new = '''  const rawLocationSection = sectionHtml(html, "Location");
+            const locationSection = rawLocationSection
+              ? rawLocationSection.split(/Event\\s+Details\\s*:/i)[0]
+              : null;
+            const locationLines = locationSection ? htmlLines(locationSection).slice(0, 4) : [];'''
+          if old not in text:
+              raise SystemExit("Expected location parser block was not found")
+          path.write_text(text.replace(old, new, 1))
+          PY
+      - name: Commit parser fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/events/city-calendars.ts
+          git commit -m "Keep Virginia Beach addresses clean"
+          git push origin HEAD:feature/hampton-roads-city-calendar-ingestion
