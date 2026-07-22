@@ -376,7 +376,7 @@ export default function BuzzMapApp() {
       type: "geojson",
       data: empty,
       cluster: true,
-      clusterRadius: 64,
+      clusterRadius: 54,
       clusterMaxZoom: 12,
       clusterProperties: {
         maxScore: ["max", ["get", "score"]],
@@ -423,7 +423,7 @@ export default function BuzzMapApp() {
       maxzoom: 13,
       filter: ["has", "point_count"],
       paint: {
-        "circle-radius": ["step", ["get", "point_count"], 28, 8, 38, 20, 50],
+        "circle-radius": ["step", ["get", "point_count"], 25, 8, 31, 20, 38],
         "circle-color": ["interpolate", ["linear"], ["coalesce", ["get", "maxScore"], 40], 35, "#34d399", 60, "#facc15", 78, "#fb923c", 90, "#ef4444"],
         "circle-opacity": 0.24,
         "circle-blur": 0.72,
@@ -437,29 +437,36 @@ export default function BuzzMapApp() {
       maxzoom: 13,
       filter: ["has", "point_count"],
       paint: {
-        "circle-radius": ["step", ["get", "point_count"], 20, 8, 27, 20, 35],
+        "circle-radius": ["step", ["get", "point_count"], 17, 8, 21, 20, 27],
         "circle-color": ["interpolate", ["linear"], ["coalesce", ["get", "maxScore"], 40], 35, "#163c38", 60, "#4a4015", 78, "#632d17", 90, "#6f1d27"],
         "circle-stroke-width": 4,
         "circle-stroke-color": ["interpolate", ["linear"], ["coalesce", ["get", "maxScore"], 40], 35, "#34d399", 60, "#facc15", 78, "#fb923c", 90, "#ef4444"],
       },
     });
     map.addLayer({
-      id: "buzz-heat-hub-count",
+      id: "buzz-heat-hub-vibe",
       type: "symbol",
       source: "buzz-map-clusters",
       minzoom: 9,
       maxzoom: 13,
       filter: ["has", "point_count"],
       layout: {
-        "text-field": ["concat", ["get", "point_count_abbreviated"], " SPOTS"],
-        "text-size": ["step", ["get", "point_count"], 9, 10, 10, 25, 11],
+        "text-field": [
+          "case",
+          [">=", ["coalesce", ["get", "maxScore"], 40], 90], "ON FIRE",
+          [">=", ["coalesce", ["get", "maxScore"], 40], 78], "HOT",
+          [">=", ["coalesce", ["get", "maxScore"], 40], 60], "RISING",
+          [">=", ["coalesce", ["get", "maxScore"], 40], 45], "ACTIVE",
+          "EXPLORE",
+        ],
+        "text-size": ["step", ["get", "point_count"], 8, 10, 8.5, 25, 9],
         "text-font": ["DIN Pro Bold", "Arial Unicode MS Bold"],
         "text-allow-overlap": true,
       },
       paint: {
         "text-color": "#ffffff",
         "text-halo-color": "rgba(8,11,16,.75)",
-        "text-halo-width": 1,
+        "text-halo-width": 1.35,
       },
     });
     map.addLayer({
@@ -854,7 +861,7 @@ export default function BuzzMapApp() {
             <button type="button" onClick={() => void searchThisMap()}><Search /> Search this map</button>
           </div>
           <div className="buzz-map-mode">
-            {mapZoom < 9.8 ? <><Sparkles /><span>Area heat</span><small>Tap a hot zone or zoom in for venues</small></> : mapZoom < 12.6 ? <><Sparkles /><span>Heat hubs</span><small>Tap a hub to reveal its venues</small></> : <><MapPin /><span>Logo pins</span><small>Thick rings show each place’s Buzz</small></>}
+            {mapZoom < 9.8 ? <><Sparkles /><span>Area heat</span><small>Tap a hot zone or zoom in for venues</small></> : mapZoom < 12.6 ? <><Sparkles /><span>Heat hubs</span><small>Tap a glow to reveal its venues</small></> : <><MapPin /><span>Logo pins</span><small>Thick rings show each place’s Buzz</small></>}
           </div>
           {loading && <div className="buzz-map-loading"><i /> Updating Buzz</div>}
           {error && <button type="button" className="buzz-map-error" onClick={() => void loadNearby()}>{error} · Retry</button>}
