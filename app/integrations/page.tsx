@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, CheckCircle2, CircleDashed, KeyRound, RadioTower, ShieldCheck } from "lucide-react";
+import { Activity, ArrowLeft, CheckCircle2, CircleDashed, KeyRound, RadioTower, ShieldCheck } from "lucide-react";
 import { integrationSnapshot, type IntegrationState } from "../../src/lib/integration-catalog";
 import "./integrations.css";
 
@@ -35,7 +35,10 @@ export default function IntegrationsPage() {
   return (
     <main className="integration-page">
       <header className="integration-hero">
-        <Link href="/" className="integration-back"><ArrowLeft /> Back to Buzz</Link>
+        <div className="integration-nav">
+          <Link href="/" className="integration-back"><ArrowLeft /> Back to Buzz</Link>
+          <Link href="/health" className="integration-health-link"><Activity /> View live provider health</Link>
+        </div>
         <div className="integration-kicker"><RadioTower /> BUZZ SYSTEMS</div>
         <h1>Integration control center</h1>
         <p>One source of truth for every map, event, mobility, community, growth, AI, and operations integration in LIT757 / Buzz.</p>
