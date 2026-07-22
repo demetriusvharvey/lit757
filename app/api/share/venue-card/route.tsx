@@ -75,7 +75,7 @@ export async function GET(request: Request) {
             <div style={{ display: "flex", flexDirection: "column" }}>
               <div style={{ fontSize: 28, fontWeight: 800, color: "#fb923c", letterSpacing: "4px" }}>{status.toUpperCase()}</div>
               <div style={{ marginTop: 10, fontSize: 67, lineHeight: 1.02, fontWeight: 900, letterSpacing: "-3px", maxWidth: 770 }}>{name}</div>
-              <div style={{ marginTop: 16, fontSize: 28, color: "#cbd5e1" }}>{city} · {trend}</div>
+              <div style={{ display: "flex", marginTop: 16, fontSize: 28, color: "#cbd5e1" }}>{city} · {trend}</div>
             </div>
           </div>
         </div>
