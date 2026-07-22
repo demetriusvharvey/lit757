@@ -21,6 +21,8 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+      - name: Test city calendar ingestion
+        run: npx --yes tsx@4.20.6 --test src/lib/events/city-calendars.test.ts
       - name: Build
         id: production_build
         continue-on-error: true
