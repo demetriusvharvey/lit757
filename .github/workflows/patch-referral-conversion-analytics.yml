@@ -1,0 +1,287 @@
+name: Patch referral conversion analytics
+
+on:
+  push:
+    branches: [feature/referral-conversion-analytics]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/referral-conversion-analytics
+          fetch-depth: 0
+      - name: Instrument sharing, referrals, favorites, and venue views
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('app/buzz-map-app.tsx')
+          text = path.read_text()
+
+          invite_import = '''import {
+            buildInviteCrewText,
+            buildInviteCrewUrl,
+            buildStoryCardUrl,
+          } from "../src/lib/invite-the-crew";
+          '''
+          analytics_import = invite_import + '''import {
+            createReferralId,
+            referralContext,
+            trackConversion,
+            type ConversionEventName,
+          } from "../src/lib/conversion-analytics";
+          '''
+          if 'from "../src/lib/conversion-analytics"' not in text:
+              if invite_import not in text:
+                  raise SystemExit('Invite import anchor missing')
+              text = text.replace(invite_import, analytics_import, 1)
+
+          select_start = text.index('  const selectVenue = useCallback((id: string) => {')
+          select_end = text.index('  selectedRef.current = selectVenue;', select_start) + len('  selectedRef.current = selectVenue;')
+          select_block = '''  const selectVenue = useCallback((id: string) => {
+            const venue = venues.find(item => String(item.id) === String(id));
+            if (!venue) return;
+            setSelected(venue);
+            setVoteMessage("");
+            setWatchMessage("");
+            const context = referralContext(window.location.href);
+            void trackConversion({
+              eventName: "venue_view",
+              venueId: venue.id,
+              referralId: context.referralId,
+              source: context.isInvite ? "invite-the-crew" : "buzz-map",
+              truthMode: venue.activity?.scoreMode || "forecast",
+              metadata: {
+                entry: context.isInvite ? "shared-link" : "map",
+                selectedFilter: active,
+              },
+            }, session?.access_token);
+            if (validVenue(venue)) mapRef.current?.easeTo({ center: coordinates(venue), zoom: Math.max(13.2, mapRef.current.getZoom()), duration: 500 });
+          }, [venues, active, session?.access_token]);
+          selectedRef.current = selectVenue;'''
+          text = text[:select_start] + select_block + text[select_end:]
+
+          deep_start = text.index('  useEffect(() => {\n    if (deepLinkHandledRef.current || !venues.length) return;', select_start)
+          deep_end_marker = '  }, [venues, selectVenue]);'
+          deep_end = text.index(deep_end_marker, deep_start) + len(deep_end_marker)
+          deep_block = '''  useEffect(() => {
+            if (deepLinkHandledRef.current || !venues.length) return;
+            const params = new URLSearchParams(window.location.search);
+            const venueId = params.get("venue");
+            if (!venueId || !venues.some(venue => String(venue.id) === venueId)) return;
+            deepLinkHandledRef.current = true;
+            const context = referralContext(window.location.href);
+            if (context.isInvite) {
+              void trackConversion({
+                eventName: "shared_link_open",
+                venueId,
+                referralId: context.referralId,
+                source: context.source,
+                truthMode: context.truthMode,
+                metadata: { entry: "shared-link" },
+              }, session?.access_token);
+            }
+            selectVenue(venueId);
+            if (params.get("invite") === "1") {
+              setShareMessage("This place is ready to share. Tap Invite the Crew to open your phone’s share sheet.");
+            }
+          }, [venues, selectVenue, session?.access_token]);'''
+          text = text[:deep_start] + deep_block + text[deep_end:]
+
+          favorite_start = text.index('  function toggleFavorite(event: ReactMouseEvent, venue: Venue) {')
+          favorite_end = text.index('\n\n  async function enableNotifications()', favorite_start)
+          favorite_block = '''  function toggleFavorite(event: ReactMouseEvent, venue: Venue) {
+            event.stopPropagation();
+            const adding = !favoriteIds.has(venue.id);
+            setFavoriteIds(current => {
+              const next = new Set(current);
+              next.has(venue.id) ? next.delete(venue.id) : next.add(venue.id);
+              localStorage.setItem(FAVORITES_KEY, JSON.stringify([...next]));
+              return next;
+            });
+            if (adding) {
+              void trackConversion({
+                eventName: "favorite_add",
+                venueId: venue.id,
+                source: "buzz-map",
+                truthMode: venue.activity?.scoreMode || "forecast",
+                metadata: { selectedFilter: active },
+              }, session?.access_token);
+            }
+          }'''
+          text = text[:favorite_start] + favorite_block + text[favorite_end:]
+
+          watch_start = text.index('  async function toggleWatch(venue: Venue) {')
+          watch_end = text.index('\n\n  function inviteVenue', watch_start)
+          watch_block = '''  async function toggleWatch(venue: Venue) {
+            const next = new Set(watchedIds);
+            const removing = next.has(venue.id);
+            removing ? next.delete(venue.id) : next.add(venue.id);
+            setWatchedIds(next);
+            localStorage.setItem(VENUE_ALERTS_KEY, JSON.stringify([...next].map(venueId => ({ venueId, threshold: 80 }))));
+            if (removing) {
+              setWatchMessage("Alert removed for this place.");
+              return;
+            }
+            void trackConversion({
+              eventName: "watch_add",
+              venueId: venue.id,
+              source: "buzz-map",
+              truthMode: venue.activity?.scoreMode || "forecast",
+              metadata: { notification: true },
+            }, session?.access_token);
+            await enableNotifications();
+          }'''
+          text = text[:watch_start] + watch_block + text[watch_end:]
+
+          invite_start = text.index('  function inviteVenue(venue: Venue) {')
+          invite_end = text.index('  async function useMyLocation()', invite_start)
+          invite_block = '''  function inviteVenue(venue: Venue, referralId?: string | null) {
+            return {
+              id: venue.id,
+              name: venue.name,
+              city: venue.city || venue.area?.shortName || null,
+              latitude: venue.lat,
+              longitude: venue.lng,
+              status: statusFor(venue),
+              trend: venue.activity?.trendLabel || null,
+              mode: venue.activity?.scoreMode || "forecast",
+              referralId,
+            };
+          }
+
+          function trackVenueConversion(
+            venue: Venue,
+            eventName: ConversionEventName,
+            channel?: string,
+            referralId?: string | null,
+            metadata?: Record<string, string | number | boolean>,
+          ) {
+            void trackConversion({
+              eventName,
+              venueId: venue.id,
+              referralId,
+              source: "invite-the-crew",
+              channel,
+              truthMode: venue.activity?.scoreMode || "forecast",
+              metadata,
+            }, session?.access_token);
+          }
+
+          async function copyInviteLink(
+            venue: Venue,
+            referralId = createReferralId(),
+            trackAttempt = true,
+            fallback = false,
+          ) {
+            const details = inviteVenue(venue, referralId);
+            const link = buildInviteCrewUrl(window.location.origin, details);
+            if (trackAttempt) trackVenueConversion(venue, "share_attempt", "copy", referralId, { entry: "copy-link" });
+            try {
+              await navigator.clipboard.writeText(link);
+              setShareMessage("Invite link copied.");
+            } catch {
+              window.prompt("Copy this Buzz invite link", link);
+              setShareMessage("Copy the link above and send it to the crew.");
+            }
+            trackVenueConversion(venue, "copy_link", "copy", referralId, { fallback });
+          }
+
+          function textCrew(venue: Venue) {
+            const referralId = createReferralId();
+            const details = inviteVenue(venue, referralId);
+            const link = buildInviteCrewUrl(window.location.origin, details);
+            const body = `${buildInviteCrewText(details)} ${link}`;
+            trackVenueConversion(venue, "share_attempt", "sms", referralId, { entry: "text-crew" });
+            trackVenueConversion(venue, "sms_open", "sms", referralId, { result: "opened" });
+            window.location.href = `sms:?&body=${encodeURIComponent(body)}`;
+            setShareMessage("Opening your messages app…");
+          }
+
+          async function storyCardFile(venue: Venue) {
+            const details = inviteVenue(venue);
+            const response = await fetch(buildStoryCardUrl(window.location.origin, details));
+            if (!response.ok) throw new Error("Could not generate the Story card");
+            const blob = await response.blob();
+            const fileName = `buzz-${venue.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "venue"}.png`;
+            return new File([blob], fileName, { type: "image/png" });
+          }
+
+          async function downloadStoryCard(venue: Venue) {
+            const referralId = createReferralId();
+            trackVenueConversion(venue, "share_attempt", "story-download", referralId, { entry: "save-story" });
+            setSharing(true);
+            try {
+              const file = await storyCardFile(venue);
+              const objectUrl = URL.createObjectURL(file);
+              const anchor = document.createElement("a");
+              anchor.href = objectUrl;
+              anchor.download = file.name;
+              document.body.appendChild(anchor);
+              anchor.click();
+              anchor.remove();
+              URL.revokeObjectURL(objectUrl);
+              trackVenueConversion(venue, "story_download", "story-download", referralId, { result: "saved" });
+              setShareMessage("Story graphic saved. Post it anywhere your crew hangs out.");
+            } catch (shareError) {
+              trackVenueConversion(venue, "share_fallback", "story-download", referralId, { result: "error" });
+              setShareMessage(shareError instanceof Error ? shareError.message : "Could not save the Story graphic");
+            } finally {
+              setSharing(false);
+            }
+          }
+
+          async function shareWithCrew(venue: Venue) {
+            const referralId = createReferralId();
+            const details = inviteVenue(venue, referralId);
+            const link = buildInviteCrewUrl(window.location.origin, details);
+            const text = buildInviteCrewText(details);
+            trackVenueConversion(venue, "share_attempt", "web-share", referralId, { entry: "invite-the-crew" });
+            setSharing(true);
+            setShareMessage("Generating the crew card…");
+            try {
+              const file = await storyCardFile(venue);
+              const canShareFile = typeof navigator.canShare === "function" && navigator.canShare({ files: [file] });
+              if (typeof navigator.share === "function") {
+                await navigator.share({
+                  title: `${venue.name} on Buzz`,
+                  text,
+                  url: link,
+                  ...(canShareFile ? { files: [file] } : {}),
+                });
+                trackVenueConversion(venue, "share_complete", "web-share", referralId, { shareFile: canShareFile, result: "shared" });
+                setShareMessage("Shared with the crew.");
+              } else {
+                trackVenueConversion(venue, "share_fallback", "copy", referralId, { fallback: true });
+                await copyInviteLink(venue, referralId, false, true);
+              }
+            } catch (shareError) {
+              if (shareError instanceof DOMException && shareError.name === "AbortError") {
+                trackVenueConversion(venue, "share_cancel", "web-share", referralId, { result: "cancelled" });
+                setShareMessage("");
+              } else {
+                trackVenueConversion(venue, "share_fallback", "copy", referralId, { fallback: true, result: "error" });
+                await copyInviteLink(venue, referralId, false, true);
+              }
+            } finally {
+              setSharing(false);
+            }
+          }
+
+          '''
+          text = text[:invite_start] + invite_block + text[invite_end:]
+
+          path.write_text(text)
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/buzz-map-app.tsx
+          git commit -m "Track Buzz referral and conversion funnel"
+          git push origin HEAD:feature/referral-conversion-analytics
