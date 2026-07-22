@@ -1,0 +1,129 @@
+name: Operations surfaces production smoke
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "53 */4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: operations-surfaces-production-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Verify integration, health, and analytics surfaces
+        env:
+          BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${BASE_URL:?Add BUZZ_PRODUCTION_URL as a GitHub Actions secret}"
+          BASE_URL="${BASE_URL%/}"
+          python - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          base = os.environ["BASE_URL"].rstrip("/")
+          report = {}
+
+          def get_text(path, timeout=90):
+              request = urllib.request.Request(
+                  f"{base}{path}",
+                  headers={"User-Agent": "BuzzOperationsSmoke/1.0", "Accept": "text/html,*/*;q=0.5"},
+              )
+              with urllib.request.urlopen(request, timeout=timeout) as response:
+                  body = response.read().decode("utf-8", errors="replace")
+                  assert response.status == 200, (path, response.status)
+                  report[path] = {"status": response.status, "length": len(body), "preview": body[:1000]}
+                  return body
+
+          def get_json(path, timeout=90):
+              request = urllib.request.Request(
+                  f"{base}{path}",
+                  headers={"User-Agent": "BuzzOperationsSmoke/1.0", "Accept": "application/json"},
+              )
+              with urllib.request.urlopen(request, timeout=timeout) as response:
+                  payload = json.load(response)
+                  assert response.status == 200, (path, response.status)
+                  report[path] = payload
+                  return payload
+
+          integrations_html = get_text("/integrations")
+          health_html = get_text("/health")
+          assert "Integration control center" in integrations_html, "Integration Control Center heading is missing"
+          assert "Live provider health" in health_html, "Live provider health heading is missing"
+          assert "/health" in integrations_html, "Integration Control Center does not link to live health"
+
+          integrations = get_json("/api/integrations")
+          assert integrations.get("success") is True
+          catalog = integrations.get("integrations") or []
+          assert len(catalog) == 45, f"Expected 45 integrations, received {len(catalog)}"
+          names = {item.get("name") for item in catalog}
+          required = {
+              "Mapbox",
+              "Supabase",
+              "Ticketmaster Discovery API",
+              "Tourism and destination calendars",
+              "National Weather Service",
+              "NOAA CO-OPS",
+              "Hampton Roads Transit GTFS",
+              "Web Share API",
+              "Referral tracking",
+              "Provider health monitoring",
+              "Analytics and conversion tracking",
+          }
+          assert required.issubset(names), f"Required integrations are missing: {sorted(required - names)}"
+
+          invalid_body = json.dumps({
+              "eventName": "unsupported_smoke_event",
+              "anonymousId": "anon_operations_smoke",
+          }).encode("utf-8")
+          analytics_request = urllib.request.Request(
+              f"{base}/api/analytics/track",
+              method="POST",
+              data=invalid_body,
+              headers={
+                  "User-Agent": "BuzzOperationsSmoke/1.0",
+                  "Accept": "application/json",
+                  "Content-Type": "application/json",
+              },
+          )
+          try:
+              urllib.request.urlopen(analytics_request, timeout=60)
+              raise AssertionError("Analytics route accepted an unsupported event")
+          except urllib.error.HTTPError as error:
+              body = error.read().decode("utf-8", errors="replace")
+              payload = json.loads(body)
+              assert error.code == 400, (error.code, payload)
+              assert payload.get("success") is False
+              assert "Unsupported analytics event" in str(payload.get("error"))
+              report["/api/analytics/track#invalid"] = {"status": error.code, "payload": payload}
+
+          with open("operations-surfaces-smoke-output.json", "w", encoding="utf-8") as output:
+              json.dump(report, output, indent=2)
+
+          print(json.dumps({
+              "integrationCount": len(catalog),
+              "integrationPageBytes": len(integrations_html),
+              "healthPageBytes": len(health_html),
+              "analyticsInvalidStatus": report["/api/analytics/track#invalid"]["status"],
+          }, indent=2))
+          PY
+      - name: Upload operations smoke output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: operations-surfaces-smoke-output
+          path: operations-surfaces-smoke-output.json
+          if-no-files-found: warn
+          retention-days: 3
