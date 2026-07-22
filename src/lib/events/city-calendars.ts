@@ -647,10 +647,16 @@ function recurrenceCalendarDates(
   }
 
   if (rule.freq === "DAILY") {
+    const permittedDays = new Set(
+      rule.byDay
+        .map(token => token.slice(-2))
+        .map(code => DAY_CODE_TO_UTC_DAY[code])
+        .filter(day => day !== undefined),
+    );
     let firstOffset = 0;
     const localWindow = calendarDateForInstant(windowStart, timeZone, startParts.zulu);
     const daysToWindow = Math.floor((localWindow.getTime() - start.getTime()) / (24 * 60 * 60 * 1000));
-    if (daysToWindow > 0) {
+    if (daysToWindow > 0 && permittedDays.size === 0) {
       const skippedIntervals = Math.max(0, Math.floor(daysToWindow / rule.interval) - 1);
       firstOffset = skippedIntervals * rule.interval;
       occurrenceNumber = skippedIntervals;
@@ -660,6 +666,7 @@ function recurrenceCalendarDates(
       iterations += 1;
       const candidate = new Date(start);
       candidate.setUTCDate(candidate.getUTCDate() + offset);
+      if (permittedDays.size && !permittedDays.has(candidate.getUTCDay())) continue;
       if (!addCandidate(candidate)) break;
     }
     return output;
@@ -911,12 +918,27 @@ export function parseCityCalendarIcs(text: string, source: CityCalendarSource): 
 
   for (const block of blocks) {
     const detached = detachedOccurrenceDetails(block, source);
-    if (String(property(block, "STATUS") || "").toUpperCase() === "CANCELLED" && detached) {
+    const isCancelled = String(property(block, "STATUS") || "").toUpperCase() === "CANCELLED";
+    if (isCancelled && detached) {
       const cancellation = cancelledIcsEvent(block, source, detached.identity, detached.start);
       events.delete(cancellation.source_event_id);
       cancelled.set(cancellation.source_event_id, cancellation);
       continue;
     }
+
+    if (isCancelled) {
+      for (const event of expandIcsBlock(block, source)) {
+        const cancellation = {
+          ...event,
+          ticket_status: "cancelled",
+          cancelled: true,
+        };
+        events.delete(cancellation.source_event_id);
+        cancelled.set(cancellation.source_event_id, cancellation);
+      }
+      continue;
+    }
+
 
     const isDetached = Boolean(detached);
     for (const event of expandIcsBlock(block, source)) {
