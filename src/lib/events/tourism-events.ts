@@ -139,6 +139,16 @@ function resolveUrl(value: unknown, source: TourismSource) {
   }
 }
 
+function resolveOptionalUrl(value: unknown, source: TourismSource) {
+  const raw = text(value);
+  if (!raw) return null;
+  try {
+    return new URL(raw, source.url).toString();
+  } catch {
+    return null;
+  }
+}
+
 export function parseVisitNorfolkEvents(html: string, source: TourismSource): NormalizedCityEvent[] {
   const rows = extractTourismEventRows(html);
   const events: NormalizedCityEvent[] = [];
@@ -151,6 +161,7 @@ export function parseVisitNorfolkEvents(html: string, source: TourismSource): No
     const startClock = parsedClocks[0] || null;
     const endClock = parsedClocks[1] || null;
     const sourceUrl = resolveUrl(row.url, source);
+    const imageUrl = resolveOptionalUrl(row.img, source);
     for (const date of dates) {
       const start = localIso(date, startClock);
       const venue = "Norfolk";
@@ -168,7 +179,7 @@ export function parseVisitNorfolkEvents(html: string, source: TourismSource): No
         source: source.id,
         source_name: source.name,
         source_url: sourceUrl,
-        image_url: resolveUrl(row.img, source),
+        image_url: imageUrl,
         ticket_status: /ticket|featured|marquee/i.test(`${row.label || ""} ${row.type || ""}`) ? "available" : null,
       });
     }
