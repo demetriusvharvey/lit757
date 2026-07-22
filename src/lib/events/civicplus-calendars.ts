@@ -6,7 +6,9 @@ import {
 
 const EASTERN_TIME_ZONE = "America/New_York";
 const REQUEST_TIMEOUT_MS = 12_000;
-const FETCH_CONCURRENCY = 6;
+const FETCH_ATTEMPTS = 2;
+const HOST_CONCURRENCY = 4;
+const BETWEEN_FEEDS_MS = 200;
 
 export type CivicPlusCalendarFeed = {
   feedId: string;
@@ -263,21 +265,34 @@ function sourceForFeed(feed: CivicPlusCalendarFeed): CityCalendarSource {
   };
 }
 
+async function wait(milliseconds: number) {
+  await new Promise(resolve => setTimeout(resolve, milliseconds));
+}
+
 async function fetchCalendarText(feed: CivicPlusCalendarFeed) {
-  const response = await fetch(feed.url, {
-    cache: "no-store",
-    headers: {
-      Accept: "text/calendar,text/plain;q=0.9,*/*;q=0.5",
-      "User-Agent": "Buzz/1.0 (https://lit757.vercel.app; demetriusvharvey@gmail.com)",
-    },
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-  });
-  if (!response.ok) throw new Error(`Official calendar request failed (${response.status})`);
-  const text = await response.text();
-  if (!text.includes("BEGIN:VCALENDAR") && !text.includes("BEGIN:VEVENT")) {
-    throw new Error("Official calendar did not return iCalendar content");
+  const failures: string[] = [];
+  for (let attempt = 1; attempt <= FETCH_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetch(feed.url, {
+        cache: "no-store",
+        headers: {
+          Accept: "text/calendar,text/plain;q=0.9,*/*;q=0.5",
+          "User-Agent": "Buzz/1.0 (https://lit757.vercel.app; demetriusvharvey@gmail.com)",
+        },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      if (!response.ok) throw new Error(`Official calendar request failed (${response.status})`);
+      const calendarText = await response.text();
+      if (!calendarText.includes("BEGIN:VCALENDAR") && !calendarText.includes("BEGIN:VEVENT")) {
+        throw new Error("Official calendar did not return iCalendar content");
+      }
+      return calendarText;
+    } catch (error) {
+      failures.push(error instanceof Error ? error.message : "Calendar request failed");
+      if (attempt < FETCH_ATTEMPTS) await wait(500 * attempt);
+    }
   }
-  return text;
+  throw new Error(`Official calendar failed after ${FETCH_ATTEMPTS} attempts: ${failures.join(" | ")}`);
 }
 
 async function mapLimit<T, R>(items: T[], concurrency: number, worker: (item: T) => Promise<R>) {
@@ -314,10 +329,44 @@ export async function fetchCivicPlusFeed(feed: CivicPlusCalendarFeed): Promise<C
   }
 }
 
+export function groupCivicPlusFeedsByOrigin(feeds: CivicPlusCalendarFeed[]) {
+  const groups = new Map<string, CivicPlusCalendarFeed[]>();
+  for (const feed of feeds) {
+    const origin = new URL(feed.url).origin;
+    groups.set(origin, [...(groups.get(origin) || []), feed]);
+  }
+  return [...groups.values()];
+}
+
+async function fetchFeedGroup(feeds: CivicPlusCalendarFeed[]) {
+  const results: CivicPlusFeedResult[] = [];
+  let consecutiveFailures = 0;
+  for (let index = 0; index < feeds.length; index += 1) {
+    const result = await fetchCivicPlusFeed(feeds[index]);
+    results.push(result);
+    consecutiveFailures = result.status === "error" ? consecutiveFailures + 1 : 0;
+    if (consecutiveFailures >= 2) {
+      for (const skipped of feeds.slice(index + 1)) {
+        results.push({
+          feed: skipped,
+          status: "error",
+          events: [],
+          error: "Skipped after repeated failures from the same official calendar host",
+          fetchedAt: new Date().toISOString(),
+        });
+      }
+      break;
+    }
+    if (index < feeds.length - 1) await wait(BETWEEN_FEEDS_MS);
+  }
+  return results;
+}
+
 export async function fetchAllCivicPlusCalendars(
   feeds = CIVICPLUS_CALENDAR_FEEDS.filter(feed => feed.enabled),
 ) {
-  const results = await mapLimit(feeds, FETCH_CONCURRENCY, fetchCivicPlusFeed);
+  const groups = groupCivicPlusFeedsByOrigin(feeds);
+  const results = (await mapLimit(groups, HOST_CONCURRENCY, fetchFeedGroup)).flat();
   const events = dedupeCivicPlusEvents(results.flatMap(result => result.events));
   return {
     generatedAt: new Date().toISOString(),
