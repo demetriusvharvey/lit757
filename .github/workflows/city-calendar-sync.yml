@@ -15,9 +15,9 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
-      - name: Ingest Hampton Roads city calendars
+      - name: Ingest Hampton Roads city and institution calendars
         env:
           BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
@@ -37,3 +37,9 @@ jobs:
           curl --silent --show-error --fail-with-body --retry 2 --max-time 120 \
             -H "Authorization: Bearer ${CRON_SECRET}" \
             "${BASE_URL}/api/events/civicplus-calendars"
+
+          echo
+          echo "Syncing universities, arenas, arts centers, museums, attractions, and festivals"
+          curl --silent --show-error --fail-with-body --retry 2 --max-time 180 \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${BASE_URL}/api/events/institution-calendars"
