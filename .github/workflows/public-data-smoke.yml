@@ -30,6 +30,7 @@ jobs:
           python - <<'PY'
           import json
           import os
+          import time
           import urllib.error
           import urllib.request
 
@@ -40,8 +41,9 @@ jobs:
               with open("public-data-smoke-output.json", "w", encoding="utf-8") as output:
                   json.dump(report, output, indent=2)
 
-          def get(path, timeout=45):
+          def get(path, timeout=45, report_key=None):
               url = f"{base}{path}"
+              key = report_key or path
               request = urllib.request.Request(
                   url,
                   headers={"User-Agent": "BuzzPublicDataSmoke/1.0", "Accept": "application/json"},
@@ -50,16 +52,16 @@ jobs:
                   response = urllib.request.urlopen(request, timeout=timeout)
               except urllib.error.HTTPError as error:
                   body = error.read().decode("utf-8", errors="replace")
-                  report[path] = {"httpStatus": error.code, "body": body[:20000]}
+                  report[key] = {"httpStatus": error.code, "body": body[:20000]}
                   save_report()
                   raise AssertionError(f"{path} returned HTTP {error.code}: {body[:4000]}") from error
               except Exception as error:
-                  report[path] = {"requestError": str(error)}
+                  report[key] = {"requestError": str(error)}
                   save_report()
                   raise AssertionError(f"{path} request failed: {error}") from error
               with response:
                   payload = json.load(response)
-                  report[path] = payload
+                  report[key] = payload
                   save_report()
                   if response.status != 200:
                       raise AssertionError(f"{path} returned HTTP {response.status}: {payload}")
@@ -100,15 +102,43 @@ jobs:
           assert isinstance(realtime.get("alerts"), list)
           assert isinstance(realtime.get("vehicles"), list)
 
-          calendars = get("/api/data/city-calendars", timeout=120)
           expected_cities = {
               "Norfolk", "Chesapeake", "Portsmouth", "Hampton", "Newport News", "Suffolk"
           }
-          city_health = calendars.get("cityHealth") or {}
-          assert expected_cities.issubset(set(city_health)), "One or more city calendar registries are missing"
-          for city in expected_cities:
-              assert int(city_health[city].get("successfulFeeds") or 0) > 0, f"{city} has no working official calendar feed"
+          calendar_attempts = []
+          calendars = None
+          city_health = {}
+          for attempt in range(1, 4):
+              calendars = get(
+                  "/api/data/city-calendars",
+                  timeout=120,
+                  report_key=f"/api/data/city-calendars#attempt-{attempt}",
+              )
+              city_health = calendars.get("cityHealth") or {}
+              missing = sorted(expected_cities - set(city_health))
+              unhealthy = sorted(
+                  city for city in expected_cities
+                  if city in city_health and int(city_health[city].get("successfulFeeds") or 0) <= 0
+              )
+              calendar_attempts.append({
+                  "attempt": attempt,
+                  "missingCities": missing,
+                  "unhealthyCities": unhealthy,
+                  "summary": calendars.get("summary") or {},
+              })
+              report["cityCalendarAttempts"] = calendar_attempts
+              save_report()
+              if not missing and not unhealthy:
+                  break
+              if attempt < 3:
+                  time.sleep(12)
+          else:
+              raise AssertionError(
+                  "Official city calendars remained unhealthy after 3 attempts: "
+                  + json.dumps(calendar_attempts)
+              )
 
+          assert calendars is not None
           institutions = get("/api/data/institution-calendars", timeout=180)
           institution_summary = institutions.get("summary") or {}
           institution_kinds = institutions.get("byKind") or {}
@@ -142,6 +172,7 @@ jobs:
               "hrtAlerts": len(realtime["alerts"]),
               "hrtVehicles": len(realtime["vehicles"]),
               "vehiclePositionsAvailable": availability.get("vehiclePositions"),
+              "calendarAttempts": calendar_attempts,
               "calendarFeeds": calendars.get("summary", {}).get("registeredFeeds"),
               "calendarFeedsWorking": calendars.get("summary", {}).get("successfulFeeds"),
               "calendarEvents": calendars.get("summary", {}).get("dedupedEvents"),
