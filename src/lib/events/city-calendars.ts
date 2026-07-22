@@ -1002,7 +1002,10 @@ export function parseVirginiaBeachEventDetail(
   const dateSection = sectionHtml(html, "Date\\s*(?:&amp;|&)\\s*Time");
   const dateText = dateSection ? htmlLines(dateSection).join(" ") : "";
   const times = eventTimesFromText(listing.date, dateText, source.timeZone || EASTERN_TIME_ZONE);
-  const locationSection = sectionHtml(html, "Location");
+  const rawLocationSection = sectionHtml(html, "Location");
+  const locationSection = rawLocationSection
+    ? rawLocationSection.split(/Event\s+Details\s*:/i)[0]
+    : null;
   const locationLines = locationSection ? htmlLines(locationSection).slice(0, 4) : [];
   const venueName = locationLines[0] || source.venueName || source.name;
   const address = locationLines.length > 1 ? locationLines.slice(1).join(", ") : null;
