@@ -1,0 +1,79 @@
+name: Patch Overpass request compatibility
+
+on:
+  push:
+    branches: [chore/osm-production-dry-run]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chore/osm-production-dry-run
+          fetch-depth: 0
+      - name: Add compatible request headers and official failover
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/lib/integrations/osm.ts')
+          text = path.read_text()
+          old_const = 'export const OVERPASS_ENDPOINT = process.env.OVERPASS_API_URL || "https://overpass-api.de/api/interpreter";'
+          new_const = '''export const OVERPASS_ENDPOINTS = process.env.OVERPASS_API_URL
+            ? [process.env.OVERPASS_API_URL]
+            : [
+              "https://overpass.maprva.org/api/interpreter",
+              "https://overpass-api.de/api/interpreter",
+              "https://overpass.private.coffee/api/interpreter",
+            ];'''
+          if old_const in text:
+              text = text.replace(old_const, new_const, 1)
+          elif 'export const OVERPASS_ENDPOINTS' not in text:
+              raise SystemExit('Overpass endpoint constant not found')
+
+          start = text.index('export async function fetchOsmVenueCandidates() {')
+          end = text.index('\nexport function normalizeVenueName', start)
+          replacement = '''export async function fetchOsmVenueCandidates() {
+            const query = buildHamptonRoadsOverpassQuery();
+            const errors: string[] = [];
+            for (const endpoint of OVERPASS_ENDPOINTS) {
+              try {
+                const response = await fetch(endpoint, {
+                  method: "POST",
+                  cache: "no-store",
+                  headers: {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "User-Agent": "Buzz/1.0 (https://lit757.vercel.app; demetriusvharvey@gmail.com)",
+                  },
+                  body: `data=${encodeURIComponent(query)}`,
+                  signal: AbortSignal.timeout(48_000),
+                });
+                if (!response.ok) {
+                  const body = (await response.text()).slice(0, 500);
+                  errors.push(`${endpoint} returned ${response.status}: ${body}`);
+                  continue;
+                }
+                return {
+                  ...parseOverpassResponse(await response.json()),
+                  endpoint,
+                };
+              } catch (error) {
+                errors.push(`${endpoint}: ${error instanceof Error ? error.message : "request failed"}`);
+              }
+            }
+            throw new Error(`All Overpass endpoints failed: ${errors.join(" | ")}`);
+          }
+          '''
+          text = text[:start] + replacement + text[end:]
+          path.write_text(text)
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/integrations/osm.ts
+          git commit -m "Add Overpass request compatibility and failover"
+          git push origin HEAD:chore/osm-production-dry-run
