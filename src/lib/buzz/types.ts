@@ -34,7 +34,7 @@ export type BuzzSignal = {
 };
 
 export type BuzzScoreFactor = {
-  family: BuzzSignalFamily | "prior";
+  family: BuzzSignalFamily | "prior" | "corroboration";
   label: string;
   points: number;
   source: string;
@@ -42,7 +42,7 @@ export type BuzzScoreFactor = {
 };
 
 export type BuzzScoreResult = {
-  version: "buzz-v1";
+  version: "buzz-v1" | "buzz-v2";
   score: number;
   label: "Chill" | "Active" | "Heating Up" | "On Fire";
   mode: BuzzScoreMode;
