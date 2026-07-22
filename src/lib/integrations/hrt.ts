@@ -32,26 +32,79 @@ export function parseCsv(text: string): CsvRow[] {
   return rows.map(values => Object.fromEntries(headers.map((header, index) => [header, values[index] || ""])));
 }
 
-function zipEntry(buffer: Buffer, wantedName: string) {
-  let offset = 0;
-  while (offset + 30 <= buffer.length) {
-    if (buffer.readUInt32LE(offset) !== 0x04034b50) { offset += 1; continue; }
-    const flags = buffer.readUInt16LE(offset + 6);
-    const method = buffer.readUInt16LE(offset + 8);
-    const compressedSize = buffer.readUInt32LE(offset + 18);
-    const fileNameLength = buffer.readUInt16LE(offset + 26);
-    const extraLength = buffer.readUInt16LE(offset + 28);
-    const fileName = buffer.subarray(offset + 30, offset + 30 + fileNameLength).toString("utf8");
-    const dataStart = offset + 30 + fileNameLength + extraLength;
-    if (flags & 0x08) throw new Error("HRT ZIP uses unsupported data descriptors");
-    const compressed = buffer.subarray(dataStart, dataStart + compressedSize);
-    if (fileName === wantedName) {
-      if (method === 0) return compressed.toString("utf8");
-      if (method === 8) return inflateRawSync(compressed).toString("utf8");
-      throw new Error(`Unsupported ZIP compression method ${method}`);
-    }
-    offset = dataStart + compressedSize;
+const END_OF_CENTRAL_DIRECTORY = 0x06054b50;
+const CENTRAL_DIRECTORY_HEADER = 0x02014b50;
+const LOCAL_FILE_HEADER = 0x04034b50;
+const MAX_ZIP_COMMENT_BYTES = 0xffff;
+
+function endOfCentralDirectory(buffer: Buffer) {
+  const minimum = Math.max(0, buffer.length - 22 - MAX_ZIP_COMMENT_BYTES);
+  for (let offset = buffer.length - 22; offset >= minimum; offset -= 1) {
+    if (buffer.readUInt32LE(offset) === END_OF_CENTRAL_DIRECTORY) return offset;
   }
+  throw new Error("HRT GTFS archive has no ZIP central directory");
+}
+
+export function readZipEntry(buffer: Buffer, wantedName: string) {
+  const end = endOfCentralDirectory(buffer);
+  const entryCount = buffer.readUInt16LE(end + 10);
+  const centralSize = buffer.readUInt32LE(end + 12);
+  const centralOffset = buffer.readUInt32LE(end + 16);
+  if (entryCount === 0xffff || centralSize === 0xffffffff || centralOffset === 0xffffffff) {
+    throw new Error("ZIP64 GTFS archives are not supported");
+  }
+  if (centralOffset + centralSize > buffer.length) {
+    throw new Error("HRT GTFS central directory is truncated");
+  }
+
+  let offset = centralOffset;
+  for (let index = 0; index < entryCount; index += 1) {
+    if (offset + 46 > buffer.length || buffer.readUInt32LE(offset) !== CENTRAL_DIRECTORY_HEADER) {
+      throw new Error("HRT GTFS central directory entry is invalid");
+    }
+
+    const flags = buffer.readUInt16LE(offset + 8);
+    const method = buffer.readUInt16LE(offset + 10);
+    const compressedSize = buffer.readUInt32LE(offset + 20);
+    const uncompressedSize = buffer.readUInt32LE(offset + 24);
+    const fileNameLength = buffer.readUInt16LE(offset + 28);
+    const extraLength = buffer.readUInt16LE(offset + 30);
+    const commentLength = buffer.readUInt16LE(offset + 32);
+    const localOffset = buffer.readUInt32LE(offset + 42);
+    const nameStart = offset + 46;
+    const nameEnd = nameStart + fileNameLength;
+    if (nameEnd > buffer.length) throw new Error("HRT GTFS ZIP filename is truncated");
+    const fileName = buffer.subarray(nameStart, nameEnd).toString("utf8");
+
+    if (fileName === wantedName) {
+      if (flags & 0x01) throw new Error("Encrypted GTFS ZIP entries are not supported");
+      if (compressedSize === 0xffffffff || uncompressedSize === 0xffffffff || localOffset === 0xffffffff) {
+        throw new Error("ZIP64 GTFS entries are not supported");
+      }
+      if (localOffset + 30 > buffer.length || buffer.readUInt32LE(localOffset) !== LOCAL_FILE_HEADER) {
+        throw new Error(`Local ZIP header is invalid for ${wantedName}`);
+      }
+      const localFileNameLength = buffer.readUInt16LE(localOffset + 26);
+      const localExtraLength = buffer.readUInt16LE(localOffset + 28);
+      const dataStart = localOffset + 30 + localFileNameLength + localExtraLength;
+      const dataEnd = dataStart + compressedSize;
+      if (dataEnd > buffer.length) throw new Error(`${wantedName} is truncated in the HRT GTFS archive`);
+      const compressed = buffer.subarray(dataStart, dataEnd);
+      const output = method === 0
+        ? compressed
+        : method === 8
+          ? inflateRawSync(compressed)
+          : null;
+      if (!output) throw new Error(`Unsupported ZIP compression method ${method}`);
+      if (uncompressedSize && output.length !== uncompressedSize) {
+        throw new Error(`${wantedName} did not match its declared uncompressed size`);
+      }
+      return output.toString("utf8");
+    }
+
+    offset = nameEnd + extraLength + commentLength;
+  }
+
   throw new Error(`${wantedName} was not found in the HRT GTFS archive`);
 }
 
@@ -73,7 +126,7 @@ async function fetchJson(url: string) {
 
 export async function fetchHrtStatic() {
   const archive = await fetchBuffer(HRT_FEEDS.static);
-  const routes = parseCsv(zipEntry(archive, "routes.txt")).map(route => ({
+  const routes = parseCsv(readZipEntry(archive, "routes.txt")).map(route => ({
     id: route.route_id,
     shortName: route.route_short_name,
     longName: route.route_long_name,
@@ -82,7 +135,7 @@ export async function fetchHrtStatic() {
     color: route.route_color || null,
     textColor: route.route_text_color || null,
   }));
-  const stops = parseCsv(zipEntry(archive, "stops.txt")).map(stop => ({
+  const stops = parseCsv(readZipEntry(archive, "stops.txt")).map(stop => ({
     id: stop.stop_id,
     code: stop.stop_code || null,
     name: stop.stop_name,
