@@ -112,11 +112,11 @@ jobs:
               int((institution_kinds.get("arena") or {}).get("successful") or 0)
               + int((institution_kinds.get("arts") or {}).get("successful") or 0)
           ) > 0, "No arena or arts-center calendar is working"
+          assert int((institution_kinds.get("museum") or {}).get("successful") or 0) > 0, "No museum calendar is working"
           assert (
-              int((institution_kinds.get("museum") or {}).get("successful") or 0)
-              + int((institution_kinds.get("festival") or {}).get("successful") or 0)
+              int((institution_kinds.get("festival") or {}).get("successful") or 0)
               + int((institution_kinds.get("attraction") or {}).get("successful") or 0)
-          ) > 0, "No museum, festival, or attraction calendar is working"
+          ) > 0, "No festival or attraction calendar is working"
 
           print(json.dumps({
               "weatherPeriods": len(weather["hourly"]),
