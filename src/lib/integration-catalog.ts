@@ -52,7 +52,7 @@ export const BUZZ_INTEGRATIONS: IntegrationDefinition[] = [
   { id: "city-calendars", name: "Official city event calendars", category: "Events & calendars", state: "live", role: "discovery", detail: "First-party Hampton Roads municipal calendars with source-level degraded-state reporting." },
   { id: "university-calendars", name: "Official university calendars", category: "Events & calendars", state: "live", role: "discovery", detail: "First-party university programming normalized into the shared event model." },
   { id: "venue-calendars", name: "Official venue calendars", category: "Events & calendars", state: "partial", role: "discovery", detail: "Arena, arts, museum, attraction, and festival calendars; failed adapters remain visible." },
-  { id: "tourism-calendars", name: "Tourism and destination calendars", category: "Events & calendars", state: "partial", role: "discovery", detail: "VisitNorfolk is live and monitored; remaining regional tourism sources are being added." },
+  { id: "tourism-calendars", name: "Tourism and destination calendars", category: "Events & calendars", state: "partial", role: "discovery", detail: "VisitNorfolk, Visit Hampton, and Visit Newport News are live and monitored; remaining regional tourism sources are pending accessible official feeds." },
   { id: "ics-feeds", name: "ICS calendar feeds", category: "Events & calendars", state: "ready", role: "discovery", detail: "Configurable first-party venue and local calendar feeds.", env: ["LOCAL_EVENT_FEEDS_JSON"] },
 
   { id: "nws", name: "National Weather Service", category: "Environment & mobility", state: "live", role: "forecast-context", detail: "Forecasts, hourly conditions, alerts, and outdoor-arrival qualification." },
@@ -74,7 +74,7 @@ export const BUZZ_INTEGRATIONS: IntegrationDefinition[] = [
   { id: "instagram-stories", name: "Instagram Sharing to Stories", category: "Growth & sharing", state: "native-only", role: "growth", detail: "Requires a native mobile shell; web currently uses the operating-system share sheet." },
   { id: "tiktok-share", name: "TikTok Share Kit", category: "Growth & sharing", state: "native-only", role: "growth", detail: "Requires a native mobile shell and TikTok integration approval." },
   { id: "sms-deep-links", name: "SMS and deep-link sharing", category: "Growth & sharing", state: "live", role: "growth", detail: "Exact venue links, SMS fallback, copy link, and downloadable Story cards." },
-  { id: "referral-tracking", name: "Referral tracking", category: "Growth & sharing", state: "partial", role: "growth", detail: "Referral parameters ship in shared links; persisted funnel attribution is next." },
+  { id: "referral-tracking", name: "Referral tracking", category: "Growth & sharing", state: "partial", role: "growth", detail: "Referral IDs and share-to-venue-view funnel tracking are implemented; durable persistence begins after the included Supabase migration is applied." },
 
   { id: "ai-recommendations", name: "AI recommendations", category: "AI & agents", state: "live", role: "discovery", detail: "Personalized and contextual venue recommendations using current Buzz inputs." },
   { id: "ai-city-summaries", name: "AI city summaries", category: "AI & agents", state: "live", role: "discovery", detail: "City-level activity summaries with provider-backed context." },
@@ -86,8 +86,8 @@ export const BUZZ_INTEGRATIONS: IntegrationDefinition[] = [
   { id: "reservation-agent", name: "Reservation Agent", category: "AI & agents", state: "planned", role: "forecast-context", detail: "Planned reservation-availability context through supported partners." },
   { id: "social-buzz-agent", name: "Social Buzz Agent", category: "AI & agents", state: "planned", role: "forecast-context", detail: "Planned weak social/context signal analysis with strict caps and no occupancy claims." },
 
-  { id: "provider-health", name: "Provider health monitoring", category: "Operations", state: "live", role: "operations", detail: "Source-level health, degraded-state warnings, scheduled smoke tests, and saved artifacts." },
-  { id: "analytics", name: "Analytics and conversion tracking", category: "Operations", state: "partial", role: "operations", detail: "Core product events exist; complete share, referral, install/open, save, and venue-view funnels remain." },
+  { id: "provider-health", name: "Provider health monitoring", category: "Operations", state: "live", role: "operations", detail: "Source-level health, degraded-state warnings, scheduled smoke tests, saved artifacts, and a live operations dashboard." },
+  { id: "analytics", name: "Analytics and conversion tracking", category: "Operations", state: "partial", role: "operations", detail: "Share, fallback, referral-open, venue-view, favorite, and watch tracking is implemented; persistence is migration-gated and remains non-blocking until enabled." },
 ];
 
 export function integrationConfigured(integration: IntegrationDefinition, env = process.env) {
