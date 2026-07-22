@@ -1,0 +1,57 @@
+name: Patch Visit Hampton tourism source
+
+on:
+  push:
+    branches: [feature/visit-hampton-tourism]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/visit-hampton-tourism
+          fetch-depth: 0
+      - name: Register official Visit Hampton calendar
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/lib/events/institution-calendars.ts')
+          text = path.read_text()
+          anchor = '''  {
+    id: "visit_norfolk_official",
+    name: "VisitNorfolk Events",
+    kind: "tourism",
+    city: "Norfolk",
+    url: "https://www.visitnorfolk.com/events/",
+    format: "embedded-json",
+    enabled: true,
+    coverageNote: "Official destination calendar with local nightlife, food, arts, festivals, sports, classes, and community events.",
+  },
+'''
+          addition = anchor + '''  {
+    id: "visit_hampton_official",
+    name: "Visit Hampton Events",
+    kind: "tourism",
+    city: "Hampton",
+    url: "https://visithampton.com/calendar/",
+    format: "tribe-api",
+    enabled: true,
+    coverageNote: "Official Hampton destination calendar with festivals, waterfront events, arts, sports, tours, food, and community programming.",
+  },
+'''
+          if anchor not in text:
+            raise SystemExit('VisitNorfolk source anchor was not found')
+          path.write_text(text.replace(anchor, addition, 1))
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/events/institution-calendars.ts
+          git commit -m "Add Visit Hampton official tourism calendar"
+          git push origin HEAD:feature/visit-hampton-tourism
