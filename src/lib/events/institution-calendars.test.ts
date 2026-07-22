@@ -17,11 +17,16 @@ function response(body: unknown, contentType = "application/json") {
   });
 }
 
-test("institution registry covers universities, arenas, arts, museums, festivals, and attractions", () => {
+test("institution registry covers universities, arenas, arts, museums, festivals, attractions, and tourism", () => {
   const kinds = new Set(INSTITUTION_CALENDAR_SOURCES.map(source => source.kind));
-  assert.deepEqual(kinds, new Set(["university", "arena", "arts", "museum", "festival", "attraction"]));
+  assert.deepEqual(kinds, new Set(["university", "arena", "arts", "museum", "festival", "attraction", "tourism"]));
   assert.ok(INSTITUTION_CALENDAR_SOURCES.every(source => source.enabled));
   assert.ok(INSTITUTION_CALENDAR_SOURCES.every(source => new URL(source.url).protocol === "https:"));
+  assert.ok(INSTITUTION_CALENDAR_SOURCES.some(source => (
+    source.id === "visit_norfolk_official"
+    && source.kind === "tourism"
+    && source.format === "embedded-json"
+  )));
 });
 
 test("Localist provider expands event instances and preserves institution metadata", async () => {
