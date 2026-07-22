@@ -138,11 +138,16 @@ async function coopsJson(stationId: string, product: CoopsProduct): Promise<Coop
 }
 
 export function normalizeTidePredictions(payload: CoopsPayload): TidePrediction[] {
-  return (payload.predictions || []).map(item => ({
-    time: String(item.t || ""),
-    heightFeet: numeric(item.v),
-    type: item.type === "H" ? "high" : item.type === "L" ? "low" : "unknown",
-  })).filter(item => item.time);
+  const predictions: TidePrediction[] = [];
+  for (const item of payload.predictions || []) {
+    const time = String(item.t || "");
+    if (!time) continue;
+    let type: TidePrediction["type"] = "unknown";
+    if (item.type === "H") type = "high";
+    if (item.type === "L") type = "low";
+    predictions.push({ time, heightFeet: numeric(item.v), type });
+  }
+  return predictions;
 }
 
 export function normalizeWaterObservation(payload: CoopsPayload): CoastalObservation | null {
@@ -192,9 +197,10 @@ export function coastalActivityImpact(wind: CoastalWind | null) {
 }
 
 export async function fetchCoastalConditions(station: CoastalStation) {
-  const wantsWaterLevel = station.observationProducts.includes("water_level" as never);
-  const wantsWind = station.observationProducts.includes("wind" as never);
-  const wantsWaterTemperature = station.observationProducts.includes("water_temperature" as never);
+  const products = station.observationProducts as readonly string[];
+  const wantsWaterLevel = products.includes("water_level");
+  const wantsWind = products.includes("wind");
+  const wantsWaterTemperature = products.includes("water_temperature");
 
   const [predictionResult, waterLevelResult, windResult, temperatureResult] = await Promise.allSettled([
     coopsJson(station.stationId, "predictions"),
