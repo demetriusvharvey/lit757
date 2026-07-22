@@ -97,6 +97,17 @@ test("RRULE series expand and respect EXDATE exclusions", () => {
   assert.notEqual(events[0].source_event_id, events[1].source_event_id);
 });
 
+test("daily RRULE honors BYDAY and counts only matching dates", () => {
+  const events = parseCityCalendarIcs(`BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:weekday-program\nSUMMARY:Weekday Program\nDTSTART;TZID=America/New_York:20260727T190000\nDTEND;TZID=America/New_York:20260727T200000\nRRULE:FREQ=DAILY;COUNT=4;BYDAY=MO,WE,FR\nLOCATION:Community Center\nEND:VEVENT\nEND:VCALENDAR`, icsSource);
+
+  assert.deepEqual(events.map(event => event.start_time), [
+    "2026-07-27T23:00:00.000Z",
+    "2026-07-29T23:00:00.000Z",
+    "2026-07-31T23:00:00.000Z",
+    "2026-08-03T23:00:00.000Z",
+  ]);
+});
+
 test("long COUNT series retain current occurrences beyond the old cap", () => {
   const events = parseCityCalendarIcs(`BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:long-daily-series\nSUMMARY:Daily Community Program\nDTSTART;TZID=America/New_York:20200101T190000\nDTEND;TZID=America/New_York:20200101T200000\nRRULE:FREQ=DAILY;COUNT=10000\nLOCATION:Community Center\nEND:VEVENT\nEND:VCALENDAR`, icsSource);
 
@@ -116,6 +127,18 @@ test("detached cancellation removes its master occurrence and emits a deletion m
   assert.equal(cancelled[0].start_time, "2026-08-01T23:00:00.000Z");
   assert.equal(cancelled[0].ticket_status, "cancelled");
   assert.notEqual(active[0].source_event_id, cancelled[0].source_event_id);
+});
+
+test("cancelled recurring master emits deletion markers for every occurrence", () => {
+  const events = parseCityCalendarIcs(`BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:cancelled-master\nSTATUS:CANCELLED\nSUMMARY:Cancelled Series\nDTSTART;TZID=America/New_York:20260725T190000\nDTEND;TZID=America/New_York:20260725T200000\nRRULE:FREQ=WEEKLY;COUNT=2\nLOCATION:Community Center\nEND:VEVENT\nEND:VCALENDAR`, icsSource);
+
+  assert.equal(events.length, 2);
+  assert.ok(events.every(event => event.cancelled));
+  assert.ok(events.every(event => event.ticket_status === "cancelled"));
+  assert.deepEqual(events.map(event => event.start_time), [
+    "2026-07-25T23:00:00.000Z",
+    "2026-08-01T23:00:00.000Z",
+  ]);
 });
 
 test("JSON-LD parser remains available for future tourism and venue sources", () => {
