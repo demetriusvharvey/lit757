@@ -117,7 +117,7 @@ export async function GET(request: Request) {
               background: "rgba(30,41,59,.46)",
             }} />
           ))}
-          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ position: "absolute", left: 0, top: 0, width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <div style={{ position: "absolute", width: 480, height: 480, borderRadius: 999, background: "radial-gradient(circle,rgba(239,68,68,.62) 0%,rgba(249,115,22,.36) 31%,rgba(250,204,21,.14) 54%,transparent 72%)" }} />
             <div style={{ position: "absolute", width: 258, height: 258, border: "8px solid rgba(251,146,60,.7)", borderRadius: 999, boxShadow: "0 0 80px rgba(249,115,22,.65)" }} />
             <div style={{ width: 128, height: 128, display: "flex", alignItems: "center", justifyContent: "center", border: "10px solid white", borderRadius: 999, background: "#ef4444", boxShadow: "0 0 0 20px rgba(239,68,68,.22),0 18px 50px rgba(0,0,0,.5)", fontSize: 46, fontWeight: 900 }}>{initials}</div>
