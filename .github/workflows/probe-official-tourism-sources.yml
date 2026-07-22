@@ -1,0 +1,28 @@
+name: Probe official tourism sources
+
+on:
+  push:
+    branches: [research/official-tourism-source-probe]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Probe official first-party pages and API candidates
+        run: node scripts/probe-official-tourism-sources.mjs
+      - name: Upload source probe
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: official-tourism-source-probe
+          path: tourism-source-probe
+          retention-days: 2
