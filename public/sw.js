@@ -13,15 +13,22 @@ self.addEventListener("push", event => {
   }
 
   const title = payload.title || "Things To Do 757";
+  const venueId = payload.venueId || null;
+  const venueUrl = payload.url || (venueId ? `/?venue=${encodeURIComponent(venueId)}&source=heating-up-alert` : "/");
   const options = {
     body: payload.body || "A saved place is heating up.",
     icon: payload.icon || "/icon.svg",
     badge: payload.badge || "/icon.svg",
     tag: payload.tag || "lit757-buzz-alert",
     renotify: true,
+    actions: venueId ? [
+      { action: "invite-crew", title: "Invite the Crew" },
+      { action: "open-buzz", title: "Open Buzz" },
+    ] : [],
     data: {
-      url: payload.url || "/",
-      venueId: payload.venueId || null,
+      url: venueUrl,
+      venueId,
+      shareUrl: payload.shareUrl || null,
     },
   };
 
@@ -30,8 +37,18 @@ self.addEventListener("push", event => {
 
 self.addEventListener("notificationclick", event => {
   event.notification.close();
-  const targetUrl = new URL(event.notification.data?.url || "/", self.location.origin).href;
+  const data = event.notification.data || {};
+  const target = new URL(data.url || "/", self.location.origin);
 
+  if (data.venueId && !target.searchParams.get("venue")) {
+    target.searchParams.set("venue", data.venueId);
+  }
+  if (event.action === "invite-crew") {
+    target.searchParams.set("invite", "1");
+    target.searchParams.set("source", "push-invite-the-crew");
+  }
+
+  const targetUrl = target.href;
   event.waitUntil((async () => {
     const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     for (const client of windows) {
