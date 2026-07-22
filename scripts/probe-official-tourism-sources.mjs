@@ -9,6 +9,8 @@ const sources = [
     page: "https://www.visitvirginiabeach.com/events/",
     candidates: [
       "https://www.visitvirginiabeach.com/events/",
+      "https://www.visitvirginiabeach.com/event/rss/",
+      "https://www.visitvirginiabeach.com/events/rss/",
       "https://www.visitvirginiabeach.com/includes/rest_v2/plugins_events_events/find/?skip=0&take=5&sort=date",
       "https://www.visitvirginiabeach.com/includes/rest_v2/plugins_events_events/find/?skip=0&take=5&sort=rank",
       "https://www.visitvirginiabeach.com/wp-json/tribe/events/v1/events?per_page=5",
@@ -20,6 +22,8 @@ const sources = [
     page: "https://www.visitnewportnews.com/events-and-festivals/",
     candidates: [
       "https://www.visitnewportnews.com/events-and-festivals/",
+      "https://www.visitnewportnews.com/event/rss/",
+      "https://www.visitnewportnews.com/events/rss/",
       "https://www.visitnewportnews.com/wp-json/tribe/events/v1/events?per_page=5",
       "https://www.visitnewportnews.com/wp-json/wp/v2/tribe_events?per_page=5",
       "https://www.visitnewportnews.com/includes/rest_v2/plugins_events_events/find/?skip=0&take=5&sort=date",
@@ -40,6 +44,8 @@ function markerSummary(body) {
     "__NEXT_DATA__",
     "eventsData",
     "event-list",
+    "<rss",
+    "<item",
     "/event/",
     "/events/",
   ];
@@ -70,7 +76,7 @@ async function probe(url) {
       signal: AbortSignal.timeout(45_000),
       headers: {
         "User-Agent": "BuzzOfficialTourismProbe/1.0",
-        Accept: "application/json,text/html,application/xhtml+xml;q=0.9,*/*;q=0.5",
+        Accept: "application/rss+xml,application/xml,text/xml,application/json,text/html,application/xhtml+xml;q=0.9,*/*;q=0.5",
       },
     });
     const body = await response.text();
@@ -86,6 +92,7 @@ async function probe(url) {
       durationMs: Date.now() - started,
       markers: markerSummary(body),
       sameOriginEventLinks: links(body, response.url),
+      rssItemCount: [...body.matchAll(/<item\b/gi)].length,
       jsonShape: parsed == null ? null : {
         array: Array.isArray(parsed),
         keys: Array.isArray(parsed) ? [] : Object.keys(parsed || {}).slice(0, 30),
@@ -120,6 +127,7 @@ for (const source of sources) {
       status: result.status,
       contentType: result.contentType,
       length: result.length,
+      rssItemCount: result.rssItemCount,
       jsonShape: result.jsonShape,
       markers: result.markers,
       eventLinks: result.sameOriginEventLinks?.slice(0, 10),
