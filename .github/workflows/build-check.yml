@@ -27,82 +27,112 @@ jobs:
           from pathlib import Path
 
           path = Path("src/lib/events/city-calendars.ts")
-          text = path.read_text()
+          lines = path.read_text().splitlines()
 
-          daily_start = text.index('  if (rule.freq === "DAILY") {')
-          weekly_start = text.index('\n\n  if (rule.freq === "WEEKLY") {', daily_start)
-          daily = text[daily_start:weekly_start]
-          if "permittedDays.size && !permittedDays.has(candidate.getUTCDay())" not in daily:
-              daily = daily.replace(
-                  '  if (rule.freq === "DAILY") {\n    let firstOffset = 0;',
-                  '''  if (rule.freq === "DAILY") {
-            const permittedDays = new Set(
-              rule.byDay
-                .map(token => token.slice(-2))
-                .map(code => DAY_CODE_TO_UTC_DAY[code])
-                .filter(day => day !== undefined),
-            );
-            let firstOffset = 0;''',
-                  1,
+          def find_line(target, start=0, end=None):
+              limit = len(lines) if end is None else end
+              for index in range(start, limit):
+                  if lines[index].strip() == target:
+                      return index
+              raise SystemExit(f"Could not find source line: {target}")
+
+          daily_start = find_line('if (rule.freq === "DAILY") {')
+          weekly_start = find_line('if (rule.freq === "WEEKLY") {', daily_start + 1)
+          daily_has_filter = any(
+              "permittedDays.size && !permittedDays.has(candidate.getUTCDay())" in line
+              for line in lines[daily_start:weekly_start]
+          )
+          if not daily_has_filter:
+              indent = lines[daily_start][:-len(lines[daily_start].lstrip())]
+              body = indent + "  "
+              continuation = body + "  "
+              insertion = [
+                  body + "const permittedDays = new Set(",
+                  continuation + "rule.byDay",
+                  continuation + "  .map(token => token.slice(-2))",
+                  continuation + "  .map(code => DAY_CODE_TO_UTC_DAY[code])",
+                  continuation + "  .filter(day => day !== undefined),",
+                  body + ");",
+              ]
+              lines[daily_start + 1:daily_start + 1] = insertion
+              weekly_start += len(insertion)
+
+              days_index = find_line("if (daysToWindow > 0) {", daily_start, weekly_start)
+              days_indent = lines[days_index][:-len(lines[days_index].lstrip())]
+              lines[days_index] = days_indent + "if (daysToWindow > 0 && permittedDays.size === 0) {"
+
+              candidate_index = find_line(
+                  "candidate.setUTCDate(candidate.getUTCDate() + offset);",
+                  daily_start,
+                  weekly_start,
               )
-              daily = daily.replace(
-                  '    if (daysToWindow > 0) {',
-                  '    if (daysToWindow > 0 && permittedDays.size === 0) {',
-                  1,
+              candidate_indent = lines[candidate_index][:-len(lines[candidate_index].lstrip())]
+              lines.insert(
+                  candidate_index + 1,
+                  candidate_indent + "if (permittedDays.size && !permittedDays.has(candidate.getUTCDay())) continue;",
               )
-              daily = daily.replace(
-                  '      candidate.setUTCDate(candidate.getUTCDate() + offset);\n      if (!addCandidate(candidate)) break;',
-                  '''      candidate.setUTCDate(candidate.getUTCDate() + offset);
-                  if (permittedDays.size && !permittedDays.has(candidate.getUTCDay())) continue;
-                  if (!addCandidate(candidate)) break;''',
-                  1,
+
+          cancelled_anchor = find_line("const cancelled = new Map<string, NormalizedCityEvent>();")
+          return_start = find_line("return [", cancelled_anchor)
+          loop_start = find_line("for (const block of blocks) {", cancelled_anchor, return_start)
+          has_master_cancel = any(
+              'const isCancelled = String(property(block, "STATUS")' in line
+              for line in lines[loop_start:return_start]
+          )
+          if not has_master_cancel:
+              detached_index = find_line(
+                  "const detached = detachedOccurrenceDetails(block, source);",
+                  loop_start,
+                  return_start,
               )
-              if "permittedDays.size && !permittedDays.has(candidate.getUTCDay())" not in daily:
-                  raise SystemExit("Daily BYDAY patch did not apply")
-              text = text[:daily_start] + daily + text[weekly_start:]
-
-          cancelled_anchor = text.index('  const cancelled = new Map<string, NormalizedCityEvent>();')
-          loop_start = text.index('  for (const block of blocks) {', cancelled_anchor)
-          loop_end = text.index('\n\n  return [', loop_start)
-          loop = text[loop_start:loop_end]
-          if 'const isCancelled = String(property(block, "STATUS")' not in loop:
-              loop = loop.replace(
-                  '''    const detached = detachedOccurrenceDetails(block, source);
-                  if (String(property(block, "STATUS") || "").toUpperCase() === "CANCELLED" && detached) {''',
-                  '''    const detached = detachedOccurrenceDetails(block, source);
-                  const isCancelled = String(property(block, "STATUS") || "").toUpperCase() === "CANCELLED";
-                  if (isCancelled && detached) {''',
-                  1,
+              detached_indent = lines[detached_index][:-len(lines[detached_index].lstrip())]
+              lines.insert(
+                  detached_index + 1,
+                  detached_indent + 'const isCancelled = String(property(block, "STATUS") || "").toUpperCase() === "CANCELLED";',
               )
-              loop = loop.replace(
-                  '''      continue;
-                  }
+              return_start += 1
 
-                  const isDetached = Boolean(detached);''',
-                  '''      continue;
-                  }
-
-                  if (isCancelled) {
-                    for (const event of expandIcsBlock(block, source)) {
-                      const cancellation = {
-                        ...event,
-                        ticket_status: "cancelled",
-                        cancelled: true,
-                      };
-                      events.delete(cancellation.source_event_id);
-                      cancelled.set(cancellation.source_event_id, cancellation);
-                    }
-                    continue;
-                  }
-
-                  const isDetached = Boolean(detached);''',
-                  1,
+              condition_index = next(
+                  index
+                  for index in range(detached_index + 2, return_start)
+                  if '.toUpperCase() === "CANCELLED" && detached' in lines[index]
               )
-              if 'const isCancelled = String(property(block, "STATUS")' not in loop or 'if (isCancelled) {' not in loop:
-                  raise SystemExit("Master cancellation patch did not apply")
-              text = text[:loop_start] + loop + text[loop_end:]
+              condition_indent = lines[condition_index][:-len(lines[condition_index].lstrip())]
+              lines[condition_index] = condition_indent + "if (isCancelled && detached) {"
 
-          path.write_text(text)
+              set_index = find_line(
+                  "cancelled.set(cancellation.source_event_id, cancellation);",
+                  condition_index,
+                  return_start,
+              )
+              continue_index = find_line("continue;", set_index, return_start)
+              close_index = continue_index + 1
+              if lines[close_index].strip() != "}":
+                  raise SystemExit("Detached cancellation block did not close where expected")
+
+              block_indent = detached_indent
+              child = block_indent + "  "
+              grandchild = child + "  "
+              great_grandchild = grandchild + "  "
+              master_block = [
+                  "",
+                  block_indent + "if (isCancelled) {",
+                  child + "for (const event of expandIcsBlock(block, source)) {",
+                  grandchild + "const cancellation = {",
+                  great_grandchild + "...event,",
+                  great_grandchild + 'ticket_status: "cancelled",',
+                  great_grandchild + "cancelled: true,",
+                  grandchild + "};",
+                  grandchild + "events.delete(cancellation.source_event_id);",
+                  grandchild + "cancelled.set(cancellation.source_event_id, cancellation);",
+                  child + "}",
+                  child + "continue;",
+                  block_indent + "}",
+                  "",
+              ]
+              lines[close_index + 1:close_index + 1] = master_block
+
+          path.write_text("\n".join(lines) + "\n")
           PY
       - name: Set up Node
         uses: actions/setup-node@v4
