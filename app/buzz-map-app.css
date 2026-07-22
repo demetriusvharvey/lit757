@@ -1,4 +1,11 @@
 body.buzz-map-active{overflow:hidden;background:#080b10}
+.buzz-map-app,.buzz-map-canvas{transition:background .45s ease,filter .45s ease}
+.buzz-map-app.daytime{background:#101820}
+.buzz-map-app.daytime .buzz-map-canvas{filter:brightness(1.12) saturate(.78) contrast(1.03)}
+.buzz-map-stage:after{content:"";position:absolute;z-index:1;inset:0;pointer-events:none;transition:opacity .45s ease,background .45s ease}
+.buzz-map-app.daytime .buzz-map-stage:after{opacity:1;background:rgba(48,65,78,.18);mix-blend-mode:color}
+.buzz-map-app.nighttime .buzz-map-stage:after{opacity:0}
+.buzz-map-toolbar,.buzz-map-mode,.buzz-map-loading,.buzz-map-error{z-index:5}
 .buzz-map-app{position:fixed;inset:0;z-index:10000;display:grid;grid-template-rows:64px 58px minmax(0,1fr);overflow:hidden;background:#080b10;color:#f8fafc;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 .buzz-map-app *{box-sizing:border-box}
 .buzz-map-app button,.buzz-map-app input,.buzz-map-app a{font:inherit}
@@ -43,6 +50,8 @@ body.buzz-map-active{overflow:hidden;background:#080b10}
 .buzz-list-copy>small{display:block;color:#7f8997;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .buzz-list-copy>strong{display:block;margin-top:5px;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .buzz-list-copy>p{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin:5px 0;color:#a7b0bc;font-size:9px;line-height:1.35}
+.buzz-vibe-tag{display:inline-flex;align-items:center;gap:5px;width:max-content;max-width:100%;margin-top:5px;padding:3px 7px;border:1px solid #3b4654;border-radius:999px;color:#d7dee6;font-size:7px;font-weight:850;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.buzz-vibe-tag b{padding-left:5px;border-left:1px solid rgba(255,255,255,.18);font-size:6px;letter-spacing:.08em}.buzz-vibe-tag.live{border-color:#9a542a;background:rgba(249,115,22,.1);color:#fed7aa}.buzz-vibe-tag.forecast{border-color:#554590;background:rgba(139,92,246,.08);color:#ddd6fe}
+.buzz-detail-vibe{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;padding:9px 11px;border:1px solid #3b4654;border-radius:13px;background:#121923;font-size:10px;font-weight:850}.buzz-detail-vibe b{padding:4px 7px;border-radius:999px;font-size:7px;letter-spacing:.1em}.buzz-detail-vibe.live{border-color:#8b4a27}.buzz-detail-vibe.live b{background:#fb923c;color:#1a0e05}.buzz-detail-vibe.forecast{border-color:#51418a}.buzz-detail-vibe.forecast b{background:#6d54bb;color:#fff}
 .buzz-status{display:inline-flex;padding:3px 7px;border:1px solid #3a4655;border-radius:999px;color:#aab4c0;font-size:7px;font-weight:900;text-transform:uppercase;letter-spacing:.04em}
 .buzz-status.s3{border-color:#bb8a18;color:#facc15}.buzz-status.s4{border-color:#c65b2a;color:#fb923c}.buzz-status.s5{border-color:#bf3d48;color:#fb7185}
 .buzz-map-list-scroll article>button{align-self:start;width:30px;height:30px;display:grid;place-items:center;border:1px solid #2d3744;border-radius:50%;background:#151c25;cursor:pointer}
