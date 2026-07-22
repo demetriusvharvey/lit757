@@ -17,7 +17,7 @@ concurrency:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,14 +35,15 @@ jobs:
               if (result.events.length <= 0) throw new Error("Visit Hampton returned no events");
             })();
           '
-      - name: Verify official tourism production sources
+      - name: Verify official tourism production sources and ingestion dry run
         env:
           BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
-          REQUIRE_VISIT_HAMPTON: "true"
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
         shell: bash
         run: |
           set -euo pipefail
           : "${BASE_URL:?Add BUZZ_PRODUCTION_URL as a GitHub Actions secret}"
+          : "${CRON_SECRET:?Add CRON_SECRET as a GitHub Actions secret}"
           BASE_URL="${BASE_URL%/}"
           python - <<'PY'
           import json
@@ -51,57 +52,78 @@ jobs:
           import urllib.request
 
           base = os.environ["BASE_URL"].rstrip("/")
-          require_visit_hampton = os.environ.get("REQUIRE_VISIT_HAMPTON", "false").lower() == "true"
-          path = "/api/data/institution-calendars?tourismProbe=1"
-          request = urllib.request.Request(
-              f"{base}{path}",
-              headers={
-                  "User-Agent": "BuzzTourismProductionSmoke/1.0",
-                  "Accept": "application/json",
-              },
-          )
+          secret = os.environ["CRON_SECRET"]
           report = {}
-          try:
-              response = urllib.request.urlopen(request, timeout=180)
-          except urllib.error.HTTPError as error:
-              body = error.read().decode("utf-8", errors="replace")
-              report = {"httpStatus": error.code, "body": body[:30000]}
-              with open("tourism-production-smoke-output.json", "w", encoding="utf-8") as output:
-                  json.dump(report, output, indent=2)
-              raise AssertionError(f"Tourism endpoint returned HTTP {error.code}: {body[:4000]}") from error
-          with response:
-              payload = json.load(response)
-          report = payload
-          with open("tourism-production-smoke-output.json", "w", encoding="utf-8") as output:
-              json.dump(report, output, indent=2)
 
-          assert response.status == 200, response.status
+          def request_json(path, headers=None, timeout=180):
+              request = urllib.request.Request(
+                  f"{base}{path}",
+                  headers={
+                      "User-Agent": "BuzzTourismProductionSmoke/1.0",
+                      "Accept": "application/json",
+                      **(headers or {}),
+                  },
+              )
+              try:
+                  response = urllib.request.urlopen(request, timeout=timeout)
+              except urllib.error.HTTPError as error:
+                  body = error.read().decode("utf-8", errors="replace")
+                  raise AssertionError(f"{path} returned HTTP {error.code}: {body[:4000]}") from error
+              with response:
+                  payload = json.load(response)
+                  assert response.status == 200, response.status
+                  return payload
+
+          payload = request_json("/api/data/institution-calendars?tourismProbe=newport-news")
+          report["publicHealth"] = payload
           assert payload.get("success") is True, json.dumps(payload)[:4000]
           by_kind = payload.get("byKind") or {}
           tourism = by_kind.get("tourism") or {}
-          assert int(tourism.get("registered") or 0) >= 2, "VisitNorfolk and Visit Hampton must both be registered"
-          assert int(tourism.get("successful") or 0) >= 2, "VisitNorfolk and Visit Hampton must both be healthy"
+          assert int(tourism.get("registered") or 0) >= 3, "Norfolk, Hampton, and Newport News tourism sources must be registered"
+          assert int(tourism.get("successful") or 0) >= 3, "Norfolk, Hampton, and Newport News tourism sources must be healthy"
           assert int(tourism.get("events") or 0) > 0, "Tourism sources returned no events"
 
           sources = payload.get("sources") or []
-          visit_norfolk = next((source for source in sources if source.get("id") == "visit_norfolk_official"), None)
-          assert visit_norfolk is not None, "VisitNorfolk source is missing"
-          assert visit_norfolk.get("status") == "ok", json.dumps(visit_norfolk)
-          assert int(visit_norfolk.get("eventCount") or 0) > 0, "VisitNorfolk returned no events"
-          assert visit_norfolk.get("sourceUrl") == "https://www.visitnorfolk.com/events/"
+          required = {
+              "visit_norfolk_official": "https://www.visitnorfolk.com/events/",
+              "visit_hampton_official": "https://visithampton.com/calendar/",
+              "visit_newport_news_official": "https://www.visitnewportnews.com/event/rss/",
+          }
+          source_results = {}
+          for source_id, source_url in required.items():
+              source = next((item for item in sources if item.get("id") == source_id), None)
+              assert source is not None, f"{source_id} is missing in production"
+              assert source.get("status") == "ok", json.dumps(source)
+              assert int(source.get("eventCount") or 0) > 0, f"{source_id} returned no events"
+              assert source.get("sourceUrl") == source_url, json.dumps(source)
+              source_results[source_id] = source
 
-          visit_hampton = next((source for source in sources if source.get("id") == "visit_hampton_official"), None)
-          if require_visit_hampton:
-              assert visit_hampton is not None, "Visit Hampton source is missing in production"
-              assert visit_hampton.get("status") == "ok", json.dumps(visit_hampton)
-              assert int(visit_hampton.get("eventCount") or 0) > 0, "Visit Hampton returned no events"
-              assert visit_hampton.get("sourceUrl") == "https://visithampton.com/calendar/"
+          dry_run = request_json(
+              "/api/events/institution-calendars?dryRun=1&tourismProbe=newport-news",
+              headers={"Authorization": f"Bearer {secret}"},
+              timeout=240,
+          )
+          report["ingestionDryRun"] = dry_run
+          assert dry_run.get("success") is True, json.dumps(dry_run)[:4000]
+          assert (dry_run.get("summary") or {}).get("dryRun") is True, "Institution ingestion did not remain a dry run"
+          ingestion_sources = dry_run.get("sources") or []
+          ingestion_newport_news = next(
+              (item for item in ingestion_sources if item.get("id") == "visit_newport_news_official"),
+              None,
+          )
+          assert ingestion_newport_news is not None, "Visit Newport News is missing from protected ingestion"
+          assert ingestion_newport_news.get("status") == "ok", json.dumps(ingestion_newport_news)
+          assert int(ingestion_newport_news.get("fetched") or 0) > 0, "Protected ingestion fetched no Newport News events"
+          assert int((dry_run.get("summary") or {}).get("inWindow") or 0) > 0, "Institution dry run found no in-window events"
+
+          with open("tourism-production-smoke-output.json", "w", encoding="utf-8") as output:
+              json.dump(report, output, indent=2)
 
           print(json.dumps({
               "tourismKind": tourism,
-              "visitNorfolk": visit_norfolk,
-              "visitHampton": visit_hampton,
-              "visitHamptonRequired": require_visit_hampton,
+              "requiredSources": source_results,
+              "ingestionNewportNews": ingestion_newport_news,
+              "ingestionSummary": dry_run.get("summary") or {},
               "totalInstitutionEvents": (payload.get("summary") or {}).get("dedupedEvents"),
           }, indent=2))
           PY
