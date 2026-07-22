@@ -1,0 +1,105 @@
+name: OpenStreetMap production smoke
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "47 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: osm-production-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Verify OSM source and protected dry run
+        env:
+          BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${BASE_URL:?Add BUZZ_PRODUCTION_URL as a GitHub Actions secret}"
+          : "${CRON_SECRET:?Add CRON_SECRET as a GitHub Actions secret}"
+          BASE_URL="${BASE_URL%/}"
+          python - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          base = os.environ["BASE_URL"].rstrip("/")
+          secret = os.environ["CRON_SECRET"]
+          report = {}
+
+          def save():
+              with open("osm-production-smoke-output.json", "w", encoding="utf-8") as output:
+                  json.dump(report, output, indent=2)
+
+          def get(path, protected=False, timeout=180):
+              headers = {
+                  "User-Agent": "BuzzOsmProductionSmoke/1.0",
+                  "Accept": "application/json",
+              }
+              if protected:
+                  headers["Authorization"] = f"Bearer {secret}"
+              request = urllib.request.Request(f"{base}{path}", headers=headers)
+              try:
+                  response = urllib.request.urlopen(request, timeout=timeout)
+              except urllib.error.HTTPError as error:
+                  body = error.read().decode("utf-8", errors="replace")
+                  report[path] = {"httpStatus": error.code, "body": body[:30000]}
+                  save()
+                  raise AssertionError(f"{path} returned HTTP {error.code}: {body[:4000]}") from error
+              with response:
+                  payload = json.load(response)
+                  report[path] = payload
+                  save()
+                  assert response.status == 200, f"{path} returned HTTP {response.status}"
+                  assert payload.get("success") is True, f"{path} failed: {json.dumps(payload)[:4000]}"
+                  return payload
+
+          source = get("/api/data/osm-venues")
+          source_summary = source.get("summary") or {}
+          assert source.get("provider") == "OpenStreetMap via Overpass API"
+          assert int(source_summary.get("total") or 0) > 0, "OSM candidate set is empty"
+          assert source.get("attribution"), "OSM attribution is missing"
+
+          dry_run = get("/api/venues/osm-enrich?dryRun=1&limit=350", protected=True)
+          venue_summary = dry_run.get("venues") or {}
+          osm_summary = dry_run.get("osm") or {}
+          assert dry_run.get("dryRun") is True, "OSM validation unexpectedly enabled writes"
+          assert int(osm_summary.get("total") or 0) > 0, "Protected enrichment received no OSM candidates"
+          assert int(venue_summary.get("evaluated") or 0) > 0, "No Buzz venues were evaluated"
+          assert int(venue_summary.get("matchedWithUsefulPatch") or 0) > 0, "OSM produced no useful venue matches"
+          assert int(venue_summary.get("updated") or 0) == 0, "Dry run must not update venues"
+
+          print(json.dumps({
+              "osmCandidates": source_summary.get("total"),
+              "osmByCategory": source_summary.get("byCategory"),
+              "osmWithAddress": source_summary.get("withAddress"),
+              "osmWithPhone": source_summary.get("withPhone"),
+              "osmWithWebsite": source_summary.get("withWebsite"),
+              "venuesInDatabase": venue_summary.get("totalInDatabase"),
+              "venuesNeedingEnrichment": venue_summary.get("needingEnrichment"),
+              "venuesEvaluated": venue_summary.get("evaluated"),
+              "usefulMatches": venue_summary.get("matchedWithUsefulPatch"),
+              "fieldsProposed": venue_summary.get("fieldsProposed"),
+              "sampleMatches": dry_run.get("matches"),
+          }, indent=2))
+          PY
+      - name: Upload OSM smoke output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: osm-production-smoke-output
+          path: osm-production-smoke-output.json
+          if-no-files-found: warn
+          retention-days: 3
