@@ -7,6 +7,7 @@ export type CityCalendarSource = {
   url: string;
   format: "ics" | "html-jsonld" | "unverified";
   enabled: boolean;
+  timeZone?: string;
   venueName?: string;
   maxDetailPages?: number;
 };
@@ -42,19 +43,25 @@ export const CITY_CALENDAR_SOURCES: CityCalendarSource[] = [
     url: "https://www.visitvirginiabeach.com/events/",
     format: "html-jsonld",
     enabled: true,
+    timeZone: "America/New_York",
     maxDetailPages: 20,
   },
-  { id: "norfolk_official", name: "Norfolk Official Events", city: "Norfolk", url: "https://www.norfolk.gov/calendar.aspx", format: "unverified", enabled: false },
-  { id: "chesapeake_official", name: "Chesapeake Official Events", city: "Chesapeake", url: "https://www.cityofchesapeake.net/Calendar.aspx", format: "unverified", enabled: false },
-  { id: "portsmouth_official", name: "Portsmouth Official Events", city: "Portsmouth", url: "https://www.portsmouthva.gov/calendar.aspx", format: "unverified", enabled: false },
-  { id: "hampton_official", name: "Hampton Official Events", city: "Hampton", url: "https://www.hampton.gov/calendar.aspx", format: "unverified", enabled: false },
-  { id: "newport_news_official", name: "Newport News Official Events", city: "Newport News", url: "https://www.nnva.gov/calendar.aspx", format: "unverified", enabled: false },
-  { id: "suffolk_official", name: "Suffolk Official Events", city: "Suffolk", url: "https://www.suffolkva.us/calendar.aspx", format: "unverified", enabled: false },
+  { id: "norfolk_official", name: "Norfolk Official Events", city: "Norfolk", url: "https://www.norfolk.gov/calendar.aspx", format: "unverified", enabled: false, timeZone: "America/New_York" },
+  { id: "chesapeake_official", name: "Chesapeake Official Events", city: "Chesapeake", url: "https://www.cityofchesapeake.net/Calendar.aspx", format: "unverified", enabled: false, timeZone: "America/New_York" },
+  { id: "portsmouth_official", name: "Portsmouth Official Events", city: "Portsmouth", url: "https://www.portsmouthva.gov/calendar.aspx", format: "unverified", enabled: false, timeZone: "America/New_York" },
+  { id: "hampton_official", name: "Hampton Official Events", city: "Hampton", url: "https://www.hampton.gov/calendar.aspx", format: "unverified", enabled: false, timeZone: "America/New_York" },
+  { id: "newport_news_official", name: "Newport News Official Events", city: "Newport News", url: "https://www.nnva.gov/calendar.aspx", format: "unverified", enabled: false, timeZone: "America/New_York" },
+  { id: "suffolk_official", name: "Suffolk Official Events", city: "Suffolk", url: "https://www.suffolkva.us/calendar.aspx", format: "unverified", enabled: false, timeZone: "America/New_York" },
 ];
 
 const HTML_HEADERS = {
   Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5",
   "User-Agent": "Buzz/1.0 (https://lit757.vercel.app; demetriusvharvey@gmail.com)",
+};
+
+type IcsProperty = {
+  value: string;
+  params: Record<string, string>;
 };
 
 function clean(value: string) {
@@ -65,20 +72,100 @@ function unfoldIcs(text: string) {
   return text.replace(/\r\n[ \t]/g, "").replace(/\n[ \t]/g, "").split(/\r?\n/);
 }
 
-function property(lines: string[], name: string) {
+function propertyEntry(lines: string[], name: string): IcsProperty | null {
   const line = lines.find(item => item.startsWith(`${name}:`) || item.startsWith(`${name};`));
   if (!line) return null;
   const separator = line.indexOf(":");
-  return separator >= 0 ? clean(line.slice(separator + 1)) : null;
+  if (separator < 0) return null;
+
+  const [propertyName, ...rawParams] = line.slice(0, separator).split(";");
+  if (propertyName !== name) return null;
+
+  const params: Record<string, string> = {};
+  for (const rawParam of rawParams) {
+    const equals = rawParam.indexOf("=");
+    if (equals <= 0) continue;
+    const key = rawParam.slice(0, equals).trim().toUpperCase();
+    const value = rawParam.slice(equals + 1).trim().replace(/^"|"$/g, "");
+    if (key && value) params[key] = value;
+  }
+
+  return { value: clean(line.slice(separator + 1)), params };
 }
 
-function parseIcsDate(value: string) {
+function property(lines: string[], name: string) {
+  return propertyEntry(lines, name)?.value || null;
+}
+
+function zonedDateTimeToIso(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second: number,
+  timeZone: string,
+) {
+  const target = Date.UTC(year, month - 1, day, hour, minute, second);
+  let candidate = target;
+
+  try {
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    });
+
+    for (let iteration = 0; iteration < 3; iteration += 1) {
+      const parts = Object.fromEntries(
+        formatter.formatToParts(new Date(candidate))
+          .filter(part => part.type !== "literal")
+          .map(part => [part.type, Number(part.value)]),
+      );
+      const represented = Date.UTC(
+        Number(parts.year),
+        Number(parts.month) - 1,
+        Number(parts.day),
+        Number(parts.hour),
+        Number(parts.minute),
+        Number(parts.second),
+      );
+      const adjustment = target - represented;
+      candidate += adjustment;
+      if (adjustment === 0) break;
+    }
+
+    return new Date(candidate).toISOString();
+  } catch {
+    return null;
+  }
+}
+
+function parseIcsDate(value: string, timeZone = "America/New_York") {
   const raw = value.trim();
   if (/^\d{8}$/.test(raw)) return new Date(`${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}T00:00:00Z`).toISOString();
   const match = raw.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z?)$/);
   if (!match) return toIso(raw);
+
   const [, year, month, day, hour, minute, second, zulu] = match;
-  return toIso(`${year}-${month}-${day}T${hour}:${minute}:${second}${zulu ? "Z" : ""}`);
+  if (zulu) {
+    return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second))).toISOString();
+  }
+
+  return zonedDateTimeToIso(
+    Number(year),
+    Number(month),
+    Number(day),
+    Number(hour),
+    Number(minute),
+    Number(second),
+    timeZone,
+  );
 }
 
 function toIso(value: unknown) {
@@ -229,12 +316,14 @@ export function parseCityCalendarIcs(text: string, source: CityCalendarSource): 
     if (line === "END:VEVENT") {
       if (!current) continue;
       const title = property(current, "SUMMARY");
-      const startValue = property(current, "DTSTART");
-      const start = startValue ? parseIcsDate(startValue) : null;
+      const startProperty = propertyEntry(current, "DTSTART");
+      const start = startProperty
+        ? parseIcsDate(startProperty.value, startProperty.params.TZID || source.timeZone)
+        : null;
       if (title && start) {
         const location = property(current, "LOCATION") || source.venueName || source.name;
         const externalId = property(current, "UID");
-        const endValue = property(current, "DTEND");
+        const endProperty = propertyEntry(current, "DTEND");
         events.push({
           source_event_id: cityEventFingerprint(source.id, externalId, title, start, location),
           name: title,
@@ -245,7 +334,9 @@ export function parseCityCalendarIcs(text: string, source: CityCalendarSource): 
           latitude: null,
           longitude: null,
           start_time: start,
-          end_time: endValue ? parseIcsDate(endValue) : null,
+          end_time: endProperty
+            ? parseIcsDate(endProperty.value, endProperty.params.TZID || startProperty?.params.TZID || source.timeZone)
+            : null,
           source: source.id,
           source_name: source.name,
           source_url: property(current, "URL") || source.url,
