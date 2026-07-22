@@ -34,6 +34,7 @@ jobs:
           import urllib.request
 
           base = os.environ["BASE_URL"].rstrip("/")
+          event_name = os.environ.get("GITHUB_EVENT_NAME", "")
           report = {}
 
           def get_text(path, timeout=90):
@@ -67,7 +68,11 @@ jobs:
           integrations = get_json("/api/integrations")
           assert integrations.get("success") is True
           catalog = integrations.get("integrations") or []
-          assert len(catalog) == 45, f"Expected 45 integrations, received {len(catalog)}"
+          if event_name == "pull_request":
+              assert len(catalog) in {45, 46}, f"Expected current or pending integration catalog, received {len(catalog)}"
+          else:
+              assert len(catalog) == 46, f"Expected 46 integrations, received {len(catalog)}"
+
           names = {item.get("name") for item in catalog}
           required = {
               "Mapbox",
@@ -83,6 +88,8 @@ jobs:
               "Analytics and conversion tracking",
           }
           assert required.issubset(names), f"Required integrations are missing: {sorted(required - names)}"
+          if len(catalog) == 46:
+              assert "BestTime" in names, "BestTime is missing from the expanded integration catalog"
 
           invalid_body = json.dumps({
               "eventName": "unsupported_smoke_event",
