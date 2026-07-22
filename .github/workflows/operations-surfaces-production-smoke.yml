@@ -67,11 +67,12 @@ jobs:
           integrations = get_json("/api/integrations")
           assert integrations.get("success") is True
           catalog = integrations.get("integrations") or []
-          assert len(catalog) == 45, f"Expected 45 integrations, received {len(catalog)}"
+          assert len(catalog) == 46, f"Expected 46 integrations, received {len(catalog)}"
           names = {item.get("name") for item in catalog}
           required = {
               "Mapbox",
               "Supabase",
+              "BestTime",
               "Ticketmaster Discovery API",
               "Tourism and destination calendars",
               "National Weather Service",
