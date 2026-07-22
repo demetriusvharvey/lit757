@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Activity, ArrowLeft, CheckCircle2, CircleDashed, KeyRound, RadioTower, ShieldCheck } from "lucide-react";
 import { integrationSnapshot, type IntegrationState } from "../../src/lib/integration-catalog";
 import "./integrations.css";
+import "./integration-health-link.css";
 
 export const dynamic = "force-dynamic";
 
