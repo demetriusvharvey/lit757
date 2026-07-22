@@ -1,11 +1,18 @@
+import { unstable_cache } from "next/cache";
 import { NextResponse } from "next/server";
 import { fetchAllCivicPlusCalendars } from "../../../../src/lib/events/civicplus-calendars";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+const getCachedCityCalendarHealth = unstable_cache(
+  fetchAllCivicPlusCalendars,
+  ["buzz-civicplus-calendar-health-v2"],
+  { revalidate: 1_800 },
+);
+
 export async function GET() {
-  const data = await fetchAllCivicPlusCalendars();
+  const data = await getCachedCityCalendarHealth();
   const cityHealth = Object.fromEntries(
     [...new Set(data.results.map(result => result.feed.city))].map(city => {
       const feeds = data.results.filter(result => result.feed.city === city);
@@ -38,6 +45,6 @@ export async function GET() {
     truthNote: "Calendar events are scheduled activity context, not proof of current venue occupancy.",
   }, {
     status: successfulFeeds ? 200 : 502,
-    headers: { "Cache-Control": "public, s-maxage=900, stale-while-revalidate=1800" },
+    headers: { "Cache-Control": "public, s-maxage=1800, stale-while-revalidate=3600" },
   });
 }
