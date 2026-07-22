@@ -9,6 +9,7 @@ export type InviteCrewVenue = {
   status?: string | null;
   trend?: string | null;
   mode?: string | null;
+  referralId?: string | null;
 };
 
 function cleanText(value: unknown, fallback = "") {
@@ -29,6 +30,8 @@ export function buildInviteCrewUrl(origin: string, venue: InviteCrewVenue) {
   url.searchParams.set("venue", cleanText(venue.id));
   url.searchParams.set("source", "invite-the-crew");
   url.searchParams.set("mode", shareMode(venue.mode));
+  const referralId = cleanText(venue.referralId);
+  if (/^[a-zA-Z0-9_-]{8,128}$/.test(referralId)) url.searchParams.set("ref", referralId);
   return url.toString();
 }
 
