@@ -3,6 +3,7 @@ name: Patch adaptive map experience
 on:
   push:
     branches: [feature/adaptive-map-heat-hubs]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -186,32 +187,44 @@ jobs:
               raise SystemExit('Pin glow anchor not found')
           text = text.replace(pin_anchor, pin_replacement, 1)
 
-          text = text.replace('''        source: "buzz-map-venues",
+          circle_old = '''        source: "buzz-map-venues",
                   minzoom: 10.5,
                   paint: {
                     "circle-radius": ["case", ["==", ["get", "selected"], true], 17, ["interpolate", ["linear"], ["zoom"], 10.5, 12, 15, 15]],
                     "circle-color": "#ffffff",
-                    "circle-stroke-width": ["case", ["==", ["get", "selected"], true], 4, 3],''', '''        source: "buzz-map-clusters",
+                    "circle-stroke-width": ["case", ["==", ["get", "selected"], true], 4, 3],'''
+          circle_new = '''        source: "buzz-map-clusters",
                   minzoom: 10.5,
                   filter: ["!", ["has", "point_count"]],
                   paint: {
                     "circle-radius": ["case", ["==", ["get", "selected"], true], 18, ["interpolate", ["linear"], ["zoom"], 10.5, 12.5, 15, 15.5]],
                     "circle-color": "#ffffff",
-                    "circle-stroke-width": ["case", ["==", ["get", "selected"], true], 6, 4],''', 1)
+                    "circle-stroke-width": ["case", ["==", ["get", "selected"], true], 6, 4],'''
+          if circle_old not in text:
+              raise SystemExit('Venue circle source anchor not found')
+          text = text.replace(circle_old, circle_new, 1)
 
-          text = text.replace('''        source: "buzz-map-venues",
+          logo_old = '''        source: "buzz-map-venues",
                   minzoom: 10.5,
-                  layout: {''', '''        source: "buzz-map-clusters",
+                  layout: {'''
+          logo_new = '''        source: "buzz-map-clusters",
                   minzoom: 10.5,
                   filter: ["!", ["has", "point_count"]],
-                  layout: {''', 1)
+                  layout: {'''
+          if logo_old not in text:
+              raise SystemExit('Logo source anchor not found')
+          text = text.replace(logo_old, logo_new, 1)
 
-          text = text.replace('''        source: "buzz-map-venues",
+          hitbox_old = '''        source: "buzz-map-venues",
                   minzoom: 10.2,
-                  paint: { "circle-radius": 28,''', '''        source: "buzz-map-clusters",
+                  paint: { "circle-radius": 28,'''
+          hitbox_new = '''        source: "buzz-map-clusters",
                   minzoom: 10.2,
                   filter: ["!", ["has", "point_count"]],
-                  paint: { "circle-radius": 30,''', 1)
+                  paint: { "circle-radius": 30,'''
+          if hitbox_old not in text:
+              raise SystemExit('Hitbox source anchor not found')
+          text = text.replace(hitbox_old, hitbox_new, 1)
 
           handler_anchor = '''    const onHeatClick = (event: mapboxgl.MapLayerMouseEvent) => {
                 if (map.getZoom() >= 10.5) return;
@@ -300,8 +313,15 @@ jobs:
               raise SystemExit('Selected vibe anchor not found')
           text = text.replace(selected_anchor, selected_replacement, 1)
 
-          text = text.replace('<div className="buzz-map-app">', '<div className={`buzz-map-app ${daypart === "day" ? "daytime" : "nighttime"}`}>', 1)
-          text = text.replace('{categories.map(([label, Icon]) =>', '{orderedCategories.map(([label, Icon]) =>', 1)
+          root_old = '<div className="buzz-map-app">'
+          if root_old not in text:
+              raise SystemExit('Root daypart class anchor not found')
+          text = text.replace(root_old, '<div className={`buzz-map-app ${daypart === "day" ? "daytime" : "nighttime"}`}>', 1)
+
+          filters_old = '{categories.map(([label, Icon]) =>'
+          if filters_old not in text:
+              raise SystemExit('Ordered filters anchor not found')
+          text = text.replace(filters_old, '{orderedCategories.map(([label, Icon]) =>', 1)
 
           list_anchor = '''            {filtered.map((venue, index) => (
                     <article key={venue.id} className={selected?.id === venue.id ? "selected" : ""} onClick={() => selectVenue(venue.id)}>
