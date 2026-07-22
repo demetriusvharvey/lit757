@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCachedOsmVenueCandidates } from "../../../../src/lib/integrations/osm-cache";
-import { OVERPASS_ENDPOINT, summarizeOsmCandidates } from "../../../../src/lib/integrations/osm";
+import { summarizeOsmCandidates } from "../../../../src/lib/integrations/osm";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -14,7 +14,7 @@ export async function GET() {
       provider: "OpenStreetMap via Overpass API",
       generatedAt: data.generatedAt,
       osmBaseTimestamp: data.osmBaseTimestamp,
-      endpoint: OVERPASS_ENDPOINT,
+      endpoint: data.endpoint,
       bounds: "Hampton Roads",
       rawElementCount: data.rawElementCount,
       summary,
