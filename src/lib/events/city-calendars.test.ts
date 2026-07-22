@@ -97,6 +97,27 @@ test("RRULE series expand and respect EXDATE exclusions", () => {
   assert.notEqual(events[0].source_event_id, events[1].source_event_id);
 });
 
+test("long COUNT series retain current occurrences beyond the old cap", () => {
+  const events = parseCityCalendarIcs(`BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:long-daily-series\nSUMMARY:Daily Community Program\nDTSTART;TZID=America/New_York:20200101T190000\nDTEND;TZID=America/New_York:20200101T200000\nRRULE:FREQ=DAILY;COUNT=10000\nLOCATION:Community Center\nEND:VEVENT\nEND:VCALENDAR`, icsSource);
+
+  assert.ok(events.length > 0);
+  assert.ok(events.length <= 2000);
+  assert.ok(events.every(event => new Date(event.start_time).getTime() >= Date.now() - 2 * 24 * 60 * 60 * 1000));
+});
+
+test("detached cancellation removes its master occurrence and emits a deletion marker", () => {
+  const events = parseCityCalendarIcs(`BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:cancellable-series\nSUMMARY:Neighborhood Meeting\nDTSTART;TZID=America/New_York:20260725T190000\nDTEND;TZID=America/New_York:20260725T200000\nRRULE:FREQ=WEEKLY;COUNT=2\nLOCATION:Community Center\nEND:VEVENT\nBEGIN:VEVENT\nUID:cancellable-series\nRECURRENCE-ID;TZID=America/New_York:20260801T190000\nSTATUS:CANCELLED\nSUMMARY:Neighborhood Meeting\nDTSTART;TZID=America/New_York:20260801T190000\nLOCATION:Community Center\nEND:VEVENT\nEND:VCALENDAR`, icsSource);
+
+  const active = events.filter(event => !event.cancelled);
+  const cancelled = events.filter(event => event.cancelled);
+  assert.equal(active.length, 1);
+  assert.equal(active[0].start_time, "2026-07-25T23:00:00.000Z");
+  assert.equal(cancelled.length, 1);
+  assert.equal(cancelled[0].start_time, "2026-08-01T23:00:00.000Z");
+  assert.equal(cancelled[0].ticket_status, "cancelled");
+  assert.notEqual(active[0].source_event_id, cancelled[0].source_event_id);
+});
+
 test("JSON-LD parser remains available for future tourism and venue sources", () => {
   const html = `<script type="application/ld+json">{
     "@context": "https://schema.org",
