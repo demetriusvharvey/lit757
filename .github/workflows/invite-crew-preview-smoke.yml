@@ -3,6 +3,8 @@ name: Invite the Crew preview smoke
 on:
   push:
     branches: [feature/invite-the-crew]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
