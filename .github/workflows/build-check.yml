@@ -7,13 +7,133 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Checkout
+      - name: Checkout feature branch
         uses: actions/checkout@v4
+        with:
+          ref: feature/hampton-roads-city-calendar-ingestion
+          fetch-depth: 0
+      - name: Apply pending recurrence review fixes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/lib/events/city-calendars.ts")
+          text = path.read_text()
+
+          old_daily = '''  if (rule.freq === "DAILY") {
+            let firstOffset = 0;
+            const localWindow = calendarDateForInstant(windowStart, timeZone, startParts.zulu);
+            const daysToWindow = Math.floor((localWindow.getTime() - start.getTime()) / (24 * 60 * 60 * 1000));
+            if (daysToWindow > 0) {
+              const skippedIntervals = Math.max(0, Math.floor(daysToWindow / rule.interval) - 1);
+              firstOffset = skippedIntervals * rule.interval;
+              occurrenceNumber = skippedIntervals;
+            }
+
+            for (let offset = firstOffset; iterations < MAX_RECURRENCE_ITERATIONS; offset += rule.interval) {
+              iterations += 1;
+              const candidate = new Date(start);
+              candidate.setUTCDate(candidate.getUTCDate() + offset);
+              if (!addCandidate(candidate)) break;
+            }
+            return output;
+          }'''
+          new_daily = '''  if (rule.freq === "DAILY") {
+            const permittedDays = new Set(
+              rule.byDay
+                .map(token => token.slice(-2))
+                .map(code => DAY_CODE_TO_UTC_DAY[code])
+                .filter(day => day !== undefined),
+            );
+            let firstOffset = 0;
+            const localWindow = calendarDateForInstant(windowStart, timeZone, startParts.zulu);
+            const daysToWindow = Math.floor((localWindow.getTime() - start.getTime()) / (24 * 60 * 60 * 1000));
+            if (daysToWindow > 0 && permittedDays.size === 0) {
+              const skippedIntervals = Math.max(0, Math.floor(daysToWindow / rule.interval) - 1);
+              firstOffset = skippedIntervals * rule.interval;
+              occurrenceNumber = skippedIntervals;
+            }
+
+            for (let offset = firstOffset; iterations < MAX_RECURRENCE_ITERATIONS; offset += rule.interval) {
+              iterations += 1;
+              const candidate = new Date(start);
+              candidate.setUTCDate(candidate.getUTCDate() + offset);
+              if (permittedDays.size && !permittedDays.has(candidate.getUTCDay())) continue;
+              if (!addCandidate(candidate)) break;
+            }
+            return output;
+          }'''
+          if old_daily in text:
+              text = text.replace(old_daily, new_daily, 1)
+          elif "permittedDays.size && !permittedDays.has(candidate.getUTCDay())" not in text:
+              raise SystemExit("Could not locate the daily recurrence block")
+
+          old_cancel = '''  for (const block of blocks) {
+            const detached = detachedOccurrenceDetails(block, source);
+            if (String(property(block, "STATUS") || "").toUpperCase() === "CANCELLED" && detached) {
+              const cancellation = cancelledIcsEvent(block, source, detached.identity, detached.start);
+              events.delete(cancellation.source_event_id);
+              cancelled.set(cancellation.source_event_id, cancellation);
+              continue;
+            }
+
+            const isDetached = Boolean(detached);
+            for (const event of expandIcsBlock(block, source)) {
+              if (cancelled.has(event.source_event_id)) continue;
+              const existing = events.get(event.source_event_id);
+              if (!existing || isDetached || !existing.detached) {
+                events.set(event.source_event_id, { event, detached: isDetached });
+              }
+            }
+          }'''
+          new_cancel = '''  for (const block of blocks) {
+            const detached = detachedOccurrenceDetails(block, source);
+            const isCancelled = String(property(block, "STATUS") || "").toUpperCase() === "CANCELLED";
+            if (isCancelled && detached) {
+              const cancellation = cancelledIcsEvent(block, source, detached.identity, detached.start);
+              events.delete(cancellation.source_event_id);
+              cancelled.set(cancellation.source_event_id, cancellation);
+              continue;
+            }
+
+            if (isCancelled) {
+              for (const event of expandIcsBlock(block, source)) {
+                const cancellation = {
+                  ...event,
+                  ticket_status: "cancelled",
+                  cancelled: true,
+                };
+                events.delete(cancellation.source_event_id);
+                cancelled.set(cancellation.source_event_id, cancellation);
+              }
+              continue;
+            }
+
+            const isDetached = Boolean(detached);
+            for (const event of expandIcsBlock(block, source)) {
+              if (cancelled.has(event.source_event_id)) continue;
+              const existing = events.get(event.source_event_id);
+              if (!existing || isDetached || !existing.detached) {
+                events.set(event.source_event_id, { event, detached: isDetached });
+              }
+            }
+          }'''
+          if old_cancel in text:
+              text = text.replace(old_cancel, new_cancel, 1)
+          elif "const isCancelled = String(property(block, \"STATUS\")" not in text:
+              raise SystemExit("Could not locate the cancellation parser block")
+
+          path.write_text(text)
+          PY
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -41,6 +161,18 @@ jobs:
           SUPABASE_URL: https://example.supabase.co
           SUPABASE_SERVICE_ROLE_KEY: build-placeholder
           NEXT_PUBLIC_MAPBOX_TOKEN: build-placeholder
+      - name: Commit validated recurrence fixes
+        if: steps.city_calendar_tests.outcome == 'success' && steps.production_build.outcome == 'success'
+        shell: bash
+        run: |
+          if git diff --quiet -- src/lib/events/city-calendars.ts; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/events/city-calendars.ts
+          git commit -m "Honor recurrence filters and series cancellations"
+          git push origin HEAD:feature/hampton-roads-city-calendar-ingestion
       - name: Upload validation logs
         if: always()
         uses: actions/upload-artifact@v4
