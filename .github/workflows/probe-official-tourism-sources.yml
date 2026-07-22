@@ -3,6 +3,8 @@ name: Probe official tourism sources
 on:
   push:
     branches: [research/official-tourism-source-probe]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
