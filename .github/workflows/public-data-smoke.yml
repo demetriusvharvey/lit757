@@ -17,7 +17,7 @@ concurrency:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - name: Verify production public-data APIs
         env:
@@ -95,13 +95,28 @@ jobs:
               "Norfolk", "Chesapeake", "Portsmouth", "Hampton", "Newport News", "Suffolk"
           }
           city_health = calendars.get("cityHealth") or {}
-          print("City calendar health:", json.dumps(city_health, indent=2), flush=True)
-          print("Feed failures:", json.dumps([
-              feed for feed in calendars.get("feeds", []) if feed.get("status") != "ok"
-          ], indent=2), flush=True)
           assert expected_cities.issubset(set(city_health)), "One or more city calendar registries are missing"
           for city in expected_cities:
               assert int(city_health[city].get("successfulFeeds") or 0) > 0, f"{city} has no working official calendar feed"
+
+          institutions = get("/api/data/institution-calendars", timeout=180)
+          institution_summary = institutions.get("summary") or {}
+          institution_kinds = institutions.get("byKind") or {}
+          institution_failures = [
+              source for source in institutions.get("sources", []) if source.get("status") != "ok"
+          ]
+          print("Institution source health:", json.dumps(institutions.get("sources") or [], indent=2), flush=True)
+          assert int(institution_summary.get("dedupedEvents") or 0) > 0, "Institution calendars returned no events"
+          assert int((institution_kinds.get("university") or {}).get("successful") or 0) > 0, "No university calendar is working"
+          assert (
+              int((institution_kinds.get("arena") or {}).get("successful") or 0)
+              + int((institution_kinds.get("arts") or {}).get("successful") or 0)
+          ) > 0, "No arena or arts-center calendar is working"
+          assert (
+              int((institution_kinds.get("museum") or {}).get("successful") or 0)
+              + int((institution_kinds.get("festival") or {}).get("successful") or 0)
+              + int((institution_kinds.get("attraction") or {}).get("successful") or 0)
+          ) > 0, "No museum, festival, or attraction calendar is working"
 
           print(json.dumps({
               "weatherPeriods": len(weather["hourly"]),
@@ -116,6 +131,11 @@ jobs:
               "calendarFeedsWorking": calendars.get("summary", {}).get("successfulFeeds"),
               "calendarEvents": calendars.get("summary", {}).get("dedupedEvents"),
               "calendarCities": city_health,
+              "institutionSources": institution_summary.get("registeredSources"),
+              "institutionSourcesWorking": institution_summary.get("successfulSources"),
+              "institutionEvents": institution_summary.get("dedupedEvents"),
+              "institutionKinds": institution_kinds,
+              "institutionFailures": institution_failures,
           }, indent=2))
           PY
       - name: Upload public-data smoke output
