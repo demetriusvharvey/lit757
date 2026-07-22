@@ -15,9 +15,9 @@ concurrency:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     steps:
-      - name: Verify production weather and transit APIs
+      - name: Verify production public-data APIs
         env:
           BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
         shell: bash
@@ -28,7 +28,6 @@ jobs:
           python - <<'PY'
           import json
           import os
-          import sys
           import urllib.request
 
           base = os.environ["BASE_URL"].rstrip("/")
@@ -70,6 +69,15 @@ jobs:
           assert isinstance(realtime.get("alerts"), list)
           assert isinstance(realtime.get("vehicles"), list)
 
+          calendars = get("/api/data/city-calendars", timeout=120)
+          expected_cities = {
+              "Norfolk", "Chesapeake", "Portsmouth", "Hampton", "Newport News", "Suffolk"
+          }
+          city_health = calendars.get("cityHealth") or {}
+          assert expected_cities.issubset(set(city_health)), "One or more city calendar registries are missing"
+          for city in expected_cities:
+              assert int(city_health[city].get("successfulFeeds") or 0) > 0, f"{city} has no working official calendar feed"
+
           print(json.dumps({
               "weatherPeriods": len(weather["hourly"]),
               "weatherAlerts": len(weather["alerts"]),
@@ -79,5 +87,9 @@ jobs:
               "hrtAlerts": len(realtime["alerts"]),
               "hrtVehicles": len(realtime["vehicles"]),
               "vehiclePositionsAvailable": availability.get("vehiclePositions"),
+              "calendarFeeds": calendars.get("summary", {}).get("registeredFeeds"),
+              "calendarFeedsWorking": calendars.get("summary", {}).get("successfulFeeds"),
+              "calendarEvents": calendars.get("summary", {}).get("dedupedEvents"),
+              "calendarCities": city_health,
           }, indent=2))
           PY

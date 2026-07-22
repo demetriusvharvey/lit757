@@ -27,7 +27,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          npx --yes tsx@4.20.6 --test src/lib/events/city-calendars.test.ts 2>&1 | tee city-calendar-test.log
+          npx --yes tsx@4.20.6 --test src/lib/events/*.test.ts 2>&1 | tee city-calendar-test.log
       - name: Test weather and transit integrations
         id: public_data_tests
         continue-on-error: true
