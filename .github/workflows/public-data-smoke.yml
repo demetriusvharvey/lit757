@@ -1,0 +1,83 @@
+name: Public data smoke
+
+on:
+  schedule:
+    - cron: "23 */2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-data-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Verify production weather and transit APIs
+        env:
+          BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${BASE_URL:?Add BUZZ_PRODUCTION_URL as a GitHub Actions secret}"
+          BASE_URL="${BASE_URL%/}"
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          import urllib.request
+
+          base = os.environ["BASE_URL"].rstrip("/")
+
+          def get(path, timeout=45):
+              url = f"{base}{path}"
+              request = urllib.request.Request(
+                  url,
+                  headers={"User-Agent": "BuzzPublicDataSmoke/1.0", "Accept": "application/json"},
+              )
+              with urllib.request.urlopen(request, timeout=timeout) as response:
+                  payload = json.load(response)
+                  if response.status != 200:
+                      raise AssertionError(f"{path} returned HTTP {response.status}")
+                  if payload.get("success") is not True:
+                      raise AssertionError(f"{path} failed: {payload.get('error')}")
+                  return payload
+
+          weather = get("/api/data/weather?city=Virginia%20Beach")
+          assert weather.get("provider") == "National Weather Service"
+          assert len(weather.get("forecast") or []) > 0, "NWS daily forecast is empty"
+          assert len(weather.get("hourly") or []) > 0, "NWS hourly forecast is empty"
+          assert isinstance(weather.get("alerts"), list), "NWS alerts must be a list"
+          assert weather.get("activityImpact", {}).get("level"), "Weather impact is missing"
+
+          static = get("/api/data/transit/static", timeout=60)
+          assert static.get("provider") == "Hampton Roads Transit"
+          assert int(static.get("routeCount") or 0) > 0, "HRT route count is zero"
+          assert int(static.get("stopCount") or 0) > 0, "HRT stop count is zero"
+          assert len(static.get("routes") or []) == int(static["routeCount"])
+          assert len(static.get("stops") or []) == int(static["stopCount"])
+
+          realtime = get("/api/data/transit/realtime")
+          assert realtime.get("provider") == "Hampton Roads Transit"
+          availability = realtime.get("availability") or {}
+          assert availability.get("tripUpdates") is True, "HRT trip updates are unavailable"
+          assert availability.get("alerts") is True, "HRT alerts are unavailable"
+          assert isinstance(realtime.get("tripUpdates"), list)
+          assert isinstance(realtime.get("alerts"), list)
+          assert isinstance(realtime.get("vehicles"), list)
+
+          print(json.dumps({
+              "weatherPeriods": len(weather["hourly"]),
+              "weatherAlerts": len(weather["alerts"]),
+              "hrtRoutes": static["routeCount"],
+              "hrtStops": static["stopCount"],
+              "hrtTripUpdates": len(realtime["tripUpdates"]),
+              "hrtAlerts": len(realtime["alerts"]),
+              "hrtVehicles": len(realtime["vehicles"]),
+              "vehiclePositionsAvailable": availability.get("vehiclePositions"),
+          }, indent=2))
+          PY
