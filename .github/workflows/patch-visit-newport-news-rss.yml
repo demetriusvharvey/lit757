@@ -1,0 +1,79 @@
+name: Patch Visit Newport News RSS source
+
+on:
+  push:
+    branches: [feature/visit-newport-news-rss]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/visit-newport-news-rss
+          fetch-depth: 0
+      - name: Register official Visit Newport News RSS source
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/lib/events/institution-calendars.ts')
+          text = path.read_text()
+
+          import_anchor = 'import { parseVisitNorfolkEvents } from "./tourism-events";\n'
+          import_addition = import_anchor + 'import { fetchSimpleviewRssCalendar } from "./simpleview-rss";\n'
+          if 'fetchSimpleviewRssCalendar' not in text:
+              if import_anchor not in text:
+                  raise SystemExit('Missing tourism import anchor')
+              text = text.replace(import_anchor, import_addition, 1)
+
+          old_format = 'export type InstitutionFormat = "localist-api" | "tribe-api" | "venue-html" | "jsonld-html" | "embedded-json";'
+          new_format = 'export type InstitutionFormat = "localist-api" | "tribe-api" | "venue-html" | "jsonld-html" | "embedded-json" | "simpleview-rss";'
+          if old_format in text:
+              text = text.replace(old_format, new_format, 1)
+          elif '"simpleview-rss"' not in text:
+              raise SystemExit('Missing InstitutionFormat anchor')
+
+          if 'id: "visit_newport_news_official"' not in text:
+              visit_hampton = text.index('    id: "visit_hampton_official"')
+              insertion_point = text.index('  },\n];', visit_hampton) + len('  },\n')
+              block = "\n".join([
+                  '  {',
+                  '    id: "visit_newport_news_official",',
+                  '    name: "Visit Newport News Events",',
+                  '    kind: "tourism",',
+                  '    city: "Newport News",',
+                  '    url: "https://www.visitnewportnews.com/event/rss/",',
+                  '    format: "simpleview-rss",',
+                  '    enabled: true,',
+                  '    coverageNote: "Official destination calendar via its public RSS feed and structured first-party event detail pages.",',
+                  '  },',
+                  '',
+              ])
+              text = text[:insertion_point] + block + text[insertion_point:]
+
+          old_fetch = '''          : source.format === "embedded-json"
+            ? await fetchEmbeddedTourism(source)
+            : await fetchJsonLdHtml(source);'''
+          new_fetch = '''          : source.format === "embedded-json"
+            ? await fetchEmbeddedTourism(source)
+            : source.format === "simpleview-rss"
+              ? await fetchSimpleviewRssCalendar(source)
+              : await fetchJsonLdHtml(source);'''
+          if old_fetch in text:
+              text = text.replace(old_fetch, new_fetch, 1)
+          elif 'source.format === "simpleview-rss"' not in text:
+              raise SystemExit('Missing provider dispatch anchor')
+
+          path.write_text(text)
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/events/institution-calendars.ts
+          git commit -m "Register Visit Newport News tourism RSS source"
+          git push origin HEAD:feature/visit-newport-news-rss
