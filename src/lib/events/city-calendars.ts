@@ -46,12 +46,45 @@ type IcsProperty = {
   params: Record<string, string>;
 };
 
+type CompactIcsParts = {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+  allDay: boolean;
+  zulu: boolean;
+};
+
+type ParsedRRule = {
+  freq: "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY";
+  interval: number;
+  count: number | null;
+  until: string | null;
+  byDay: string[];
+  byMonthDay: number[];
+};
+
 const EASTERN_TIME_ZONE = "America/New_York";
 const VB_LISTING_TIMEOUT_MS = 7_000;
 const VB_DETAIL_TIMEOUT_MS = 6_000;
 const VB_LISTING_CONCURRENCY = 5;
 const VB_DETAIL_CONCURRENCY = 6;
 const VB_DETAIL_PAGE_LIMIT = 18;
+const RECURRENCE_WINDOW_PAST_MS = 24 * 60 * 60 * 1000;
+const RECURRENCE_WINDOW_FUTURE_MS = 121 * 24 * 60 * 60 * 1000;
+const MAX_RECURRENCE_ITERATIONS = 20_000;
+const MAX_RECURRENCE_OCCURRENCES = 2_000;
+const DAY_CODE_TO_UTC_DAY: Record<string, number> = {
+  SU: 0,
+  MO: 1,
+  TU: 2,
+  WE: 3,
+  TH: 4,
+  FR: 5,
+  SA: 6,
+};
 
 export const CITY_CALENDAR_SOURCES: CityCalendarSource[] = [
   {
@@ -93,29 +126,35 @@ function unfoldIcs(text: string) {
     .split(/\r?\n/);
 }
 
-function propertyEntry(lines: string[], name: string): IcsProperty | null {
-  const line = lines.find(item => item.startsWith(`${name}:`) || item.startsWith(`${name};`));
-  if (!line) return null;
+function propertyEntries(lines: string[], name: string): IcsProperty[] {
+  const entries: IcsProperty[] = [];
+  for (const line of lines) {
+    if (!line.startsWith(`${name}:`) && !line.startsWith(`${name};`)) continue;
+    const separator = line.indexOf(":");
+    if (separator < 0) continue;
 
-  const separator = line.indexOf(":");
-  if (separator < 0) return null;
+    const [propertyName, ...rawParams] = line.slice(0, separator).split(";");
+    if (propertyName !== name) continue;
 
-  const [propertyName, ...rawParams] = line.slice(0, separator).split(";");
-  if (propertyName !== name) return null;
+    const params: Record<string, string> = {};
+    for (const rawParam of rawParams) {
+      const equals = rawParam.indexOf("=");
+      if (equals <= 0) continue;
+      const key = rawParam.slice(0, equals).trim().toUpperCase();
+      const value = rawParam.slice(equals + 1).trim().replace(/^"|"$/g, "");
+      if (key && value) params[key] = value;
+    }
 
-  const params: Record<string, string> = {};
-  for (const rawParam of rawParams) {
-    const equals = rawParam.indexOf("=");
-    if (equals <= 0) continue;
-    const key = rawParam.slice(0, equals).trim().toUpperCase();
-    const value = rawParam.slice(equals + 1).trim().replace(/^"|"$/g, "");
-    if (key && value) params[key] = value;
+    entries.push({
+      value: clean(line.slice(separator + 1)),
+      params,
+    });
   }
+  return entries;
+}
 
-  return {
-    value: clean(line.slice(separator + 1)),
-    params,
-  };
+function propertyEntry(lines: string[], name: string) {
+  return propertyEntries(lines, name)[0] || null;
 }
 
 function property(lines: string[], name: string) {
@@ -172,45 +211,64 @@ function zonedDateTimeToIso(
   }
 }
 
-function parseIcsDate(value: string, timeZone = EASTERN_TIME_ZONE) {
+function parseCompactIcsParts(value: string): CompactIcsParts | null {
   const raw = value.trim();
   const dateOnly = raw.match(/^(\d{4})(\d{2})(\d{2})$/);
   if (dateOnly) {
-    return zonedDateTimeToIso(
-      Number(dateOnly[1]),
-      Number(dateOnly[2]),
-      Number(dateOnly[3]),
-      0,
-      0,
-      0,
-      timeZone,
-    );
+    return {
+      year: Number(dateOnly[1]),
+      month: Number(dateOnly[2]),
+      day: Number(dateOnly[3]),
+      hour: 0,
+      minute: 0,
+      second: 0,
+      allDay: true,
+      zulu: false,
+    };
   }
 
   const compact = raw.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z?)$/);
-  if (!compact) return toIso(raw);
+  if (!compact) return null;
+  return {
+    year: Number(compact[1]),
+    month: Number(compact[2]),
+    day: Number(compact[3]),
+    hour: Number(compact[4]),
+    minute: Number(compact[5]),
+    second: Number(compact[6]),
+    allDay: false,
+    zulu: compact[7] === "Z",
+  };
+}
 
-  const [, year, month, day, hour, minute, second, zulu] = compact;
-  if (zulu) {
-    return new Date(Date.UTC(
-      Number(year),
-      Number(month) - 1,
-      Number(day),
-      Number(hour),
-      Number(minute),
-      Number(second),
-    )).toISOString();
-  }
+function calendarDate(parts: CompactIcsParts) {
+  return new Date(Date.UTC(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    parts.hour,
+    parts.minute,
+    parts.second,
+  ));
+}
 
+function isoFromCalendarDate(value: Date, timeZone: string, zulu: boolean) {
+  if (zulu) return value.toISOString();
   return zonedDateTimeToIso(
-    Number(year),
-    Number(month),
-    Number(day),
-    Number(hour),
-    Number(minute),
-    Number(second),
+    value.getUTCFullYear(),
+    value.getUTCMonth() + 1,
+    value.getUTCDate(),
+    value.getUTCHours(),
+    value.getUTCMinutes(),
+    value.getUTCSeconds(),
     timeZone,
   );
+}
+
+function parseIcsDate(value: string, timeZone = EASTERN_TIME_ZONE) {
+  const parts = parseCompactIcsParts(value);
+  if (parts) return isoFromCalendarDate(calendarDate(parts), timeZone, parts.zulu);
+  return toIso(value);
 }
 
 function toIso(value: unknown) {
@@ -428,12 +486,246 @@ function eventTimesFromText(date: string, text: string, timeZone: string) {
   };
 }
 
-function occurrenceExternalId(lines: string[]) {
-  const uid = property(lines, "UID");
+function parseRRule(value: string | null): ParsedRRule | null {
+  if (!value) return null;
+  const fields = Object.fromEntries(
+    value.split(";").map(part => {
+      const separator = part.indexOf("=");
+      return separator < 0
+        ? [part.toUpperCase(), ""]
+        : [part.slice(0, separator).toUpperCase(), part.slice(separator + 1)];
+    }),
+  );
+  const freq = String(fields.FREQ || "").toUpperCase();
+  if (!(["DAILY", "WEEKLY", "MONTHLY", "YEARLY"] as string[]).includes(freq)) return null;
+
+  const interval = Math.max(1, Number.parseInt(String(fields.INTERVAL || "1"), 10) || 1);
+  const rawCount = Number.parseInt(String(fields.COUNT || ""), 10);
+  const count = Number.isFinite(rawCount) && rawCount > 0
+    ? Math.min(rawCount, MAX_RECURRENCE_OCCURRENCES)
+    : null;
+  const byDay = String(fields.BYDAY || "")
+    .split(",")
+    .map(value => value.trim().toUpperCase())
+    .filter(Boolean);
+  const byMonthDay = String(fields.BYMONTHDAY || "")
+    .split(",")
+    .map(value => Number.parseInt(value, 10))
+    .filter(value => Number.isFinite(value) && value !== 0 && value >= -31 && value <= 31);
+
+  return {
+    freq: freq as ParsedRRule["freq"],
+    interval,
+    count,
+    until: fields.UNTIL ? String(fields.UNTIL) : null,
+    byDay,
+    byMonthDay,
+  };
+}
+
+function startOfUtcWeek(value: Date) {
+  const result = new Date(value);
+  const distanceFromMonday = (result.getUTCDay() + 6) % 7;
+  result.setUTCDate(result.getUTCDate() - distanceFromMonday);
+  result.setUTCHours(0, 0, 0, 0);
+  return result;
+}
+
+function validDayOfMonth(year: number, monthIndex: number, day: number) {
+  const daysInMonth = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+  const normalized = day > 0 ? day : daysInMonth + day + 1;
+  return normalized >= 1 && normalized <= daysInMonth ? normalized : null;
+}
+
+function monthlyDaysForRule(
+  year: number,
+  monthIndex: number,
+  startDay: number,
+  rule: ParsedRRule,
+) {
+  const days = new Set<number>();
+  if (rule.byMonthDay.length) {
+    for (const value of rule.byMonthDay) {
+      const day = validDayOfMonth(year, monthIndex, value);
+      if (day) days.add(day);
+    }
+    return [...days].sort((left, right) => left - right);
+  }
+
+  if (rule.byDay.length) {
+    const daysInMonth = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+    for (const token of rule.byDay) {
+      const match = token.match(/^([+-]?\d+)?(SU|MO|TU|WE|TH|FR|SA)$/);
+      if (!match) continue;
+      const ordinal = match[1] ? Number(match[1]) : null;
+      const targetDay = DAY_CODE_TO_UTC_DAY[match[2]];
+      const matching: number[] = [];
+      for (let day = 1; day <= daysInMonth; day += 1) {
+        if (new Date(Date.UTC(year, monthIndex, day)).getUTCDay() === targetDay) matching.push(day);
+      }
+      if (ordinal === null) matching.forEach(day => days.add(day));
+      else {
+        const index = ordinal > 0 ? ordinal - 1 : matching.length + ordinal;
+        if (matching[index]) days.add(matching[index]);
+      }
+    }
+    return [...days].sort((left, right) => left - right);
+  }
+
+  const sameDay = validDayOfMonth(year, monthIndex, startDay);
+  return sameDay ? [sameDay] : [];
+}
+
+function untilMilliseconds(rule: ParsedRRule, timeZone: string) {
+  if (!rule.until) return null;
+  const parsed = parseIcsDate(rule.until, timeZone);
+  if (!parsed) return null;
+  const parts = parseCompactIcsParts(rule.until);
+  if (!parts?.allDay) return new Date(parsed).getTime();
+  const nextDay = calendarDate(parts);
+  nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+  const nextMidnight = isoFromCalendarDate(nextDay, timeZone, false);
+  return nextMidnight ? new Date(nextMidnight).getTime() - 1 : new Date(parsed).getTime();
+}
+
+function recurrenceCalendarDates(
+  start: Date,
+  startParts: CompactIcsParts,
+  rule: ParsedRRule,
+  timeZone: string,
+) {
+  const output: Date[] = [];
+  const windowStart = Date.now() - RECURRENCE_WINDOW_PAST_MS;
+  const windowEnd = Date.now() + RECURRENCE_WINDOW_FUTURE_MS;
+  const until = untilMilliseconds(rule, timeZone);
+  const bounded = rule.count !== null || until !== null;
+  let occurrenceNumber = 0;
+  let iterations = 0;
+
+  function addCandidate(candidate: Date) {
+    if (candidate.getTime() < start.getTime()) return true;
+    const iso = isoFromCalendarDate(candidate, timeZone, startParts.zulu);
+    if (!iso) return true;
+    const timestamp = new Date(iso).getTime();
+    if (until !== null && timestamp > until) return false;
+    if (!bounded && timestamp > windowEnd) return false;
+
+    occurrenceNumber += 1;
+    if (rule.count !== null && occurrenceNumber > rule.count) return false;
+    if (bounded || timestamp >= windowStart) output.push(new Date(candidate));
+    if (output.length >= MAX_RECURRENCE_OCCURRENCES) return false;
+    return rule.count === null || occurrenceNumber < rule.count;
+  }
+
+  if (rule.freq === "DAILY") {
+    for (let offset = 0; iterations < MAX_RECURRENCE_ITERATIONS; offset += rule.interval) {
+      iterations += 1;
+      const candidate = new Date(start);
+      candidate.setUTCDate(candidate.getUTCDate() + offset);
+      if (!addCandidate(candidate)) break;
+    }
+    return output;
+  }
+
+  if (rule.freq === "WEEKLY") {
+    const permittedDays = new Set(
+      (rule.byDay.length ? rule.byDay : [Object.keys(DAY_CODE_TO_UTC_DAY)
+        .find(code => DAY_CODE_TO_UTC_DAY[code] === start.getUTCDay())!])
+        .map(token => token.slice(-2))
+        .map(code => DAY_CODE_TO_UTC_DAY[code])
+        .filter(day => day !== undefined),
+    );
+    const firstWeek = startOfUtcWeek(start).getTime();
+    const candidate = new Date(start);
+    while (iterations < MAX_RECURRENCE_ITERATIONS) {
+      iterations += 1;
+      const week = Math.floor((startOfUtcWeek(candidate).getTime() - firstWeek) / (7 * 24 * 60 * 60 * 1000));
+      if (week >= 0 && week % rule.interval === 0 && permittedDays.has(candidate.getUTCDay())) {
+        if (!addCandidate(candidate)) break;
+      }
+      candidate.setUTCDate(candidate.getUTCDate() + 1);
+    }
+    return output;
+  }
+
+  if (rule.freq === "MONTHLY") {
+    for (let monthOffset = 0; iterations < MAX_RECURRENCE_ITERATIONS; monthOffset += rule.interval) {
+      iterations += 1;
+      const monthAnchor = new Date(Date.UTC(
+        start.getUTCFullYear(),
+        start.getUTCMonth() + monthOffset,
+        1,
+        start.getUTCHours(),
+        start.getUTCMinutes(),
+        start.getUTCSeconds(),
+      ));
+      const days = monthlyDaysForRule(
+        monthAnchor.getUTCFullYear(),
+        monthAnchor.getUTCMonth(),
+        start.getUTCDate(),
+        rule,
+      );
+      let keepGoing = true;
+      for (const day of days) {
+        const candidate = new Date(monthAnchor);
+        candidate.setUTCDate(day);
+        if (!addCandidate(candidate)) {
+          keepGoing = false;
+          break;
+        }
+      }
+      if (!keepGoing) break;
+    }
+    return output;
+  }
+
+  for (let yearOffset = 0; iterations < MAX_RECURRENCE_ITERATIONS; yearOffset += rule.interval) {
+    iterations += 1;
+    const candidate = new Date(Date.UTC(
+      start.getUTCFullYear() + yearOffset,
+      start.getUTCMonth(),
+      start.getUTCDate(),
+      start.getUTCHours(),
+      start.getUTCMinutes(),
+      start.getUTCSeconds(),
+    ));
+    if (candidate.getUTCMonth() !== start.getUTCMonth()) continue;
+    if (!addCandidate(candidate)) break;
+  }
+  return output;
+}
+
+function recurrenceIdentity(
+  uid: string | null,
+  occurrenceIso: string,
+) {
+  return `${uid || "recurrence"}|${occurrenceIso}`;
+}
+
+function detachedOccurrenceIdentity(lines: string[], source: CityCalendarSource) {
   const recurrence = propertyEntry(lines, "RECURRENCE-ID");
-  if (!recurrence) return uid;
-  const zone = recurrence.params.TZID || "floating";
-  return `${uid || "recurrence"}|${zone}|${recurrence.value}`;
+  if (!recurrence) return null;
+  const parts = parseCompactIcsParts(recurrence.value);
+  const timeZone = recurrence.params.TZID
+    || (parts?.zulu ? "UTC" : source.timeZone)
+    || EASTERN_TIME_ZONE;
+  const iso = parseIcsDate(recurrence.value, timeZone);
+  return iso ? recurrenceIdentity(property(lines, "UID"), iso) : null;
+}
+
+function exdateInstants(lines: string[], source: CityCalendarSource) {
+  const values = new Set<number>();
+  for (const entry of propertyEntries(lines, "EXDATE")) {
+    for (const raw of entry.value.split(",").map(value => value.trim()).filter(Boolean)) {
+      const parts = parseCompactIcsParts(raw);
+      const timeZone = entry.params.TZID
+        || (parts?.zulu ? "UTC" : source.timeZone)
+        || EASTERN_TIME_ZONE;
+      const iso = parseIcsDate(raw, timeZone);
+      if (iso) values.add(new Date(iso).getTime());
+    }
+  }
+  return values;
 }
 
 export function cityEventFingerprint(
@@ -447,66 +739,135 @@ export function cityEventFingerprint(
   return `${source}_${createHash("sha256").update(key).digest("hex").slice(0, 32)}`;
 }
 
-export function parseCityCalendarIcs(text: string, source: CityCalendarSource): NormalizedCityEvent[] {
-  const lines = unfoldIcs(text);
-  const events: NormalizedCityEvent[] = [];
-  let current: string[] | null = null;
+function normalizedIcsEvent(
+  lines: string[],
+  source: CityCalendarSource,
+  start: string,
+  end: string | null,
+  externalId: string | null,
+): NormalizedCityEvent | null {
+  const title = property(lines, "SUMMARY");
+  if (!title) return null;
+  const location = property(lines, "LOCATION") || source.venueName || source.name;
+  return {
+    source_event_id: cityEventFingerprint(source.id, externalId, title, start, location),
+    name: title,
+    description: property(lines, "DESCRIPTION"),
+    venue_name: location,
+    address: location,
+    city: source.city,
+    latitude: null,
+    longitude: null,
+    start_time: start,
+    end_time: end,
+    source: source.id,
+    source_name: source.name,
+    source_url: property(lines, "URL") || source.url,
+    image_url: property(lines, "IMAGE"),
+    ticket_status: null,
+  };
+}
 
-  for (const line of lines) {
+function expandIcsBlock(lines: string[], source: CityCalendarSource) {
+  const startProperty = propertyEntry(lines, "DTSTART");
+  if (!startProperty) return [] as NormalizedCityEvent[];
+  const startParts = parseCompactIcsParts(startProperty.value);
+  const startTimeZone = startProperty.params.TZID
+    || (startParts?.zulu ? "UTC" : source.timeZone)
+    || EASTERN_TIME_ZONE;
+  const startIso = parseIcsDate(startProperty.value, startTimeZone);
+  if (!startIso) return [] as NormalizedCityEvent[];
+
+  const endProperty = propertyEntry(lines, "DTEND");
+  const endParts = endProperty ? parseCompactIcsParts(endProperty.value) : null;
+  const endTimeZone = endProperty?.params.TZID || startTimeZone;
+  const endIso = endProperty ? parseIcsDate(endProperty.value, endTimeZone) : null;
+  const detachedIdentity = detachedOccurrenceIdentity(lines, source);
+  const rule = detachedIdentity ? null : parseRRule(property(lines, "RRULE"));
+
+  if (!rule || !startParts) {
+    const externalId = detachedIdentity || property(lines, "UID");
+    const event = normalizedIcsEvent(lines, source, startIso, endIso, externalId);
+    return event ? [event] : [];
+  }
+
+  const startCalendar = calendarDate(startParts);
+  const endCalendar = endParts ? calendarDate(endParts) : null;
+  const calendarDuration = endCalendar ? endCalendar.getTime() - startCalendar.getTime() : null;
+  const instantDuration = endIso ? new Date(endIso).getTime() - new Date(startIso).getTime() : null;
+  const excluded = exdateInstants(lines, source);
+  const uid = property(lines, "UID");
+  const events: NormalizedCityEvent[] = [];
+
+  for (const occurrence of recurrenceCalendarDates(startCalendar, startParts, rule, startTimeZone)) {
+    const occurrenceStart = isoFromCalendarDate(occurrence, startTimeZone, startParts.zulu);
+    if (!occurrenceStart) continue;
+    if (excluded.has(new Date(occurrenceStart).getTime())) continue;
+
+    let occurrenceEnd: string | null = null;
+    if (calendarDuration !== null && endParts) {
+      const endCalendarOccurrence = new Date(occurrence.getTime() + calendarDuration);
+      occurrenceEnd = isoFromCalendarDate(endCalendarOccurrence, endTimeZone, endParts.zulu);
+    } else if (instantDuration !== null) {
+      occurrenceEnd = new Date(new Date(occurrenceStart).getTime() + instantDuration).toISOString();
+    }
+
+    const event = normalizedIcsEvent(
+      lines,
+      source,
+      occurrenceStart,
+      occurrenceEnd,
+      recurrenceIdentity(uid, occurrenceStart),
+    );
+    if (event) events.push(event);
+  }
+
+  return events;
+}
+
+export function parseCityCalendarIcs(text: string, source: CityCalendarSource): NormalizedCityEvent[] {
+  const blocks: string[][] = [];
+  let current: string[] | null = null;
+  for (const line of unfoldIcs(text)) {
     if (line === "BEGIN:VEVENT") {
       current = [];
       continue;
     }
-
     if (line === "END:VEVENT") {
-      if (!current) continue;
-      const title = property(current, "SUMMARY");
-      const startProperty = propertyEntry(current, "DTSTART");
-      const start = startProperty
-        ? parseIcsDate(startProperty.value, startProperty.params.TZID || source.timeZone)
-        : null;
-
-      if (title && start) {
-        const location = property(current, "LOCATION") || source.venueName || source.name;
-        const endProperty = propertyEntry(current, "DTEND");
-        events.push({
-          source_event_id: cityEventFingerprint(
-            source.id,
-            occurrenceExternalId(current),
-            title,
-            start,
-            location,
-          ),
-          name: title,
-          description: property(current, "DESCRIPTION"),
-          venue_name: location,
-          address: location,
-          city: source.city,
-          latitude: null,
-          longitude: null,
-          start_time: start,
-          end_time: endProperty
-            ? parseIcsDate(
-              endProperty.value,
-              endProperty.params.TZID || startProperty?.params.TZID || source.timeZone,
-            )
-            : null,
-          source: source.id,
-          source_name: source.name,
-          source_url: property(current, "URL") || source.url,
-          image_url: property(current, "IMAGE"),
-          ticket_status: null,
-        });
-      }
-
+      if (current) blocks.push(current);
       current = null;
       continue;
     }
-
     if (current) current.push(line);
   }
 
-  return events;
+  const events = new Map<string, { event: NormalizedCityEvent; detached: boolean }>();
+  const cancelled = new Set<string>();
+
+  for (const block of blocks) {
+    const detachedIdentity = detachedOccurrenceIdentity(block, source);
+    if (String(property(block, "STATUS") || "").toUpperCase() === "CANCELLED" && detachedIdentity) {
+      const startProperty = propertyEntry(block, "DTSTART");
+      const startParts = startProperty ? parseCompactIcsParts(startProperty.value) : null;
+      const zone = startProperty?.params.TZID
+        || (startParts?.zulu ? "UTC" : source.timeZone)
+        || EASTERN_TIME_ZONE;
+      const start = startProperty ? parseIcsDate(startProperty.value, zone) : null;
+      const title = property(block, "SUMMARY") || "cancelled";
+      const venue = property(block, "LOCATION") || source.venueName || source.name;
+      if (start) cancelled.add(cityEventFingerprint(source.id, detachedIdentity, title, start, venue));
+      continue;
+    }
+
+    const detached = Boolean(detachedIdentity);
+    for (const event of expandIcsBlock(block, source)) {
+      if (cancelled.has(event.source_event_id)) continue;
+      const existing = events.get(event.source_event_id);
+      if (!existing || detached || !existing.detached) events.set(event.source_event_id, { event, detached });
+    }
+  }
+
+  return [...events.values()].map(value => value.event);
 }
 
 export function parseCityCalendarJsonLd(
