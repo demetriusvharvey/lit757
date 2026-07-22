@@ -38,7 +38,7 @@ jobs:
       - name: Verify official tourism production sources
         env:
           BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
-          REQUIRE_VISIT_HAMPTON: ${{ github.event_name != 'pull_request' }}
+          REQUIRE_VISIT_HAMPTON: "true"
         shell: bash
         run: |
           set -euo pipefail
@@ -79,8 +79,8 @@ jobs:
           assert payload.get("success") is True, json.dumps(payload)[:4000]
           by_kind = payload.get("byKind") or {}
           tourism = by_kind.get("tourism") or {}
-          assert int(tourism.get("registered") or 0) > 0, "No tourism source is registered"
-          assert int(tourism.get("successful") or 0) > 0, "No tourism source is healthy"
+          assert int(tourism.get("registered") or 0) >= 2, "VisitNorfolk and Visit Hampton must both be registered"
+          assert int(tourism.get("successful") or 0) >= 2, "VisitNorfolk and Visit Hampton must both be healthy"
           assert int(tourism.get("events") or 0) > 0, "Tourism sources returned no events"
 
           sources = payload.get("sources") or []
