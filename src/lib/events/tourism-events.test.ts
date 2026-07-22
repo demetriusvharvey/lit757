@@ -38,6 +38,7 @@ test("all-day tourism events use a stable local-noon representation", () => {
   assert.ok(event);
   assert.equal(event.start_time, "2026-07-20T12:00:00-04:00");
   assert.equal(event.end_time, null);
+  assert.equal(event.image_url, null);
 });
 
 test("ignores unrelated JavaScript arrays", () => {
