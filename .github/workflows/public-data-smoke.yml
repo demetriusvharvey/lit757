@@ -30,6 +30,7 @@ jobs:
           python - <<'PY'
           import json
           import os
+          import urllib.error
           import urllib.request
 
           base = os.environ["BASE_URL"].rstrip("/")
@@ -40,12 +41,19 @@ jobs:
                   url,
                   headers={"User-Agent": "BuzzPublicDataSmoke/1.0", "Accept": "application/json"},
               )
-              with urllib.request.urlopen(request, timeout=timeout) as response:
+              try:
+                  response = urllib.request.urlopen(request, timeout=timeout)
+              except urllib.error.HTTPError as error:
+                  body = error.read().decode("utf-8", errors="replace")
+                  raise AssertionError(f"{path} returned HTTP {error.code}: {body[:4000]}") from error
+              except Exception as error:
+                  raise AssertionError(f"{path} request failed: {error}") from error
+              with response:
                   payload = json.load(response)
                   if response.status != 200:
-                      raise AssertionError(f"{path} returned HTTP {response.status}")
+                      raise AssertionError(f"{path} returned HTTP {response.status}: {payload}")
                   if payload.get("success") is not True:
-                      raise AssertionError(f"{path} failed: {payload.get('error')}")
+                      raise AssertionError(f"{path} failed: {json.dumps(payload)[:4000]}")
                   return payload
 
           weather = get("/api/data/weather?city=Virginia%20Beach")
@@ -76,6 +84,10 @@ jobs:
               "Norfolk", "Chesapeake", "Portsmouth", "Hampton", "Newport News", "Suffolk"
           }
           city_health = calendars.get("cityHealth") or {}
+          print("City calendar health:", json.dumps(city_health, indent=2), flush=True)
+          print("Feed failures:", json.dumps([
+              feed for feed in calendars.get("feeds", []) if feed.get("status") != "ok"
+          ], indent=2), flush=True)
           assert expected_cities.issubset(set(city_health)), "One or more city calendar registries are missing"
           for city in expected_cities:
               assert int(city_health[city].get("successfulFeeds") or 0) > 0, f"{city} has no working official calendar feed"
