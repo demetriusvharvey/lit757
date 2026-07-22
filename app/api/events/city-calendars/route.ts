@@ -18,7 +18,8 @@ const db = createClient(
 function authorized(request: Request) {
   const secret = process.env.CRON_SECRET;
   if (!secret) return process.env.NODE_ENV !== "production";
-  return request.headers.get("authorization") === `Bearer ${secret}` || request.headers.get("x-cron-secret") === secret;
+  return request.headers.get("authorization") === `Bearer ${secret}`
+    || request.headers.get("x-cron-secret") === secret;
 }
 
 function databaseRow(event: NormalizedCityEvent) {
@@ -35,12 +36,21 @@ function databaseRow(event: NormalizedCityEvent) {
 }
 
 export async function GET(request: Request) {
-  if (!authorized(request)) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  if (!authorized(request)) {
+    return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  }
 
   const now = Date.now();
   const cutoff = now + 120 * 24 * 60 * 60 * 1000;
   const activeSources = CITY_CALENDAR_SOURCES.filter(source => source.enabled);
-  const summary = { fetched: 0, inserted: 0, updated: 0, skipped: 0, failed: 0 };
+  const summary = {
+    fetched: 0,
+    inserted: 0,
+    updated: 0,
+    cancelled: 0,
+    skipped: 0,
+    failed: 0,
+  };
   const results: Array<Record<string, unknown>> = [];
   const collected: NormalizedCityEvent[] = [];
 
@@ -48,25 +58,67 @@ export async function GET(request: Request) {
     try {
       const provider = createCityCalendarProvider(source);
       const events = (await provider.fetchEvents()).filter(event => {
+        if (event.cancelled) return true;
         const start = new Date(event.start_time).getTime();
-        return Number.isFinite(start) && start >= now - 6 * 60 * 60 * 1000 && start <= cutoff;
+        return Number.isFinite(start)
+          && start >= now - 6 * 60 * 60 * 1000
+          && start <= cutoff;
       });
       summary.fetched += events.length;
       collected.push(...events);
-      results.push({ source: source.id, city: source.city, format: source.format, status: "ok", fetched: events.length });
+      results.push({
+        source: source.id,
+        city: source.city,
+        format: source.format,
+        status: "ok",
+        fetched: events.length,
+        cancellations: events.filter(event => event.cancelled).length,
+      });
     } catch (error) {
       summary.failed += 1;
       const message = error instanceof Error ? error.message : "Unknown error";
-      console.error("City calendar ingestion failed", { source: source.id, city: source.city, error: message });
-      results.push({ source: source.id, city: source.city, format: source.format, status: "error", error: message });
+      console.error("City calendar ingestion failed", {
+        source: source.id,
+        city: source.city,
+        error: message,
+      });
+      results.push({
+        source: source.id,
+        city: source.city,
+        format: source.format,
+        status: "error",
+        error: message,
+      });
     }
   }
 
-  const deduped = [...new Map(collected.map(event => [event.source_event_id, event])).values()];
+  const deduped = [...new Map(
+    collected.map(event => [event.source_event_id, event]),
+  ).values()];
   summary.skipped += collected.length - deduped.length;
 
-  if (deduped.length) {
-    const ids = deduped.map(event => event.source_event_id);
+  const cancellations = deduped.filter(event => event.cancelled);
+  const activeEvents = deduped.filter(event => !event.cancelled);
+  summary.cancelled = cancellations.length;
+
+  if (cancellations.length) {
+    const cancelledIds = cancellations.map(event => event.source_event_id);
+    const { error: deleteError } = await db
+      .from("events")
+      .delete()
+      .in("source_event_id", cancelledIds);
+
+    if (deleteError) {
+      console.error("City calendar cancellation cleanup failed", deleteError.message);
+      return NextResponse.json(
+        { success: false, error: deleteError.message, summary, results },
+        { status: 500 },
+      );
+    }
+  }
+
+  if (activeEvents.length) {
+    const ids = activeEvents.map(event => event.source_event_id);
     const { data: existingRows, error: existingError } = await db
       .from("events")
       .select("source_event_id")
@@ -74,20 +126,28 @@ export async function GET(request: Request) {
 
     if (existingError) {
       console.error("City calendar existing-event lookup failed", existingError.message);
-      return NextResponse.json({ success: false, error: existingError.message, summary, results }, { status: 500 });
+      return NextResponse.json(
+        { success: false, error: existingError.message, summary, results },
+        { status: 500 },
+      );
     }
 
-    const existing = new Set((existingRows || []).map(row => String(row.source_event_id)));
-    summary.updated = deduped.filter(event => existing.has(event.source_event_id)).length;
-    summary.inserted = deduped.length - summary.updated;
+    const existing = new Set(
+      (existingRows || []).map(row => String(row.source_event_id)),
+    );
+    summary.updated = activeEvents.filter(event => existing.has(event.source_event_id)).length;
+    summary.inserted = activeEvents.length - summary.updated;
 
     const { error: upsertError } = await db
       .from("events")
-      .upsert(deduped.map(databaseRow), { onConflict: "source_event_id" });
+      .upsert(activeEvents.map(databaseRow), { onConflict: "source_event_id" });
 
     if (upsertError) {
       console.error("City calendar event upsert failed", upsertError.message);
-      return NextResponse.json({ success: false, error: upsertError.message, summary, results }, { status: 500 });
+      return NextResponse.json(
+        { success: false, error: upsertError.message, summary, results },
+        { status: 500 },
+      );
     }
   }
 
