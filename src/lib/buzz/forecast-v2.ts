@@ -144,7 +144,7 @@ export function passivePresenceEvidence(args: { passiveDevices: number; verified
   const verified = Math.max(0, Math.round(args.verifiedDevices));
   const points = Math.min(24, passive * 4 + verified * 7);
   const live = passive >= 3 || verified >= 2 || (passive >= 2 && verified >= 1);
-  const confidence = live && passive + verified >= 5 ? "high" : live ? "medium" : "low";
+  const confidence: "low" | "medium" | "high" = live && passive + verified >= 5 ? "high" : live ? "medium" : "low";
   const label = live
     ? `${passive + verified} independent phones nearby`
     : passive + verified > 0
