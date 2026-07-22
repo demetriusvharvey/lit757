@@ -1,7 +1,49 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { deflateRawSync } from "node:zlib";
 import { weatherActivityImpact } from "./nws";
-import { normalizeTripUpdates, normalizeVehiclePositions, parseCsv } from "./hrt";
+import { normalizeTripUpdates, normalizeVehiclePositions, parseCsv, readZipEntry } from "./hrt";
+
+function dataDescriptorZip(fileNameValue: string, contentValue: string) {
+  const fileName = Buffer.from(fileNameValue, "utf8");
+  const content = Buffer.from(contentValue, "utf8");
+  const compressed = deflateRawSync(content);
+
+  const local = Buffer.alloc(30);
+  local.writeUInt32LE(0x04034b50, 0);
+  local.writeUInt16LE(20, 4);
+  local.writeUInt16LE(0x08, 6);
+  local.writeUInt16LE(8, 8);
+  local.writeUInt16LE(fileName.length, 26);
+
+  const descriptor = Buffer.alloc(16);
+  descriptor.writeUInt32LE(0x08074b50, 0);
+  descriptor.writeUInt32LE(0, 4);
+  descriptor.writeUInt32LE(compressed.length, 8);
+  descriptor.writeUInt32LE(content.length, 12);
+
+  const centralOffset = local.length + fileName.length + compressed.length + descriptor.length;
+  const central = Buffer.alloc(46);
+  central.writeUInt32LE(0x02014b50, 0);
+  central.writeUInt16LE(20, 4);
+  central.writeUInt16LE(20, 6);
+  central.writeUInt16LE(0x08, 8);
+  central.writeUInt16LE(8, 10);
+  central.writeUInt32LE(0, 16);
+  central.writeUInt32LE(compressed.length, 20);
+  central.writeUInt32LE(content.length, 24);
+  central.writeUInt16LE(fileName.length, 28);
+  central.writeUInt32LE(0, 42);
+
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(1, 8);
+  end.writeUInt16LE(1, 10);
+  end.writeUInt32LE(central.length + fileName.length, 12);
+  end.writeUInt32LE(centralOffset, 16);
+
+  return Buffer.concat([local, fileName, compressed, descriptor, central, fileName, end]);
+}
 
 test("weather activity impact distinguishes storms and favorable weather", () => {
   const storm = weatherActivityImpact({
@@ -26,6 +68,12 @@ test("GTFS CSV parser supports quoted commas and escaped quotes", () => {
   assert.equal(rows.length, 2);
   assert.equal(rows[0].stop_name, "Main St, East");
   assert.equal(rows[1].stop_name, 'The "Hub"');
+});
+
+test("GTFS ZIP reader supports data descriptors using central-directory sizes", () => {
+  const content = "route_id,route_short_name\r\n20,Virginia Beach\r\n";
+  const archive = dataDescriptorZip("routes.txt", content);
+  assert.equal(readZipEntry(archive, "routes.txt"), content);
 });
 
 test("trip updates normalize arrival predictions", () => {
