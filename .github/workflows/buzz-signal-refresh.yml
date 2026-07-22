@@ -13,6 +13,18 @@ on:
         default: all
         type: choice
         options: [all, first-party, foot-traffic, commercial, forecast]
+      action:
+        description: BestTime action (use bootstrap for the first trial activation)
+        required: false
+        default: refresh
+        type: choice
+        options: [refresh, bootstrap]
+      besttime_limit:
+        description: Maximum BestTime venues to bootstrap or refresh
+        required: false
+        default: "25"
+        type: choice
+        options: ["5", "10", "25", "50"]
 
 permissions:
   contents: read
@@ -42,19 +54,71 @@ jobs:
   foot-traffic:
     if: github.event_name == 'workflow_dispatch' && (inputs.tier == 'all' || inputs.tier == 'foot-traffic') || github.event.schedule == '7,37 * * * *'
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     steps:
-      - name: Refresh mapped BestTime venues
+      - name: Bootstrap or refresh BestTime venues
         env:
           BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          ACTION: ${{ inputs.action || 'refresh' }}
+          LIMIT: ${{ inputs.besttime_limit || '50' }}
         run: |
           set -euo pipefail
           : "${BASE_URL:?Add BUZZ_PRODUCTION_URL as a GitHub Actions secret}"
           : "${CRON_SECRET:?Add CRON_SECRET as a GitHub Actions secret}"
-          curl --silent --show-error --fail-with-body --retry 2 --retry-all-errors --max-time 180 \
+          curl --silent --show-error --fail-with-body --retry 2 --retry-all-errors --max-time 240 \
             -H "Authorization: Bearer ${CRON_SECRET}" \
-            "${BASE_URL%/}/api/buzz/refresh?provider=besttime&limit=50"
+            "${BASE_URL%/}/api/buzz/refresh?provider=besttime&action=${ACTION}&limit=${LIMIT}" \
+            | tee besttime-refresh.json
+
+          python - <<'PY'
+          import json
+          import os
+
+          with open("besttime-refresh.json", encoding="utf-8") as source:
+              payload = json.load(source)
+
+          assert payload.get("success") is True, payload
+          results = payload.get("results") or []
+          result = next((item for item in results if item.get("provider") == "besttime"), None)
+          assert result is not None, payload
+
+          details = result.get("details") or []
+          skipped = [item for item in details if item.get("status") == "skipped"]
+          assert not skipped, skipped
+
+          attempted = int(result.get("attempted") or 0)
+          succeeded = int(result.get("succeeded") or 0)
+          failed = int(result.get("failed") or 0)
+          action = os.environ.get("ACTION", "refresh")
+
+          if action == "bootstrap":
+              assert attempted > 0, "BestTime bootstrap found no eligible venues"
+              assert succeeded > 0, f"BestTime bootstrap produced no successful venue mappings: {result}"
+          elif attempted > 0:
+              assert succeeded > 0, f"Every mapped BestTime venue failed to refresh: {result}"
+
+          coverage = {}
+          for item in details:
+              status = str(item.get("status") or "unknown")
+              coverage[status] = coverage.get(status, 0) + 1
+
+          print(json.dumps({
+              "action": action,
+              "attempted": attempted,
+              "succeeded": succeeded,
+              "failed": failed,
+              "coverage": coverage,
+          }, indent=2))
+          PY
+      - name: Upload BestTime activation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: besttime-refresh-${{ github.run_id }}
+          path: besttime-refresh.json
+          if-no-files-found: warn
+          retention-days: 7
 
   commercial-demand:
     if: github.event_name == 'workflow_dispatch' && (inputs.tier == 'all' || inputs.tier == 'commercial') || github.event.schedule == '19 * * * *'
