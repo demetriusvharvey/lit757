@@ -3,6 +3,7 @@ import {
   fetchAllInstitutionCalendars,
 } from "./institution-calendars";
 import { fetchSimpleviewRssCalendar } from "./simpleview-rss";
+import type { NormalizedCityEvent } from "./city-calendars";
 
 export const VISIT_NEWPORT_NEWS_SOURCE = {
   id: "visit_newport_news_official",
@@ -15,11 +16,56 @@ export const VISIT_NEWPORT_NEWS_SOURCE = {
   coverageNote: "Official destination calendar via its public RSS feed and structured first-party event detail pages.",
 };
 
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: "&",
+  apos: "'",
+  quot: '"',
+  nbsp: " ",
+  eacute: "é",
+  Eacute: "É",
+  aacute: "á",
+  Aacute: "Á",
+  iacute: "í",
+  Iacute: "Í",
+  oacute: "ó",
+  Oacute: "Ó",
+  uacute: "ú",
+  Uacute: "Ú",
+  ntilde: "ñ",
+  Ntilde: "Ñ",
+  rsquo: "’",
+  lsquo: "‘",
+  rdquo: "”",
+  ldquo: "“",
+  ndash: "–",
+  mdash: "—",
+};
+
+function cleanDisplayText(value: string | null) {
+  if (!value) return value;
+  return value
+    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code: string) => String.fromCodePoint(Number.parseInt(code, 16)))
+    .replace(/&([a-zA-Z]+);/g, (entity, name: string) => NAMED_ENTITIES[name] ?? entity)
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cleanEventDisplayFields(event: NormalizedCityEvent): NormalizedCityEvent {
+  return {
+    ...event,
+    name: cleanDisplayText(event.name) || event.name,
+    description: cleanDisplayText(event.description),
+    venue_name: cleanDisplayText(event.venue_name) || event.venue_name,
+    address: cleanDisplayText(event.address),
+  };
+}
+
 async function fetchVisitNewportNewsSource() {
   const fetchedAt = new Date().toISOString();
   try {
     const events = dedupeInstitutionEvents(
-      await fetchSimpleviewRssCalendar(VISIT_NEWPORT_NEWS_SOURCE),
+      (await fetchSimpleviewRssCalendar(VISIT_NEWPORT_NEWS_SOURCE)).map(cleanEventDisplayFields),
     );
     return {
       source: VISIT_NEWPORT_NEWS_SOURCE,
