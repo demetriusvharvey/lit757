@@ -5,7 +5,7 @@ export type CityCalendarSource = {
   name: string;
   city: string;
   url: string;
-  format: "ics" | "html-jsonld" | "unverified";
+  format: "ics" | "html-jsonld" | "vb-city-html" | "unverified";
   enabled: boolean;
   timeZone?: string;
   venueName?: string;
@@ -35,16 +35,22 @@ export type CityCalendarProvider = {
   fetchEvents(): Promise<NormalizedCityEvent[]>;
 };
 
+type VirginiaBeachListingEvent = {
+  name: string;
+  date: string;
+  url: string;
+};
+
 export const CITY_CALENDAR_SOURCES: CityCalendarSource[] = [
   {
     id: "virginia_beach_official",
-    name: "Visit Virginia Beach Events",
+    name: "City of Virginia Beach Event Calendar",
     city: "Virginia Beach",
-    url: "https://www.visitvirginiabeach.com/events/",
-    format: "html-jsonld",
+    url: "https://virginiabeach.gov/connect/events",
+    format: "vb-city-html",
     enabled: true,
     timeZone: "America/New_York",
-    maxDetailPages: 20,
+    maxDetailPages: 30,
   },
   { id: "norfolk_official", name: "Norfolk Official Events", city: "Norfolk", url: "https://www.norfolk.gov/calendar.aspx", format: "unverified", enabled: false, timeZone: "America/New_York" },
   { id: "chesapeake_official", name: "Chesapeake Official Events", city: "Chesapeake", url: "https://www.cityofchesapeake.net/Calendar.aspx", format: "unverified", enabled: false, timeZone: "America/New_York" },
@@ -181,6 +187,7 @@ function decodeHtml(value: string) {
     .replace(/&amp;/gi, "&")
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">")
+    .replace(/&nbsp;/gi, " ")
     .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
     .replace(/&#x([0-9a-f]+);/gi, (_, code: string) => String.fromCodePoint(Number.parseInt(code, 16)));
 }
@@ -189,6 +196,19 @@ function stripHtml(value: unknown) {
   if (typeof value !== "string") return null;
   const cleaned = decodeHtml(value.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
   return cleaned || null;
+}
+
+function htmlLines(value: string) {
+  return decodeHtml(
+    value
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
+      .replace(/<(?:br\s*\/?|\/p|\/div|\/li|\/h[1-6])>/gi, "\n")
+      .replace(/<[^>]+>/g, " "),
+  )
+    .split(/\n+/)
+    .map(line => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -298,6 +318,57 @@ function normalizeJsonLdEvent(event: Record<string, unknown>, source: CityCalend
   };
 }
 
+function sectionHtml(html: string, headingPattern: string) {
+  const heading = new RegExp(`<h[1-6][^>]*>[\\s\\S]*?${headingPattern}[\\s\\S]*?<\\/h[1-6]>`, "i").exec(html);
+  if (!heading || heading.index === undefined) return null;
+  const rest = html.slice(heading.index + heading[0].length);
+  const nextHeading = rest.search(/<h[1-6]\b/i);
+  return nextHeading >= 0 ? rest.slice(0, nextHeading) : rest;
+}
+
+function markerSectionHtml(html: string, markerPattern: string) {
+  const marker = new RegExp(markerPattern, "i").exec(html);
+  if (!marker || marker.index === undefined) return null;
+  const rest = html.slice(marker.index + marker[0].length);
+  const nextHeading = rest.search(/<h[1-6]\b/i);
+  return nextHeading >= 0 ? rest.slice(0, nextHeading) : rest;
+}
+
+function clockParts(hourValue: string, minuteValue: string | undefined, meridiem: string) {
+  let hour = Number(hourValue) % 12;
+  if (meridiem.toLowerCase() === "p") hour += 12;
+  return { hour, minute: Number(minuteValue || 0) };
+}
+
+function eventTimesFromText(date: string, text: string, timeZone: string) {
+  const [year, month, day] = date.split("-").map(Number);
+  const range = text.match(/(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\.?\s*[-–]\s*(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\.?/i);
+  if (range) {
+    const startClock = clockParts(range[1], range[2], range[3]);
+    const endClock = clockParts(range[4], range[5], range[6]);
+    const start = zonedDateTimeToIso(year, month, day, startClock.hour, startClock.minute, 0, timeZone);
+    let end = zonedDateTimeToIso(year, month, day, endClock.hour, endClock.minute, 0, timeZone);
+    if (start && end && new Date(end).getTime() < new Date(start).getTime()) {
+      end = new Date(new Date(end).getTime() + 24 * 60 * 60 * 1000).toISOString();
+    }
+    return { start, end };
+  }
+
+  const single = text.match(/(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\.?/i);
+  if (single) {
+    const clock = clockParts(single[1], single[2], single[3]);
+    return {
+      start: zonedDateTimeToIso(year, month, day, clock.hour, clock.minute, 0, timeZone),
+      end: null,
+    };
+  }
+
+  return {
+    start: zonedDateTimeToIso(year, month, day, 0, 0, 0, timeZone),
+    end: null,
+  };
+}
+
 export function cityEventFingerprint(source: string, externalId: string | null, title: string, start: string, venue: string) {
   const key = externalId || `${title.trim().toLowerCase()}|${start}|${venue.trim().toLowerCase()}`;
   return `${source}_${createHash("sha256").update(key).digest("hex").slice(0, 32)}`;
@@ -383,6 +454,73 @@ export function extractEventDetailLinks(html: string, source: CityCalendarSource
   return [...new Set(links)];
 }
 
+export function parseVirginiaBeachEventListing(html: string, source: CityCalendarSource) {
+  const base = new URL(source.url);
+  const events: VirginiaBeachListingEvent[] = [];
+  const expression = /<a\b[^>]*href=["']([^"']*\/connect\/events\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+
+  for (const match of html.matchAll(expression)) {
+    const name = stripHtml(match[2]);
+    if (!name) continue;
+    try {
+      const url = new URL(decodeHtml(match[1]), base);
+      if (url.origin !== base.origin) continue;
+      const date = url.pathname.match(/\/(\d{4}-\d{2}-\d{2})\/?$/)?.[1];
+      if (!date) continue;
+      url.hash = "";
+      events.push({ name, date, url: url.toString() });
+    } catch {
+      // Ignore malformed event links.
+    }
+  }
+
+  return [...new Map(events.map(event => [event.url, event])).values()];
+}
+
+export function parseVirginiaBeachEventDetail(
+  html: string,
+  listing: VirginiaBeachListingEvent,
+  source: CityCalendarSource,
+): NormalizedCityEvent {
+  const title = stripHtml(html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1]) || listing.name;
+  const dateSection = sectionHtml(html, "Date\\s*(?:&amp;|&)\\s*Time");
+  const dateText = dateSection ? htmlLines(dateSection).join(" ") : "";
+  const times = eventTimesFromText(listing.date, dateText, source.timeZone || "America/New_York");
+  const locationSection = sectionHtml(html, "Location");
+  const locationLines = locationSection ? htmlLines(locationSection).slice(0, 4) : [];
+  const venueName = locationLines[0] || source.venueName || source.name;
+  const address = locationLines.length > 1 ? locationLines.slice(1).join(", ") : null;
+  const descriptionSection = markerSectionHtml(html, "Event\\s+Details\\s*:");
+  const description = descriptionSection ? stripHtml(descriptionSection) : null;
+  const start = times.start || zonedDateTimeToIso(
+    Number(listing.date.slice(0, 4)),
+    Number(listing.date.slice(5, 7)),
+    Number(listing.date.slice(8, 10)),
+    0,
+    0,
+    0,
+    source.timeZone || "America/New_York",
+  )!;
+
+  return {
+    source_event_id: cityEventFingerprint(source.id, listing.url, title, start, venueName),
+    name: title,
+    description,
+    venue_name: venueName,
+    address,
+    city: source.city,
+    latitude: null,
+    longitude: null,
+    start_time: start,
+    end_time: times.end,
+    source: source.id,
+    source_name: source.name,
+    source_url: listing.url,
+    image_url: null,
+    ticket_status: null,
+  };
+}
+
 async function fetchText(url: string, headers: Record<string, string>, timeoutMs = 12_000) {
   const response = await fetch(url, {
     cache: "no-store",
@@ -414,6 +552,20 @@ function datedListingUrl(source: CityCalendarSource) {
   url.searchParams.set("sort", "date");
   url.searchParams.set("skip", "0");
   return url.toString();
+}
+
+function monthlyListingUrls(source: CityCalendarSource) {
+  const start = new Date();
+  const end = new Date(Date.now() + 120 * 24 * 60 * 60 * 1000);
+  const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+  const urls: string[] = [];
+  while (cursor <= end) {
+    const url = new URL(source.url);
+    url.searchParams.set("date", `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}`);
+    urls.push(url.toString());
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  return urls;
 }
 
 export function createIcsCityCalendarProvider(source: CityCalendarSource): CityCalendarProvider {
@@ -464,7 +616,53 @@ export function createHtmlJsonLdCityCalendarProvider(source: CityCalendarSource)
   };
 }
 
+export function createVirginiaBeachCityCalendarProvider(source: CityCalendarSource): CityCalendarProvider {
+  return {
+    source,
+    async fetchEvents() {
+      const listingPages = await mapLimit(monthlyListingUrls(source), 3, url => fetchText(url, HTML_HEADERS, 12_000));
+      const listings = [...new Map(
+        listingPages.flatMap(html => parseVirginiaBeachEventListing(html, source)).map(event => [event.url, event]),
+      ).values()].slice(0, source.maxDetailPages || 30);
+
+      if (!listings.length) throw new Error("Virginia Beach calendar returned no dated event links");
+
+      return mapLimit(listings, 5, async listing => {
+        try {
+          const html = await fetchText(listing.url, HTML_HEADERS, 8_000);
+          return parseVirginiaBeachEventDetail(html, listing, source);
+        } catch (error) {
+          console.warn("Virginia Beach event detail fetch failed", {
+            url: listing.url,
+            error: error instanceof Error ? error.message : "Unknown error",
+          });
+          const [year, month, day] = listing.date.split("-").map(Number);
+          const start = zonedDateTimeToIso(year, month, day, 0, 0, 0, source.timeZone || "America/New_York")!;
+          return {
+            source_event_id: cityEventFingerprint(source.id, listing.url, listing.name, start, source.name),
+            name: listing.name,
+            description: null,
+            venue_name: source.name,
+            address: null,
+            city: source.city,
+            latitude: null,
+            longitude: null,
+            start_time: start,
+            end_time: null,
+            source: source.id,
+            source_name: source.name,
+            source_url: listing.url,
+            image_url: null,
+            ticket_status: null,
+          };
+        }
+      });
+    },
+  };
+}
+
 export function createCityCalendarProvider(source: CityCalendarSource): CityCalendarProvider {
+  if (source.format === "vb-city-html") return createVirginiaBeachCityCalendarProvider(source);
   if (source.format === "html-jsonld") return createHtmlJsonLdCityCalendarProvider(source);
   if (source.format === "ics") return createIcsCityCalendarProvider(source);
   throw new Error(`City calendar format is not verified for ${source.id}`);
