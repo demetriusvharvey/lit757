@@ -3,6 +3,12 @@ import { createClient } from "@supabase/supabase-js";
 import { getVenueImage } from "../../../src/lib/venue-image";
 import { ACTIVITY_DISTRICTS, distanceMiles, type ActivityDistrict } from "../../../src/lib/buzz/districts";
 import { clamp, openHoursAdjustment, passivePresenceEvidence, trafficEvidence } from "../../../src/lib/buzz/forecast-v2";
+import {
+  loadPublicActivityContext,
+  transitEvidenceForDistrict,
+  weatherEvidenceForVenue,
+  type SupportingEvidence,
+} from "../../../src/lib/integrations/public-context";
 
 export const dynamic = "force-dynamic";
 
@@ -36,12 +42,13 @@ type TrafficRow = {
   metadata?: Record<string, unknown> | null;
 };
 type ScoreFactor = { family?: string; source?: string; label?: string; points?: number };
+type Confidence = "low" | "medium" | "high";
 type ScoreRow = {
   venue_id: string;
   score: number;
   label: string;
   score_mode: "live" | "forecast";
-  confidence: "low" | "medium" | "high";
+  confidence: Confidence;
   version: string;
   computed_at: string;
   expires_at: string;
@@ -79,6 +86,10 @@ function kindFor(text: string) {
   if (/bar|brew|cocktail|wine|pub|club|dj|nightlife|lounge|music/.test(text)) return "nightlife";
   if (/park|trail|beach|garden|outdoor|museum|shopping|mall|market|arcade|bowling|golf|zoo|aquarium|theater|theatre|comedy/.test(text)) return "activity";
   return "other";
+}
+
+function outdoorVenue(text: string) {
+  return /park|trail|beach|garden|outdoor|boardwalk|golf|zoo|festival|amphitheater|amphitheatre/.test(text);
 }
 
 function categoryMatch(category: string, kind: string, text: string, hasEvent: boolean) {
@@ -157,10 +168,10 @@ function nearestDistrict(lat: number, lng: number): ActivityDistrict | null {
   return match?.district || null;
 }
 
-function districtStatus(trafficPoints: number, stats: DistrictEventStats, nearbyPhones: number) {
-  if (nearbyPhones >= 5 || (trafficPoints >= 9 && (stats.active > 0 || stats.soon > 1))) return "Hot";
-  if (nearbyPhones >= 3 || trafficPoints >= 6 || stats.active > 1) return "Busy";
-  if (trafficPoints >= 3 || stats.soon > 0) return "Building";
+function districtStatus(mobilityPoints: number, stats: DistrictEventStats, nearbyPhones: number) {
+  if (nearbyPhones >= 5 || (mobilityPoints >= 9 && (stats.active > 0 || stats.soon > 1))) return "Hot";
+  if (nearbyPhones >= 3 || mobilityPoints >= 6 || stats.active > 1) return "Busy";
+  if (mobilityPoints >= 3 || stats.soon > 0) return "Building";
   return "Calm";
 }
 
@@ -186,6 +197,14 @@ function chooseEvent(events: EventRow[], reference: Date) {
   })[0] || null;
 }
 
+function neutralEvidence(): SupportingEvidence {
+  return { available: false, points: 0, cap: null, label: null, confidencePenalty: false, metadata: {} };
+}
+
+function lowerConfidence(confidence: Confidence): Confidence {
+  return confidence === "high" ? "medium" : "low";
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const lat = numberParam(url.searchParams.get("lat"));
@@ -200,13 +219,17 @@ export async function GET(request: Request) {
   const eventEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
   const presenceStart = new Date(now.getTime() - 30 * 60 * 1000).toISOString();
 
-  const [venueResult, eventResult, mappingResult, presenceResult, scoreResult, trafficResult] = await Promise.all([
+  const [venueResult, eventResult, mappingResult, presenceResult, scoreResult, trafficResult, publicContext] = await Promise.all([
     db.from("venues").select("id,name,city,address,lat,lng,type,category,ai_score,ai_summary,google_rating,google_place_id,photo_source,phone,website,hours,enriched_at").limit(2500),
     db.from("events").select("id,name,venue_name,start_time,end_time,ticket_status,source_url").gte("start_time", eventStart).lte("start_time", eventEnd).order("start_time").limit(1800),
     db.from("buzz_provider_events").select("event_id,venue_id").not("venue_id", "is", null).limit(4000),
     db.from("venue_live_reports").select("venue_id,device_id,report_type,report_value").in("report_type", ["nearby_presence", "passive_presence"]).gte("created_at", presenceStart).limit(5000),
     db.from("buzz_score_snapshots").select("venue_id,score,label,score_mode,confidence,version,computed_at,expires_at,evidence_age_minutes,source_families,explanation,factors").gt("expires_at", now.toISOString()).limit(3000),
     db.from("buzz_signal_snapshots").select("source,value,observed_at,expires_at,metadata").like("source", "tomtom:%").gt("expires_at", now.toISOString()).order("observed_at", { ascending: false }).limit(1000),
+    loadPublicActivityContext().catch(error => {
+      console.error("Public weather/transit context unavailable", error instanceof Error ? error.message : error);
+      return null;
+    }),
   ]);
 
   if (venueResult.error) return NextResponse.json({ success: false, error: venueResult.error.message }, { status: 500 });
@@ -302,6 +325,12 @@ export async function GET(request: Request) {
     const districtEventStats = district ? (districtEvents.get(district.id) || { active: 0, soon: 0, total: 0 }) : { active: 0, soon: 0, total: 0 };
     const spilloverMultiplier = baseKind === "food" || baseKind === "nightlife" ? 1 : 0.5;
     const areaEventPoints = Math.round(Math.min(7, districtEventStats.active * 3 + districtEventStats.soon * 1.5) * spilloverMultiplier);
+    const weatherEvidence = publicContext
+      ? weatherEvidenceForVenue(publicContext, venueLat, venueLng, outdoorVenue(text))
+      : neutralEvidence();
+    const transitEvidence = publicContext
+      ? transitEvidenceForDistrict(publicContext, district?.id || null)
+      : neutralEvidence();
 
     const group = presence.get(venue.id) || { passive: new Set<string>(), verified: new Set<string>() };
     const phoneEvidence = passivePresenceEvidence({ passiveDevices: group.passive.size, verifiedDevices: group.verified.size });
@@ -317,7 +346,9 @@ export async function GET(request: Request) {
       peakEvidence.points +
       hoursEvidence.points +
       areaTraffic.points +
-      areaEventPoints
+      areaEventPoints +
+      weatherEvidence.points +
+      transitEvidence.points
     );
 
     const live = snapshot?.score_mode === "live" || phoneEvidence.live;
@@ -328,32 +359,40 @@ export async function GET(request: Request) {
       hoursEvidence.open === true,
       areaTraffic.points >= 3,
       areaEventPoints >= 3,
+      transitEvidence.points >= 2,
       providerSupport >= 8,
       phoneEvidence.points >= 4,
     ].filter(Boolean).length;
 
     if (hoursEvidence.cap !== null) buzzScore = Math.min(buzzScore, hoursEvidence.cap);
+    if (weatherEvidence.cap !== null) buzzScore = Math.min(buzzScore, weatherEvidence.cap);
     if (!live) {
       const stronglySupported = evidenceCount >= 3 && hoursEvidence.open !== false;
       buzzScore = Math.min(buzzScore, stronglySupported ? 84 : evidenceCount >= 2 ? 76 : 68);
     }
     buzzScore = clamp(buzzScore, 0, 100);
 
-    const confidence = live
+    let confidence: Confidence = live
       ? snapshot?.confidence || phoneEvidence.confidence
       : evidenceCount >= 4 && areaTraffic.baselineReady ? "high"
         : evidenceCount >= 2 ? "medium"
           : "low";
+    if (!live && (weatherEvidence.confidencePenalty || transitEvidence.confidencePenalty)) {
+      confidence = lowerConfidence(confidence);
+    }
     const scoreMode = live ? "live" : "forecast";
 
     const explanationParts: string[] = [];
     if (hoursEvidence.open === false) explanationParts.push(hoursEvidence.label || "Closed now");
+    if (weatherEvidence.label && weatherEvidence.points < 0) explanationParts.push(weatherEvidence.label);
     if (phoneEvidence.label) explanationParts.push(phoneEvidence.label);
     if (eventEvidence.active) explanationParts.push(`${event?.name || "Event"} happening now`);
     else if (eventEvidence.soon) explanationParts.push(`${event?.name || "Event"} starts soon`);
     if (ticketEvidence.label) explanationParts.push(ticketEvidence.label);
     if (areaTraffic.label && district) explanationParts.push(`${district.shortName}: ${areaTraffic.label.toLowerCase()}`);
+    if (transitEvidence.label && transitEvidence.points !== 0) explanationParts.push(transitEvidence.label);
     if (!eventEvidence.active && districtEventStats.active > 0) explanationParts.push(`${districtEventStats.active} nearby event${districtEventStats.active === 1 ? "" : "s"} happening`);
+    if (weatherEvidence.label && weatherEvidence.points > 0) explanationParts.push(weatherEvidence.label);
     if (hoursEvidence.open === true && peakEvidence.label) explanationParts.push(peakEvidence.label);
     else if (hoursEvidence.open === true && !eventEvidence.active) explanationParts.push("Open now");
     const trendLabel = explanationParts.slice(0, 3).join(" · ") || "Conservative forecast; no strong activity signal yet";
@@ -367,6 +406,7 @@ export async function GET(request: Request) {
       lat: venueLat,
       lng: venueLng,
     });
+    const districtMobilityPoints = areaTraffic.points + Math.max(0, transitEvidence.points);
 
     return [{
       id: venue.id,
@@ -389,10 +429,14 @@ export async function GET(request: Request) {
         id: district.id,
         name: district.name,
         shortName: district.shortName,
-        status: districtStatus(areaTraffic.points, districtEventStats, phoneEvidence.passive + phoneEvidence.verified),
+        status: districtStatus(districtMobilityPoints, districtEventStats, phoneEvidence.passive + phoneEvidence.verified),
         traffic: Math.round(areaTraffic.raw),
         trafficBaseline: areaTraffic.baseline,
         trafficAnomaly: areaTraffic.anomaly,
+        transitArrivals30Minutes: Number(transitEvidence.metadata.arrivals30Minutes || 0),
+        transitArrivals60Minutes: Number(transitEvidence.metadata.arrivals60Minutes || 0),
+        transitDelayMinutes: transitEvidence.metadata.averageDelayMinutes ?? null,
+        transitDegraded: transitEvidence.metadata.degraded === true,
         eventsActive: districtEventStats.active,
         eventsSoon: districtEventStats.soon,
       } : null,
@@ -405,7 +449,7 @@ export async function GET(request: Request) {
         updatedAt: snapshot?.computed_at || now.toISOString(),
         expiresAt: snapshot?.expires_at || null,
         evidenceAgeMinutes: snapshot?.evidence_age_minutes ?? null,
-        scoreVersion: "buzz-v2-autonomous-forecast",
+        scoreVersion: "buzz-v2.1-public-context",
         sourceFamilies: [...new Set([
           ...(snapshot?.source_families || []),
           ...(district ? ["mobility"] : []),
@@ -413,6 +457,8 @@ export async function GET(request: Request) {
           ...(peakEvidence.points ? ["expected_peak"] : []),
           ...(hoursEvidence.open !== null ? ["operating_hours"] : []),
           ...(phoneEvidence.points ? ["passive_presence"] : []),
+          ...(weatherEvidence.available ? ["weather"] : []),
+          ...(transitEvidence.available ? ["public_transit"] : []),
         ])],
         explanation: trendLabel,
         factors: {
@@ -427,6 +473,10 @@ export async function GET(request: Request) {
           openHoursPoints: hoursEvidence.points,
           areaTrafficPoints: areaTraffic.points,
           areaEventPoints,
+          weatherPoints: weatherEvidence.points,
+          weather: weatherEvidence.metadata,
+          transitPoints: transitEvidence.points,
+          transit: transitEvidence.metadata,
           districtTraffic: Math.round(areaTraffic.raw),
           districtTrafficBaseline: areaTraffic.baseline,
           districtTrafficAnomaly: areaTraffic.anomaly,
@@ -454,8 +504,17 @@ export async function GET(request: Request) {
   return NextResponse.json({
     success: true,
     generatedAt: now.toISOString(),
-    scoreVersion: "buzz-v2-autonomous-forecast",
-    scoreNotice: "Buzz works without votes using open hours, venue patterns, mapped events, tickets, abnormal area traffic, provider signals, and passive nearby phones. Votes only verify and calibrate the forecast.",
+    scoreVersion: "buzz-v2.1-public-context",
+    scoreNotice: "Buzz combines open hours, venue patterns, mapped events, tickets, abnormal area traffic, cached weather, HRT arrivals, provider signals, and passive nearby phones. Weather and transit only adjust forecasts and can never prove a venue is Live.",
+    supportingContext: publicContext ? {
+      generatedAt: publicContext.generatedAt,
+      availability: publicContext.availability,
+      errors: publicContext.errors,
+    } : {
+      generatedAt: null,
+      availability: { weather: false, hrtStatic: false, hrtRealtime: false, hrtVehiclePositions: false },
+      errors: { weather: ["Public context unavailable"], hrtStatic: null, hrtRealtime: null },
+    },
     scope,
     resultCount: ranked.length,
     picks: venues.slice(0, 40),
