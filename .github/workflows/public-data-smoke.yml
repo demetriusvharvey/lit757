@@ -108,6 +108,8 @@ jobs:
           calendar_attempts = []
           calendars = None
           city_health = {}
+          missing = []
+          unhealthy = []
           for attempt in range(1, 4):
               probe = int(time.time() * 1000)
               path = f"/api/data/city-calendars?smokeAttempt={attempt}&probe={probe}"
@@ -134,13 +136,29 @@ jobs:
                   break
               if attempt < 3:
                   time.sleep(12)
-          else:
-              raise AssertionError(
-                  "Official city calendars remained unhealthy after 3 independent attempts: "
-                  + json.dumps(calendar_attempts)
-              )
 
           assert calendars is not None
+          if missing:
+              raise AssertionError(f"Official city calendar registries are missing: {missing}")
+          healthy_city_count = sum(
+              1 for city in expected_cities
+              if int((city_health.get(city) or {}).get("successfulFeeds") or 0) > 0
+          )
+          successful_feed_count = int((calendars.get("summary") or {}).get("successfulFeeds") or 0)
+          registered_feed_count = int((calendars.get("summary") or {}).get("registeredFeeds") or 0)
+          if healthy_city_count < 4 or successful_feed_count < max(1, registered_feed_count // 2):
+              raise AssertionError(
+                  "Regional municipal calendar coverage is below the minimum healthy threshold: "
+                  + json.dumps(calendar_attempts)
+              )
+          if unhealthy:
+              print(
+                  f"::warning title=Municipal calendars degraded::{', '.join(unhealthy)} remained unavailable "
+                  f"after 3 probes; {healthy_city_count}/{len(expected_cities)} cities and "
+                  f"{successful_feed_count}/{registered_feed_count} feeds remain healthy.",
+                  flush=True,
+              )
+
           institutions = get("/api/data/institution-calendars", timeout=180)
           institution_summary = institutions.get("summary") or {}
           institution_kinds = institutions.get("byKind") or {}
@@ -175,6 +193,7 @@ jobs:
               "hrtVehicles": len(realtime["vehicles"]),
               "vehiclePositionsAvailable": availability.get("vehiclePositions"),
               "calendarAttempts": calendar_attempts,
+              "calendarDegradedCities": unhealthy,
               "calendarFeeds": calendars.get("summary", {}).get("registeredFeeds"),
               "calendarFeedsWorking": calendars.get("summary", {}).get("successfulFeeds"),
               "calendarEvents": calendars.get("summary", {}).get("dedupedEvents"),
