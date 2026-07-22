@@ -15,7 +15,7 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     steps:
       - name: Ingest Hampton Roads city calendars
         env:
@@ -27,6 +27,13 @@ jobs:
           : "${CRON_SECRET:?Add CRON_SECRET as a GitHub Actions secret}"
           BASE_URL="${BASE_URL%/}"
 
+          echo "Syncing Virginia Beach official calendar"
           curl --silent --show-error --fail-with-body --retry 2 --max-time 90 \
             -H "Authorization: Bearer ${CRON_SECRET}" \
             "${BASE_URL}/api/events/city-calendars"
+
+          echo
+          echo "Syncing Norfolk, Chesapeake, Portsmouth, Hampton, Newport News, and Suffolk calendars"
+          curl --silent --show-error --fail-with-body --retry 2 --max-time 120 \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${BASE_URL}/api/events/civicplus-calendars"
