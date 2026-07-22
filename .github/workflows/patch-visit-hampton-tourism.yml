@@ -55,3 +55,5 @@ jobs:
           git add src/lib/events/institution-calendars.ts
           git commit -m "Add Visit Hampton official tourism calendar"
           git push origin HEAD:feature/visit-hampton-tourism
+
+# Retriggered after the pull request opened so GitHub registers the branch workflow.
