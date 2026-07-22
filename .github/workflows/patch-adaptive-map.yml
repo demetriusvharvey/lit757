@@ -1,0 +1,372 @@
+name: Patch adaptive map experience
+
+on:
+  push:
+    branches: [feature/adaptive-map-heat-hubs]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/adaptive-map-heat-hubs
+          fetch-depth: 0
+      - name: Add daypart UI, vibes, clusters, and stronger rings
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('app/buzz-map-app.tsx')
+          text = path.read_text()
+
+          invite_import = '''import {
+            buildInviteCrewText,
+            buildInviteCrewUrl,
+            buildStoryCardUrl,
+          } from "../src/lib/invite-the-crew";'''
+          adaptive_import = '''import {
+            contextualVibe,
+            discoveryDaypart,
+            orderedDiscoveryCategories,
+            type DiscoveryDaypart,
+          } from "../src/lib/adaptive-discovery";'''
+          if adaptive_import not in text:
+              if invite_import not in text:
+                  raise SystemExit('Invite helper import anchor not found')
+              text = text.replace(invite_import, invite_import + '\n' + adaptive_import, 1)
+
+          state_anchor = '''  const [mapZoom, setMapZoom] = useState(8.8);
+            const [listExpanded, setListExpanded] = useState(false);'''
+          state_replacement = '''  const [mapZoom, setMapZoom] = useState(8.8);
+            const [daypart, setDaypart] = useState<DiscoveryDaypart>(() => discoveryDaypart());
+            const [listExpanded, setListExpanded] = useState(false);'''
+          if state_anchor not in text:
+              raise SystemExit('Daypart state anchor not found')
+          text = text.replace(state_anchor, state_replacement, 1)
+
+          lifecycle_anchor = '''  }, [loadNearby]);
+
+            const filtered = useMemo(() => {'''
+          lifecycle_replacement = '''  }, [loadNearby]);
+
+            useEffect(() => {
+              const syncDaypart = () => setDaypart(discoveryDaypart());
+              syncDaypart();
+              const timer = window.setInterval(syncDaypart, 60_000);
+              return () => window.clearInterval(timer);
+            }, []);
+
+            const orderedCategories = useMemo(() => orderedDiscoveryCategories(daypart)
+              .map(label => categories.find(([candidate]) => candidate === label))
+              .filter((item): item is typeof categories[number] => Boolean(item)), [daypart]);
+
+            const filtered = useMemo(() => {'''
+          if lifecycle_anchor not in text:
+              raise SystemExit('Daypart lifecycle anchor not found')
+          text = text.replace(lifecycle_anchor, lifecycle_replacement, 1)
+
+          filtered_anchor = '''  }, [venues, active, query]);
+
+            const selectVenue = useCallback'''
+          filtered_replacement = '''  }, [venues, active, query]);
+
+            const vibeFor = useCallback((venue: Venue) => contextualVibe({
+              category: categoryFor(venue),
+              type: venue.type || venue.kind,
+              score: score(venue),
+              hasEvent: Boolean(venue.event?.name),
+              trend: venue.activity?.trendLabel,
+              scoreMode: venue.activity?.scoreMode,
+            }, daypart), [daypart]);
+
+            const selectVenue = useCallback'''
+          if filtered_anchor not in text:
+              raise SystemExit('Vibe helper anchor not found')
+          text = text.replace(filtered_anchor, filtered_replacement, 1)
+
+          source_anchor = '''    map.addSource("buzz-map-venues", { type: "geojson", data: empty });
+
+              const buzzColor: any = ['''
+          source_replacement = '''    map.addSource("buzz-map-venues", { type: "geojson", data: empty });
+              map.addSource("buzz-map-clusters", {
+                type: "geojson",
+                data: empty,
+                cluster: true,
+                clusterRadius: 64,
+                clusterMaxZoom: 12,
+                clusterProperties: {
+                  maxScore: ["max", ["get", "score"]],
+                },
+              } as mapboxgl.GeoJSONSourceSpecification);
+
+              const buzzColor: any = ['''
+          if source_anchor not in text:
+              raise SystemExit('Cluster source anchor not found')
+          text = text.replace(source_anchor, source_replacement, 1)
+
+          pin_anchor = '''    map.addLayer({
+                id: "buzz-pin-glow",
+                type: "circle",
+                source: "buzz-map-venues",
+                minzoom: 10.5,
+                paint: {
+                  "circle-radius": ["case", ["==", ["get", "selected"], true], 27, ["interpolate", ["linear"], ["get", "score"], 20, 12, 100, 23]],
+                  "circle-color": buzzColor,
+                  "circle-opacity": ["case", ["==", ["get", "selected"], true], 0.5, 0.28],
+                  "circle-blur": 0.78,
+                },
+              });'''
+          pin_replacement = '''    map.addLayer({
+                id: "buzz-heat-hub-glow",
+                type: "circle",
+                source: "buzz-map-clusters",
+                minzoom: 9,
+                maxzoom: 13,
+                filter: ["has", "point_count"],
+                paint: {
+                  "circle-radius": ["step", ["get", "point_count"], 28, 8, 38, 20, 50],
+                  "circle-color": ["interpolate", ["linear"], ["coalesce", ["get", "maxScore"], 40], 35, "#34d399", 60, "#facc15", 78, "#fb923c", 90, "#ef4444"],
+                  "circle-opacity": 0.24,
+                  "circle-blur": 0.72,
+                },
+              });
+              map.addLayer({
+                id: "buzz-heat-hubs",
+                type: "circle",
+                source: "buzz-map-clusters",
+                minzoom: 9,
+                maxzoom: 13,
+                filter: ["has", "point_count"],
+                paint: {
+                  "circle-radius": ["step", ["get", "point_count"], 20, 8, 27, 20, 35],
+                  "circle-color": ["interpolate", ["linear"], ["coalesce", ["get", "maxScore"], 40], 35, "#163c38", 60, "#4a4015", 78, "#632d17", 90, "#6f1d27"],
+                  "circle-stroke-width": 4,
+                  "circle-stroke-color": ["interpolate", ["linear"], ["coalesce", ["get", "maxScore"], 40], 35, "#34d399", 60, "#facc15", 78, "#fb923c", 90, "#ef4444"],
+                },
+              });
+              map.addLayer({
+                id: "buzz-heat-hub-count",
+                type: "symbol",
+                source: "buzz-map-clusters",
+                minzoom: 9,
+                maxzoom: 13,
+                filter: ["has", "point_count"],
+                layout: {
+                  "text-field": ["concat", ["get", "point_count_abbreviated"], " SPOTS"],
+                  "text-size": ["step", ["get", "point_count"], 9, 10, 10, 25, 11],
+                  "text-font": ["DIN Pro Bold", "Arial Unicode MS Bold"],
+                  "text-allow-overlap": true,
+                },
+                paint: {
+                  "text-color": "#ffffff",
+                  "text-halo-color": "rgba(8,11,16,.75)",
+                  "text-halo-width": 1,
+                },
+              });
+              map.addLayer({
+                id: "buzz-pin-glow",
+                type: "circle",
+                source: "buzz-map-clusters",
+                minzoom: 10.5,
+                filter: ["!", ["has", "point_count"]],
+                paint: {
+                  "circle-radius": ["case", ["==", ["get", "selected"], true], 29, ["interpolate", ["linear"], ["get", "score"], 20, 13, 100, 24]],
+                  "circle-color": buzzColor,
+                  "circle-opacity": ["case", ["==", ["get", "selected"], true], 0.55, 0.32],
+                  "circle-blur": 0.76,
+                },
+              });'''
+          if pin_anchor not in text:
+              raise SystemExit('Pin glow anchor not found')
+          text = text.replace(pin_anchor, pin_replacement, 1)
+
+          text = text.replace('''        source: "buzz-map-venues",
+                  minzoom: 10.5,
+                  paint: {
+                    "circle-radius": ["case", ["==", ["get", "selected"], true], 17, ["interpolate", ["linear"], ["zoom"], 10.5, 12, 15, 15]],
+                    "circle-color": "#ffffff",
+                    "circle-stroke-width": ["case", ["==", ["get", "selected"], true], 4, 3],''', '''        source: "buzz-map-clusters",
+                  minzoom: 10.5,
+                  filter: ["!", ["has", "point_count"]],
+                  paint: {
+                    "circle-radius": ["case", ["==", ["get", "selected"], true], 18, ["interpolate", ["linear"], ["zoom"], 10.5, 12.5, 15, 15.5]],
+                    "circle-color": "#ffffff",
+                    "circle-stroke-width": ["case", ["==", ["get", "selected"], true], 6, 4],''', 1)
+
+          text = text.replace('''        source: "buzz-map-venues",
+                  minzoom: 10.5,
+                  layout: {''', '''        source: "buzz-map-clusters",
+                  minzoom: 10.5,
+                  filter: ["!", ["has", "point_count"]],
+                  layout: {''', 1)
+
+          text = text.replace('''        source: "buzz-map-venues",
+                  minzoom: 10.2,
+                  paint: { "circle-radius": 28,''', '''        source: "buzz-map-clusters",
+                  minzoom: 10.2,
+                  filter: ["!", ["has", "point_count"]],
+                  paint: { "circle-radius": 30,''', 1)
+
+          handler_anchor = '''    const onHeatClick = (event: mapboxgl.MapLayerMouseEvent) => {
+                if (map.getZoom() >= 10.5) return;
+                map.easeTo({ center: event.lngLat, zoom: Math.min(12, map.getZoom() + 2.3), duration: 520 });
+              };
+              const enter'''
+          handler_replacement = '''    const onHeatClick = (event: mapboxgl.MapLayerMouseEvent) => {
+                if (map.getZoom() >= 10.5) return;
+                map.easeTo({ center: event.lngLat, zoom: Math.min(12, map.getZoom() + 2.3), duration: 520 });
+              };
+              const onHeatHubClick = (event: mapboxgl.MapLayerMouseEvent) => {
+                map.easeTo({ center: event.lngLat, zoom: Math.min(14, map.getZoom() + 2.4), duration: 520 });
+              };
+              const enter'''
+          if handler_anchor not in text:
+              raise SystemExit('Cluster click handler anchor not found')
+          text = text.replace(handler_anchor, handler_replacement, 1)
+
+          event_anchor = '''    map.on("click", "buzz-pin-hitbox", onVenueClick);
+              map.on("click", "buzz-area-heat", onHeatClick);
+              map.on("mouseenter", "buzz-pin-hitbox", enter);'''
+          event_replacement = '''    map.on("click", "buzz-pin-hitbox", onVenueClick);
+              map.on("click", "buzz-area-heat", onHeatClick);
+              map.on("click", "buzz-heat-hubs", onHeatHubClick);
+              map.on("mouseenter", "buzz-pin-hitbox", enter);
+              map.on("mouseenter", "buzz-heat-hubs", enter);'''
+          if event_anchor not in text:
+              raise SystemExit('Cluster event anchor not found')
+          text = text.replace(event_anchor, event_replacement, 1)
+
+          leave_anchor = '''    map.on("mouseleave", "buzz-pin-hitbox", leave);
+              map.on("mouseenter", "buzz-area-heat", enter);'''
+          leave_replacement = '''    map.on("mouseleave", "buzz-pin-hitbox", leave);
+              map.on("mouseleave", "buzz-heat-hubs", leave);
+              map.on("mouseenter", "buzz-area-heat", enter);'''
+          if leave_anchor not in text:
+              raise SystemExit('Cluster leave anchor not found')
+          text = text.replace(leave_anchor, leave_replacement, 1)
+
+          cleanup_anchor = '''      map.off("click", "buzz-pin-hitbox", onVenueClick);
+                map.off("click", "buzz-area-heat", onHeatClick);
+                map.off("mouseenter", "buzz-pin-hitbox", enter);
+                map.off("mouseleave", "buzz-pin-hitbox", leave);'''
+          cleanup_replacement = '''      map.off("click", "buzz-pin-hitbox", onVenueClick);
+                map.off("click", "buzz-area-heat", onHeatClick);
+                map.off("click", "buzz-heat-hubs", onHeatHubClick);
+                map.off("mouseenter", "buzz-pin-hitbox", enter);
+                map.off("mouseleave", "buzz-pin-hitbox", leave);
+                map.off("mouseenter", "buzz-heat-hubs", enter);
+                map.off("mouseleave", "buzz-heat-hubs", leave);'''
+          if cleanup_anchor not in text:
+              raise SystemExit('Cluster cleanup anchor not found')
+          text = text.replace(cleanup_anchor, cleanup_replacement, 1)
+
+          update_anchor = '''  useEffect(() => {
+              const source = mapRef.current?.getSource("buzz-map-venues") as mapboxgl.GeoJSONSource | undefined;
+              if (!source) return;
+              const nextLogoUrls = new Map<string, string>();'''
+          update_replacement = '''  useEffect(() => {
+              const heatSource = mapRef.current?.getSource("buzz-map-venues") as mapboxgl.GeoJSONSource | undefined;
+              const clusterSource = mapRef.current?.getSource("buzz-map-clusters") as mapboxgl.GeoJSONSource | undefined;
+              if (!heatSource || !clusterSource) return;
+              const nextLogoUrls = new Map<string, string>();'''
+          if update_anchor not in text:
+              raise SystemExit('Dual source update anchor not found')
+          text = text.replace(update_anchor, update_replacement, 1)
+
+          set_data_anchor = '''    logoUrlsRef.current = nextLogoUrls;
+              source.setData({ type: "FeatureCollection", features });'''
+          set_data_replacement = '''    logoUrlsRef.current = nextLogoUrls;
+              const collection: GeoJSON.FeatureCollection<GeoJSON.Point> = { type: "FeatureCollection", features };
+              heatSource.setData(collection);
+              clusterSource.setData(collection);'''
+          if set_data_anchor not in text:
+              raise SystemExit('Dual source setData anchor not found')
+          text = text.replace(set_data_anchor, set_data_replacement, 1)
+
+          selected_anchor = '''  const selectedAddress = detail?.address || selected?.address;
+
+            return ('''
+          selected_replacement = '''  const selectedAddress = detail?.address || selected?.address;
+            const selectedVibe = selected ? vibeFor(selected) : null;
+
+            return ('''
+          if selected_anchor not in text:
+              raise SystemExit('Selected vibe anchor not found')
+          text = text.replace(selected_anchor, selected_replacement, 1)
+
+          text = text.replace('<div className="buzz-map-app">', '<div className={`buzz-map-app ${daypart === "day" ? "daytime" : "nighttime"}`}>', 1)
+          text = text.replace('{categories.map(([label, Icon]) =>', '{orderedCategories.map(([label, Icon]) =>', 1)
+
+          list_anchor = '''            {filtered.map((venue, index) => (
+                    <article key={venue.id} className={selected?.id === venue.id ? "selected" : ""} onClick={() => selectVenue(venue.id)}>
+                      <div className="buzz-list-photo"><img src={logoUrlFor(venue)} alt={`${venue.name} logo`} loading="lazy" decoding="async" /><b>{score(venue)}</b></div>
+                      <div className="buzz-list-copy"><small>{index === 0 ? "BEST NOW" : `#${index + 1}`} · {categoryFor(venue)} · {milesLabel(venue.distanceMiles) || venue.city || "Nearby"}</small><strong>{venue.name}</strong><p>{venue.event?.name || venue.reason || "Available right now"}</p><span className={`buzz-status s${Math.floor(score(venue) / 20)}`}>{statusFor(venue)}{venue.activity?.scoreMode === "live" ? " · Live" : " · Forecast"}</span></div>
+                      <button type="button" className={favoriteIds.has(venue.id) ? "saved" : ""} onClick={event => toggleFavorite(event, venue)} aria-label={`Save ${venue.name}`}><Heart fill={favoriteIds.has(venue.id) ? "currentColor" : "none"} /></button>
+                    </article>
+                  ))}'''
+          list_replacement = '''            {filtered.map((venue, index) => {
+                    const vibe = vibeFor(venue);
+                    return (
+                      <article key={venue.id} className={selected?.id === venue.id ? "selected" : ""} onClick={() => selectVenue(venue.id)}>
+                        <div className="buzz-list-photo"><img src={logoUrlFor(venue)} alt={`${venue.name} logo`} loading="lazy" decoding="async" /><b>{score(venue)}</b></div>
+                        <div className="buzz-list-copy"><small>{index === 0 ? "BEST NOW" : `#${index + 1}`} · {categoryFor(venue)} · {milesLabel(venue.distanceMiles) || venue.city || "Nearby"}</small><strong>{venue.name}</strong><span className={`buzz-vibe-tag ${vibe.truth}`}>{vibe.label}<b>{vibe.truth === "live" ? "LIVE" : "FORECAST"}</b></span><p>{venue.event?.name || venue.reason || "Available right now"}</p><span className={`buzz-status s${Math.floor(score(venue) / 20)}`}>{statusFor(venue)}{venue.activity?.scoreMode === "live" ? " · Live" : " · Forecast"}</span></div>
+                        <button type="button" className={favoriteIds.has(venue.id) ? "saved" : ""} onClick={event => toggleFavorite(event, venue)} aria-label={`Save ${venue.name}`}><Heart fill={favoriteIds.has(venue.id) ? "currentColor" : "none"} /></button>
+                      </article>
+                    );
+                  })}'''
+          if list_anchor not in text:
+              raise SystemExit('List vibe JSX anchor not found')
+          text = text.replace(list_anchor, list_replacement, 1)
+
+          mode_anchor = '''          {mapZoom < 10.5 ? <><Sparkles /><span>Area heat</span><small>Tap a hot zone or zoom in for venues</small></> : <><MapPin /><span>Logo pins</span><small>The ring color shows each place’s Buzz</small></>}'''
+          mode_replacement = '''          {mapZoom < 9.8 ? <><Sparkles /><span>Area heat</span><small>Tap a hot zone or zoom in for venues</small></> : mapZoom < 12.6 ? <><Sparkles /><span>Heat hubs</span><small>Tap a hub to reveal its venues</small></> : <><MapPin /><span>Logo pins</span><small>Thick rings show each place’s Buzz</small></>}'''
+          if mode_anchor not in text:
+              raise SystemExit('Map mode anchor not found')
+          text = text.replace(mode_anchor, mode_replacement, 1)
+
+          detail_anchor = '''            <div className="buzz-detail-reason"><Sparkles /><div><strong>Why Buzz thinks this</strong><p>{selected.reason || "Buzz is combining current activity signals for this place."}</p></div></div>'''
+          detail_replacement = '''            {selectedVibe && <div className={`buzz-detail-vibe ${selectedVibe.truth}`}><span>{selectedVibe.label}</span><b>{selectedVibe.truth === "live" ? "LIVE" : "FORECAST"}</b></div>}
+                        <div className="buzz-detail-reason"><Sparkles /><div><strong>Why Buzz thinks this</strong><p>{selected.reason || "Buzz is combining current activity signals for this place."}</p></div></div>'''
+          if detail_anchor not in text:
+              raise SystemExit('Detail vibe JSX anchor not found')
+          text = text.replace(detail_anchor, detail_replacement, 1)
+
+          path.write_text(text)
+
+          css = Path('app/buzz-map-app.css')
+          css_text = css.read_text()
+          css_anchor = 'body.buzz-map-active{overflow:hidden;background:#080b10}'
+          css_prefix = '''body.buzz-map-active{overflow:hidden;background:#080b10}
+          .buzz-map-app,.buzz-map-canvas{transition:background .45s ease,filter .45s ease}
+          .buzz-map-app.daytime{background:#101820}
+          .buzz-map-app.daytime .buzz-map-canvas{filter:brightness(1.12) saturate(.78) contrast(1.03)}
+          .buzz-map-stage:after{content:"";position:absolute;z-index:1;inset:0;pointer-events:none;transition:opacity .45s ease,background .45s ease}
+          .buzz-map-app.daytime .buzz-map-stage:after{opacity:1;background:rgba(48,65,78,.18);mix-blend-mode:color}
+          .buzz-map-app.nighttime .buzz-map-stage:after{opacity:0}
+          .buzz-map-toolbar,.buzz-map-mode,.buzz-map-loading,.buzz-map-error{z-index:5}
+          '''
+          if css_anchor not in css_text:
+              raise SystemExit('Adaptive CSS root anchor not found')
+          css_text = css_text.replace(css_anchor, css_prefix, 1)
+
+          vibe_css_anchor = '.buzz-status{display:inline-flex;padding:3px 7px;'
+          vibe_css = '''.buzz-vibe-tag{display:inline-flex;align-items:center;gap:5px;width:max-content;max-width:100%;margin-top:5px;padding:3px 7px;border:1px solid #3b4654;border-radius:999px;color:#d7dee6;font-size:7px;font-weight:850;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.buzz-vibe-tag b{padding-left:5px;border-left:1px solid rgba(255,255,255,.18);font-size:6px;letter-spacing:.08em}.buzz-vibe-tag.live{border-color:#9a542a;background:rgba(249,115,22,.1);color:#fed7aa}.buzz-vibe-tag.forecast{border-color:#554590;background:rgba(139,92,246,.08);color:#ddd6fe}
+          .buzz-detail-vibe{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;padding:9px 11px;border:1px solid #3b4654;border-radius:13px;background:#121923;font-size:10px;font-weight:850}.buzz-detail-vibe b{padding:4px 7px;border-radius:999px;font-size:7px;letter-spacing:.1em}.buzz-detail-vibe.live{border-color:#8b4a27}.buzz-detail-vibe.live b{background:#fb923c;color:#1a0e05}.buzz-detail-vibe.forecast{border-color:#51418a}.buzz-detail-vibe.forecast b{background:#6d54bb;color:#fff}
+          ''' + vibe_css_anchor
+          if vibe_css_anchor not in css_text:
+              raise SystemExit('Vibe CSS anchor not found')
+          css_text = css_text.replace(vibe_css_anchor, vibe_css, 1)
+          css.write_text(css_text)
+          PY
+          rm .github/workflows/patch-adaptive-map.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/buzz-map-app.tsx app/buzz-map-app.css .github/workflows/patch-adaptive-map.yml
+          git commit -m "Build adaptive day-night discovery and Heat Hubs"
+          git push origin HEAD:feature/adaptive-map-heat-hubs
