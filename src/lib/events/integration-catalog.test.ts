@@ -8,6 +8,7 @@ const requiredNames = [
   "Google Street View API",
   "OpenStreetMap / Overpass",
   "TomTom",
+  "BestTime",
   "Brandfetch",
   "Supabase",
   "Vercel",
