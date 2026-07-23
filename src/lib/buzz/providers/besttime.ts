@@ -254,9 +254,10 @@ export function mappingFromBestTimeAccountVenue(venue: VenueForBuzz, accountVenu
 
 export async function findExistingBestTimeForecast(
   venue: VenueForBuzz,
-  accountVenues: BestTimeAccountVenue[] = await listBestTimeAccountVenues(),
+  accountVenues?: BestTimeAccountVenue[],
 ) {
-  const accountVenue = findBestTimeAccountVenue(venue, accountVenues);
+  const venues = accountVenues || await listBestTimeAccountVenues();
+  const accountVenue = findBestTimeAccountVenue(venue, venues);
   if (!accountVenue || !isBestTimeAccountVenueForecasted(accountVenue) || !accountVenue.venue_id) return null;
   return mappingFromBestTimeAccountVenue(venue, accountVenue);
 }
