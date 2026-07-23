@@ -1,4 +1,4 @@
-name: Elite live activity UI retry once
+name: Elite live activity UI execute now
 
 on:
   push:
