@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Recover previously created BestTime forecasts
+      - name: Inspect and recover BestTime account forecasts without creating any
         env:
           BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
@@ -26,7 +26,7 @@ jobs:
           export RUN_URL
 
           if [ -z "${BASE_URL:-}" ] || [ -z "${CRON_SECRET:-}" ]; then
-            printf '## BestTime recovery failed\n\nRequired GitHub production secrets are missing.\n\n[Open workflow run](%s)\n' "$RUN_URL" > besttime-recovery-summary.md
+            printf '## BestTime read-only recovery failed\n\nRequired GitHub production secrets are missing.\n\n[Open workflow run](%s)\n' "$RUN_URL" > besttime-recovery-summary.md
             exit 1
           fi
 
@@ -34,7 +34,7 @@ jobs:
             --output besttime-recovery.json \
             --write-out '%{http_code}' \
             -H "Authorization: Bearer ${CRON_SECRET}" \
-            "${BASE_URL%/}/api/buzz/refresh?provider=besttime&action=bootstrap&limit=15")
+            "${BASE_URL%/}/api/buzz/besttime-recover?limit=25")
           CURL_STATUS=$?
           export HTTP_STATUS CURL_STATUS
 
@@ -66,60 +66,55 @@ jobs:
           elif not isinstance(payload, dict) or payload.get("success") is not True:
               failure = f"The production endpoint reported failure: {str((payload or {}).get('error') or 'unknown error')[:500]}"
 
-          result = None
-          if not failure:
-              result = next((item for item in (payload.get("results") or []) if item.get("provider") == "besttime"), None)
-              if result is None:
-                  failure = "The response did not include a BestTime result."
-
-          details = (result or {}).get("details") or []
-          attempted = int((result or {}).get("attempted") or 0)
-          succeeded = int((result or {}).get("succeeded") or 0)
-          failed = int((result or {}).get("failed") or 0)
-          coverage = {}
-          for item in details:
-              status = str(item.get("status") or "unknown")
-              coverage[status] = coverage.get(status, 0) + 1
-
-          if not failure and succeeded <= 0:
-              sample = next((str(item.get("error")) for item in details if item.get("error")), "No provider error returned")
-              failure = f"No existing BestTime forecasts were recovered. First error: {sample[:500]}"
-
           if failure:
               lines = [
-                  "## BestTime existing-forecast recovery failed",
+                  "## BestTime read-only recovery failed",
                   "",
                   failure,
                   "",
-                  f"- Attempted: **{attempted}**",
-                  f"- Successful mappings: **{succeeded}**",
-                  f"- Failed: **{failed}**",
+                  "No new BestTime forecast was created by this run.",
                   "",
                   f"[Open workflow run]({run_url})",
               ]
               Path("besttime-recovery-summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
               raise SystemExit(1)
 
+          account_count = int(payload.get("accountVenueCount") or 0)
+          account_forecasted = int(payload.get("accountForecastedCount") or 0)
+          candidate_count = int(payload.get("candidateCount") or 0)
+          recovered = int(payload.get("recovered") or 0)
+          mapped_without_forecast = int(payload.get("mappedWithoutForecast") or 0)
+          unsupported = int(payload.get("unsupported") or 0)
+          not_in_account = int(payload.get("notInAccount") or 0)
+          failed = int(payload.get("failed") or 0)
+
           lines = [
-              "## BestTime existing forecasts recovered",
+              "## BestTime read-only recovery completed",
               "",
-              f"- Attempted: **{attempted}**",
-              f"- Successful mappings: **{succeeded}**",
-              f"- Failed/unsupported: **{failed}**",
-              "- Recovery limit: **15 venues**",
+              f"- BestTime account venues returned: **{account_count}**",
+              f"- Account venues with forecasts: **{account_forecasted}**",
+              f"- Buzz candidates inspected: **{candidate_count}**",
+              f"- Forecast evidence recovered: **{recovered}**",
+              f"- Provider mappings saved without a current forecast: **{mapped_without_forecast}**",
+              f"- Unsupported by BestTime: **{unsupported}**",
+              f"- Not found in the BestTime account: **{not_in_account}**",
+              f"- Database failures: **{failed}**",
               "",
-              "### Coverage stored",
-          ]
-          for status, count in sorted(coverage.items()):
-              lines.append(f"- `{status}`: **{count}**")
-          lines.extend([
-              "",
-              "Recovered mappings now remain stored even when BestTime has forecast data but no live reading. Forecast-only values remain non-live evidence inside Buzz Score v2.",
+              "This recovery was read-only at BestTime: it did not create or refresh a forecast and could not consume forecast credits.",
               "",
               f"[Open workflow run]({run_url})",
-          ])
+          ]
           Path("besttime-recovery-summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-          print(json.dumps({"attempted": attempted, "succeeded": succeeded, "failed": failed, "coverage": coverage}, indent=2))
+          print(json.dumps({
+              "accountVenueCount": account_count,
+              "accountForecastedCount": account_forecasted,
+              "candidateCount": candidate_count,
+              "recovered": recovered,
+              "mappedWithoutForecast": mapped_without_forecast,
+              "unsupported": unsupported,
+              "notInAccount": not_in_account,
+              "failed": failed,
+          }, indent=2))
           PY
 
       - name: Record recovery result on integration issue
@@ -130,7 +125,7 @@ jobs:
         run: |
           if [ ! -f besttime-recovery-summary.md ]; then
             RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-            printf '## BestTime existing-forecast recovery failed\n\nThe workflow stopped before producing a provider summary.\n\n[Open workflow run](%s)\n' "$RUN_URL" > besttime-recovery-summary.md
+            printf '## BestTime read-only recovery failed\n\nThe workflow stopped before producing a summary.\n\n[Open workflow run](%s)\n' "$RUN_URL" > besttime-recovery-summary.md
           fi
           gh issue comment 68 --repo "$GITHUB_REPOSITORY" --body-file besttime-recovery-summary.md
 
@@ -138,7 +133,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: besttime-existing-forecast-recovery-${{ github.run_id }}
+          name: besttime-read-only-recovery-${{ github.run_id }}
           path: |
             besttime-recovery.json
             besttime-recovery-summary.md
