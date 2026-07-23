@@ -3,8 +3,10 @@ import test from "node:test";
 import {
   bestTimeSignals,
   createBestTimeForecast,
+  extractBestTimeAccountVenues,
   fetchBestTimeLive,
   findBestTimeAccountVenue,
+  isBestTimeAccountVenueForecasted,
   resetBestTimeAccountVenueCacheForTests,
 } from "./providers/besttime";
 import type { VenueForBuzz } from "./types";
@@ -29,6 +31,22 @@ test("matches an existing account forecast conservatively by name and address", 
   assert.equal(match?.venue_id, "right");
 });
 
+test("extracts account venues from direct and nested provider response shapes", () => {
+  const direct = extractBestTimeAccountVenues([{ venue_id: "ven_direct" }]);
+  const nested = extractBestTimeAccountVenues({ data: { venues: [{ venue_id: "ven_nested" }] } });
+  const results = extractBestTimeAccountVenues({ results: [{ venue_id: "ven_results" }] });
+  assert.equal(direct[0].venue_id, "ven_direct");
+  assert.equal(nested[0].venue_id, "ven_nested");
+  assert.equal(results[0].venue_id, "ven_results");
+});
+
+test("normalizes provider forecast flags from booleans, strings, and numbers", () => {
+  assert.equal(isBestTimeAccountVenueForecasted({ venue_forecasted: true }), true);
+  assert.equal(isBestTimeAccountVenueForecasted({ venue_forecasted: "true" }), true);
+  assert.equal(isBestTimeAccountVenueForecasted({ venue_forecasted: 1 }), true);
+  assert.equal(isBestTimeAccountVenueForecasted({ venue_forecasted: false }), false);
+});
+
 test("reuses an existing forecast instead of spending a new forecast credit", async () => {
   const originalFetch = globalThis.fetch;
   withKeys();
@@ -38,13 +56,17 @@ test("reuses an existing forecast instead of spending a new forecast credit", as
     const url = String(input);
     calls.push(url);
     assert.match(url, /\/venues\?/);
-    return new Response(JSON.stringify([{
-      venue_id: "ven_existing",
-      venue_name: "Harbor Club",
-      venue_address: "123 Main Street, Virginia Beach, VA",
-      venue_forecasted: true,
-      epoch_analysis: 123,
-    }]), { status: 200 });
+    return new Response(JSON.stringify({
+      data: {
+        venues: [{
+          venue_id: "ven_existing",
+          venue_name: "Harbor Club",
+          venue_address: "123 Main Street, Virginia Beach, VA",
+          venue_forecasted: "true",
+          epoch_analysis: 123,
+        }],
+      },
+    }), { status: 200 });
   }) as typeof fetch;
 
   try {
