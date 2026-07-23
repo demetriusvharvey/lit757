@@ -37,7 +37,8 @@ test("weighted online calibration learns venue, hour, weekday, season, and recen
   assert.ok(profile.venueAdjustment > 0);
   assert.ok(profile.hourAdjustment > 0);
   assert.ok(profile.dayAdjustment > 0);
-  assert.ok(profile.confidenceWeight > 0.45);
+  // Large historical misses should produce a useful correction while keeping model confidence conservative.
+  assert.ok(profile.confidenceWeight > 0.3 && profile.confidenceWeight < 0.5, `confidence was ${profile.confidenceWeight}`);
   assert.ok(signal);
   assert.equal(signal.family, "historical_learning");
   assert.equal(signal.type, "calibration_adjustment");
