@@ -1,0 +1,19 @@
+[
+  {"key":"venue-embedding","model_id":"BAAI/bge-small-en-v1.5","license":"MIT","recommended":true,"gated":false},
+  {"key":"embedding-fallback","model_id":"sentence-transformers/all-MiniLM-L6-v2","license":"Apache-2.0","recommended":false,"gated":false},
+  {"key":"venue-reranker","model_id":"cross-encoder/ms-marco-MiniLM-L6-v2","license":"Apache-2.0","recommended":true,"gated":false},
+  {"key":"vibe-classifier","model_id":"MoritzLaurer/ModernBERT-base-zeroshot-v2.0","license":"Apache-2.0","recommended":true,"gated":false},
+  {"key":"entity-extractor","model_id":"dslim/distilbert-NER","license":"Apache-2.0","recommended":true,"gated":false},
+  {"key":"short-copy-generator","model_id":"google/flan-t5-base","license":"Apache-2.0","recommended":false,"gated":false},
+  {"key":"image-relevance","model_id":"google/siglip2-base-patch16-224","license":"Apache-2.0","recommended":true,"gated":false},
+  {"key":"image-aesthetic-score","model_id":"somepago/AestheticSigLIP","license":"Apache-2.0","recommended":true,"gated":false},
+  {"key":"vision-understanding","model_id":"microsoft/Florence-2-base","license":"MIT","recommended":true,"gated":false},
+  {"key":"image-captioning-fallback","model_id":"Salesforce/blip-image-captioning-base","license":"BSD-3-Clause","recommended":false,"gated":false},
+  {"key":"image-upscaler","model_id":"caidas/swin2SR-realworld-sr-x4-64-bsrgan-psnr","license":"Apache-2.0","recommended":true,"gated":false},
+  {"key":"image-segmentation","model_id":"facebook/sam2.1-hiera-small","license":"Apache-2.0","recommended":false,"gated":false},
+  {"key":"image-depth","model_id":"depth-anything/Depth-Anything-V2-Small-hf","license":"Apache-2.0","recommended":false,"gated":false},
+  {"key":"image-safety","model_id":"Falconsai/nsfw_image_detection","license":"Apache-2.0","recommended":true,"gated":false},
+  {"key":"buzz-forecast","model_id":"amazon/chronos-2","license":"Apache-2.0","recommended":true,"gated":false},
+  {"key":"buzz-forecast-fast","model_id":"ibm-granite/granite-timeseries-ttm-r3","license":"Apache-2.0","recommended":true,"gated":false},
+  {"key":"brand-art-generator","model_id":"black-forest-labs/FLUX.1-schnell","license":"Apache-2.0","recommended":false,"gated":true}
+]
