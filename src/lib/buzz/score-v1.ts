@@ -97,12 +97,13 @@ function confidenceFor(
   activeFamilies: Set<BuzzSignalFamily>,
   directEvidence: boolean,
   liveAge: number | null,
-  calibrationSamples: number,
+  calibrationEffectiveSamples: number,
   calibrationError: number,
 ): BuzzConfidence {
-  const matureCalibration = calibrationSamples >= 12 && calibrationError <= 14;
+  const matureCalibration = calibrationEffectiveSamples >= 10 && calibrationError <= 12;
+  const usefulCalibration = calibrationEffectiveSamples >= 5 && calibrationError <= 20;
   if (directEvidence && liveFamilies.size >= 2 && liveSources.size >= 2 && (liveAge ?? 999) <= 20 && matureCalibration) return "high";
-  if (directEvidence || (liveFamilies.size >= 2 && liveSources.size >= 2) || activeFamilies.size >= 3 || matureCalibration) return "medium";
+  if (directEvidence || (liveFamilies.size >= 2 && liveSources.size >= 2) || activeFamilies.size >= 3 || usefulCalibration) return "medium";
   return "low";
 }
 
@@ -193,7 +194,7 @@ export function calculateBuzzScore(venue: VenueForBuzz, signals: BuzzSignal[], r
     .sort((a, b) => Math.abs(b.points) - Math.abs(a.points))
     .slice(0, 3);
   const calibration = active.find(item => item.signal.type === "calibration_adjustment")?.signal;
-  const calibrationSamples = Number(calibration?.metadata?.sampleCount || 0);
+  const calibrationEffectiveSamples = Number(calibration?.metadata?.effectiveSampleSize ?? calibration?.metadata?.sampleCount ?? 0);
   const calibrationError = Number(calibration?.metadata?.meanAbsoluteError || 999);
 
   return {
@@ -201,7 +202,7 @@ export function calculateBuzzScore(venue: VenueForBuzz, signals: BuzzSignal[], r
     score,
     label: labelFor(score),
     mode: liveFamilies.size ? "live" : "forecast",
-    confidence: confidenceFor(liveFamilies, liveSources, activeFamilies, verifiedFirstParty, evidenceAgeMinutes, calibrationSamples, calibrationError),
+    confidence: confidenceFor(liveFamilies, liveSources, activeFamilies, verifiedFirstParty, evidenceAgeMinutes, calibrationEffectiveSamples, calibrationError),
     computedAt: referenceTime.toISOString(),
     expiresAt,
     evidenceAgeMinutes,
