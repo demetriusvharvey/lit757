@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { applyCalibration, buildCalibrationFeatures, confidenceFromCalibration, type BuzzCalibrationModel } from "./calibration";
 import { calculateBuzzScore } from "./score-v1";
 import type { BuzzSignal, VenueForBuzz } from "./types";
 
@@ -64,9 +65,36 @@ export async function loadActiveSignals(db: SupabaseClient, venueId: string, now
   return (data || []).map(row => rowToSignal(row as SignalRow));
 }
 
+async function loadCalibrationModel(db: SupabaseClient) {
+  const { data, error } = await db
+    .from("buzz_calibration_models")
+    .select("model")
+    .eq("model_key", "global")
+    .maybeSingle();
+  if (error || !data?.model) return null;
+  return data.model as BuzzCalibrationModel;
+}
+
 export async function recomputeBuzzScore(db: SupabaseClient, venue: VenueForBuzz, now = new Date()) {
   const signals = await loadActiveSignals(db, venue.id, now);
-  const score = calculateBuzzScore(venue, signals, now);
+  const base = calculateBuzzScore(venue, signals, now);
+  const model = await loadCalibrationModel(db);
+  const features = buildCalibrationFeatures(venue, signals, base.score, now);
+  const calibrated = applyCalibration(model, features);
+  const score = {
+    ...base,
+    score: calibrated.score,
+    confidence: confidenceFromCalibration(base.confidence, model),
+    version: calibrated.applied ? "buzz-ml-v1" as const : base.version,
+    factors: calibrated.applied && Math.abs(calibrated.adjustment) >= 0.5
+      ? [...base.factors, {
+          family: "calibration" as const,
+          label: "Historical calibration",
+          points: calibrated.adjustment,
+          source: "buzz-ml-v1",
+        }]
+      : base.factors,
+  };
   const snapshot = {
     venue_id: venue.id,
     score: score.score,
