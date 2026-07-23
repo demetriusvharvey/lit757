@@ -111,12 +111,22 @@ export async function embedTexts(texts: string[]) {
   });
 }
 
+type VibeClassification =
+  | Array<{ label: string; score: number }>
+  | { labels?: string[]; scores?: number[] };
+
 export async function classifyVibes(text: string, labels: string[]) {
-  return callHuggingFace<Array<{ label: string; score: number }>>("vibe-classifier", {
+  const result = await callHuggingFace<VibeClassification>("vibe-classifier", {
     inputs: text,
     parameters: {
       candidate_labels: labels,
       multi_label: true,
     },
   });
+
+  if (Array.isArray(result)) return result;
+  return (result.labels || []).map((label, index) => ({
+    label,
+    score: Number(result.scores?.[index] || 0),
+  }));
 }
