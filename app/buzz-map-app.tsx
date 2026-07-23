@@ -315,49 +315,49 @@ export default function BuzzMapApp() {
   }, daypart), [daypart]);
 
   const selectVenue = useCallback((id: string) => {
-  const venue = venues.find(item => String(item.id) === String(id));
-  if (!venue) return;
-  setSelected(venue);
-  setVoteMessage("");
-  setWatchMessage("");
-  const context = referralContext(window.location.href);
-  void trackConversion({
-    eventName: "venue_view",
-    venueId: venue.id,
-    referralId: context.referralId,
-    source: context.isInvite ? "invite-the-crew" : "buzz-map",
-    truthMode: venue.activity?.scoreMode || "forecast",
-    metadata: {
-      entry: context.isInvite ? "shared-link" : "map",
-      selectedFilter: active,
-    },
-  }, session?.access_token);
-  if (validVenue(venue)) mapRef.current?.easeTo({ center: coordinates(venue), zoom: Math.max(13.2, mapRef.current.getZoom()), duration: 500 });
-}, [venues, active, session?.access_token]);
-selectedRef.current = selectVenue;
+    const venue = venues.find(item => String(item.id) === String(id));
+    if (!venue) return;
+    setSelected(venue);
+    setVoteMessage("");
+    setWatchMessage("");
+    const context = referralContext(window.location.href);
+    void trackConversion({
+      eventName: "venue_view",
+      venueId: venue.id,
+      referralId: context.referralId,
+      source: context.isInvite ? "invite-the-crew" : "buzz-map",
+      truthMode: venue.activity?.scoreMode || "forecast",
+      metadata: {
+        entry: context.isInvite ? "shared-link" : "map",
+        selectedFilter: active,
+      },
+    }, session?.access_token);
+    if (validVenue(venue)) mapRef.current?.easeTo({ center: coordinates(venue), zoom: Math.max(13.2, mapRef.current.getZoom()), duration: 500 });
+  }, [venues, active, session?.access_token]);
+  selectedRef.current = selectVenue;
 
   useEffect(() => {
-  if (deepLinkHandledRef.current || !venues.length) return;
-  const params = new URLSearchParams(window.location.search);
-  const venueId = params.get("venue");
-  if (!venueId || !venues.some(venue => String(venue.id) === venueId)) return;
-  deepLinkHandledRef.current = true;
-  const context = referralContext(window.location.href);
-  if (context.isInvite) {
-    void trackConversion({
-      eventName: "shared_link_open",
-      venueId,
-      referralId: context.referralId,
-      source: context.source,
-      truthMode: context.truthMode,
-      metadata: { entry: "shared-link" },
-    }, session?.access_token);
-  }
-  selectVenue(venueId);
-  if (params.get("invite") === "1") {
-    setShareMessage("This place is ready to share. Tap Invite the Crew to open your phone’s share sheet.");
-  }
-}, [venues, selectVenue, session?.access_token]);
+    if (deepLinkHandledRef.current || !venues.length) return;
+    const params = new URLSearchParams(window.location.search);
+    const venueId = params.get("venue");
+    if (!venueId || !venues.some(venue => String(venue.id) === venueId)) return;
+    deepLinkHandledRef.current = true;
+    const context = referralContext(window.location.href);
+    if (context.isInvite) {
+      void trackConversion({
+        eventName: "shared_link_open",
+        venueId,
+        referralId: context.referralId,
+        source: context.source,
+        truthMode: context.truthMode,
+        metadata: { entry: "shared-link" },
+      }, session?.access_token);
+    }
+    selectVenue(venueId);
+    if (params.get("invite") === "1") {
+      setShareMessage("This place is ready to share. Tap Invite the Crew to open your phone’s share sheet.");
+    }
+  }, [venues, selectVenue, session?.access_token]);
 
   useEffect(() => {
     if (!selected) {
@@ -452,10 +452,10 @@ selectedRef.current = selectVenue;
       maxzoom: 13,
       filter: ["has", "point_count"],
       paint: {
-        "circle-radius": ["step", ["get", "point_count"], 25, 8, 31, 20, 38],
+        "circle-radius": ["step", ["get", "point_count"], 22, 8, 28, 20, 34],
         "circle-color": ["interpolate", ["linear"], ["coalesce", ["get", "maxScore"], 40], 35, "#34d399", 60, "#facc15", 78, "#fb923c", 90, "#ef4444"],
-        "circle-opacity": 0.24,
-        "circle-blur": 0.72,
+        "circle-opacity": 0.26,
+        "circle-blur": 0.8,
       },
     });
     map.addLayer({
@@ -466,36 +466,11 @@ selectedRef.current = selectVenue;
       maxzoom: 13,
       filter: ["has", "point_count"],
       paint: {
-        "circle-radius": ["step", ["get", "point_count"], 17, 8, 21, 20, 27],
-        "circle-color": ["interpolate", ["linear"], ["coalesce", ["get", "maxScore"], 40], 35, "#163c38", 60, "#4a4015", 78, "#632d17", 90, "#6f1d27"],
-        "circle-stroke-width": 4,
+        "circle-radius": ["step", ["get", "point_count"], 11, 8, 14, 20, 18],
+        "circle-color": ["interpolate", ["linear"], ["coalesce", ["get", "maxScore"], 40], 35, "#0f2f2c", 60, "#423a11", 78, "#592613", 90, "#65141f"],
+        "circle-opacity": 0.88,
+        "circle-stroke-width": 3,
         "circle-stroke-color": ["interpolate", ["linear"], ["coalesce", ["get", "maxScore"], 40], 35, "#34d399", 60, "#facc15", 78, "#fb923c", 90, "#ef4444"],
-      },
-    });
-    map.addLayer({
-      id: "buzz-heat-hub-vibe",
-      type: "symbol",
-      source: "buzz-map-clusters",
-      minzoom: 9,
-      maxzoom: 13,
-      filter: ["has", "point_count"],
-      layout: {
-        "text-field": [
-          "case",
-          [">=", ["coalesce", ["get", "maxScore"], 40], 90], "ON FIRE",
-          [">=", ["coalesce", ["get", "maxScore"], 40], 78], "HOT",
-          [">=", ["coalesce", ["get", "maxScore"], 40], 60], "RISING",
-          [">=", ["coalesce", ["get", "maxScore"], 40], 45], "ACTIVE",
-          "EXPLORE",
-        ],
-        "text-size": ["step", ["get", "point_count"], 8, 10, 8.5, 25, 9],
-        "text-font": ["DIN Pro Bold", "Arial Unicode MS Bold"],
-        "text-allow-overlap": true,
-      },
-      paint: {
-        "text-color": "#ffffff",
-        "text-halo-color": "rgba(8,11,16,.75)",
-        "text-halo-width": 1.35,
       },
     });
     map.addLayer({
@@ -577,257 +552,56 @@ selectedRef.current = selectVenue;
     map.on("click", "buzz-area-heat", onHeatClick);
     map.on("click", "buzz-heat-hubs", onHeatHubClick);
     map.on("mouseenter", "buzz-pin-hitbox", enter);
-    map.on("mouseenter", "buzz-heat-hubs", enter);
     map.on("mouseleave", "buzz-pin-hitbox", leave);
-    map.on("mouseleave", "buzz-heat-hubs", leave);
     map.on("mouseenter", "buzz-area-heat", enter);
     map.on("mouseleave", "buzz-area-heat", leave);
+    map.on("mouseenter", "buzz-heat-hubs", enter);
+    map.on("mouseleave", "buzz-heat-hubs", leave);
+
     return () => {
       map.off("styleimagemissing", onStyleImageMissing);
-      if (!map.getLayer("buzz-pin-hitbox")) return;
       map.off("click", "buzz-pin-hitbox", onVenueClick);
       map.off("click", "buzz-area-heat", onHeatClick);
       map.off("click", "buzz-heat-hubs", onHeatHubClick);
       map.off("mouseenter", "buzz-pin-hitbox", enter);
       map.off("mouseleave", "buzz-pin-hitbox", leave);
-      map.off("mouseenter", "buzz-heat-hubs", enter);
-      map.off("mouseleave", "buzz-heat-hubs", leave);
       map.off("mouseenter", "buzz-area-heat", enter);
       map.off("mouseleave", "buzz-area-heat", leave);
+      map.off("mouseenter", "buzz-heat-hubs", enter);
+      map.off("mouseleave", "buzz-heat-hubs", leave);
     };
   }, [mapReady]);
 
   useEffect(() => {
-    const heatSource = mapRef.current?.getSource("buzz-map-venues") as mapboxgl.GeoJSONSource | undefined;
+    const venueSource = mapRef.current?.getSource("buzz-map-venues") as mapboxgl.GeoJSONSource | undefined;
     const clusterSource = mapRef.current?.getSource("buzz-map-clusters") as mapboxgl.GeoJSONSource | undefined;
-    if (!heatSource || !clusterSource) return;
-    const nextLogoUrls = new Map<string, string>();
+    if (!venueSource || !clusterSource) return;
     const features: GeoJSON.Feature<GeoJSON.Point>[] = filtered.filter(validVenue).map(venue => {
       const logoKey = logoKeyFor(venue);
-      nextLogoUrls.set(logoKey, logoUrlFor(venue));
+      logoUrlsRef.current.set(logoKey, logoUrlFor(venue));
       return {
         type: "Feature",
         geometry: { type: "Point", coordinates: coordinates(venue) },
         properties: {
-          id: venue.id,
+          id: String(venue.id),
           score: score(venue),
-          selected: venue.id === selected?.id,
-          category: categoryFor(venue),
+          selected: selected?.id === venue.id,
           logoKey,
         },
       };
     });
-    logoUrlsRef.current = nextLogoUrls;
-    const collection: GeoJSON.FeatureCollection<GeoJSON.Point> = { type: "FeatureCollection", features };
-    heatSource.setData(collection);
-    clusterSource.setData(collection);
+    const data: GeoJSON.FeatureCollection<GeoJSON.Point> = { type: "FeatureCollection", features };
+    venueSource.setData(data);
+    clusterSource.setData(data);
   }, [filtered, selected?.id, mapReady]);
 
-  function toggleFavorite(event: ReactMouseEvent, venue: Venue) {
-  event.stopPropagation();
-  const adding = !favoriteIds.has(venue.id);
-  setFavoriteIds(current => {
-    const next = new Set(current);
-    next.has(venue.id) ? next.delete(venue.id) : next.add(venue.id);
-    localStorage.setItem(FAVORITES_KEY, JSON.stringify([...next]));
-    return next;
-  });
-  if (adding) {
-    void trackConversion({
-      eventName: "favorite_add",
-      venueId: venue.id,
-      source: "buzz-map",
-      truthMode: venue.activity?.scoreMode || "forecast",
-      metadata: { selectedFilter: active },
-    }, session?.access_token);
-  }
-}
-
-  async function enableNotifications() {
-    if (!session) {
-      window.dispatchEvent(new Event("lit757:open-notification-auth"));
-      setWatchMessage("Sign in to finish connecting alerts to this device.");
-      return false;
-    }
-    if (typeof Notification === "undefined") {
-      setWatchMessage("Notifications are not supported in this browser. On iPhone, install Buzz to your Home Screen first.");
-      return false;
-    }
-    const permission = Notification.permission === "default" ? await Notification.requestPermission() : Notification.permission;
-    if (permission !== "granted") {
-      setWatchMessage("Notifications are blocked. Allow them in your browser settings to receive Buzz alerts.");
-      return false;
-    }
-    localStorage.setItem(ALERTS_KEY, "true");
-    setWatchMessage("Alerts are enabled. Buzz will notify you when this place meaningfully heats up.");
-    return true;
-  }
-
-  async function toggleWatch(venue: Venue) {
-  const next = new Set(watchedIds);
-  const removing = next.has(venue.id);
-  removing ? next.delete(venue.id) : next.add(venue.id);
-  setWatchedIds(next);
-  localStorage.setItem(VENUE_ALERTS_KEY, JSON.stringify([...next].map(venueId => ({ venueId, threshold: 80 }))));
-  if (removing) {
-    setWatchMessage("Alert removed for this place.");
-    return;
-  }
-  void trackConversion({
-    eventName: "watch_add",
-    venueId: venue.id,
-    source: "buzz-map",
-    truthMode: venue.activity?.scoreMode || "forecast",
-    metadata: { notification: true },
-  }, session?.access_token);
-  await enableNotifications();
-}
-
-  function inviteVenue(venue: Venue, referralId?: string | null) {
-  return {
-    id: venue.id,
-    name: venue.name,
-    city: venue.city || venue.area?.shortName || null,
-    latitude: venue.lat,
-    longitude: venue.lng,
-    status: statusFor(venue),
-    trend: venue.activity?.trendLabel || null,
-    mode: venue.activity?.scoreMode || "forecast",
-    referralId,
+  const useMyLocation = async () => {
+    const position = await getPosition();
+    const latitude = position.coords.latitude;
+    const longitude = position.coords.longitude;
+    mapRef.current?.easeTo({ center: [longitude, latitude], zoom: 13, duration: 650 });
+    await loadNearby({ lat: latitude, lng: longitude, radius: 10, label: "near you" });
   };
-}
-
-function trackVenueConversion(
-  venue: Venue,
-  eventName: ConversionEventName,
-  channel?: string,
-  referralId?: string | null,
-  metadata?: Record<string, string | number | boolean>,
-) {
-  void trackConversion({
-    eventName,
-    venueId: venue.id,
-    referralId,
-    source: "invite-the-crew",
-    channel,
-    truthMode: venue.activity?.scoreMode || "forecast",
-    metadata,
-  }, session?.access_token);
-}
-
-async function copyInviteLink(
-  venue: Venue,
-  referralId = createReferralId(),
-  trackAttempt = true,
-  fallback = false,
-) {
-  const details = inviteVenue(venue, referralId);
-  const link = buildInviteCrewUrl(window.location.origin, details);
-  if (trackAttempt) trackVenueConversion(venue, "share_attempt", "copy", referralId, { entry: "copy-link" });
-  try {
-    await navigator.clipboard.writeText(link);
-    setShareMessage("Invite link copied.");
-  } catch {
-    window.prompt("Copy this Buzz invite link", link);
-    setShareMessage("Copy the link above and send it to the crew.");
-  }
-  trackVenueConversion(venue, "copy_link", "copy", referralId, { fallback });
-}
-
-function textCrew(venue: Venue) {
-  const referralId = createReferralId();
-  const details = inviteVenue(venue, referralId);
-  const link = buildInviteCrewUrl(window.location.origin, details);
-  const body = `${buildInviteCrewText(details)} ${link}`;
-  trackVenueConversion(venue, "share_attempt", "sms", referralId, { entry: "text-crew" });
-  trackVenueConversion(venue, "sms_open", "sms", referralId, { result: "opened" });
-  window.location.href = `sms:?&body=${encodeURIComponent(body)}`;
-  setShareMessage("Opening your messages app…");
-}
-
-async function storyCardFile(venue: Venue) {
-  const details = inviteVenue(venue);
-  const response = await fetch(buildStoryCardUrl(window.location.origin, details));
-  if (!response.ok) throw new Error("Could not generate the Story card");
-  const blob = await response.blob();
-  const fileName = `buzz-${venue.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "venue"}.png`;
-  return new File([blob], fileName, { type: "image/png" });
-}
-
-async function downloadStoryCard(venue: Venue) {
-  const referralId = createReferralId();
-  trackVenueConversion(venue, "share_attempt", "story-download", referralId, { entry: "save-story" });
-  setSharing(true);
-  try {
-    const file = await storyCardFile(venue);
-    const objectUrl = URL.createObjectURL(file);
-    const anchor = document.createElement("a");
-    anchor.href = objectUrl;
-    anchor.download = file.name;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(objectUrl);
-    trackVenueConversion(venue, "story_download", "story-download", referralId, { result: "saved" });
-    setShareMessage("Story graphic saved. Post it anywhere your crew hangs out.");
-  } catch (shareError) {
-    trackVenueConversion(venue, "share_fallback", "story-download", referralId, { result: "error" });
-    setShareMessage(shareError instanceof Error ? shareError.message : "Could not save the Story graphic");
-  } finally {
-    setSharing(false);
-  }
-}
-
-async function shareWithCrew(venue: Venue) {
-  const referralId = createReferralId();
-  const details = inviteVenue(venue, referralId);
-  const link = buildInviteCrewUrl(window.location.origin, details);
-  const text = buildInviteCrewText(details);
-  trackVenueConversion(venue, "share_attempt", "web-share", referralId, { entry: "invite-the-crew" });
-  setSharing(true);
-  setShareMessage("Generating the crew card…");
-  try {
-    const file = await storyCardFile(venue);
-    const canShareFile = typeof navigator.canShare === "function" && navigator.canShare({ files: [file] });
-    if (typeof navigator.share === "function") {
-      await navigator.share({
-        title: `${venue.name} on Buzz`,
-        text,
-        url: link,
-        ...(canShareFile ? { files: [file] } : {}),
-      });
-      trackVenueConversion(venue, "share_complete", "web-share", referralId, { shareFile: canShareFile, result: "shared" });
-      setShareMessage("Shared with the crew.");
-    } else {
-      trackVenueConversion(venue, "share_fallback", "copy", referralId, { fallback: true });
-      await copyInviteLink(venue, referralId, false, true);
-    }
-  } catch (shareError) {
-    if (shareError instanceof DOMException && shareError.name === "AbortError") {
-      trackVenueConversion(venue, "share_cancel", "web-share", referralId, { result: "cancelled" });
-      setShareMessage("");
-    } else {
-      trackVenueConversion(venue, "share_fallback", "copy", referralId, { fallback: true, result: "error" });
-      await copyInviteLink(venue, referralId, false, true);
-    }
-  } finally {
-    setSharing(false);
-  }
-}
-
-  async function useMyLocation() {
-    setLoading(true);
-    try {
-      const position = await getPosition();
-      const latitude = position.coords.latitude;
-      const longitude = position.coords.longitude;
-      mapRef.current?.easeTo({ center: [longitude, latitude], zoom: 12.5, duration: 650 });
-      await loadNearby({ lat: latitude, lng: longitude, radius: 10, label: "near you" });
-    } catch {
-      setLoading(false);
-      setError("Location permission is needed to show nearby Buzz.");
-    }
-  }
 
   async function searchThisMap() {
     const bounds = mapRef.current?.getBounds();
@@ -882,20 +656,139 @@ async function shareWithCrew(venue: Venue) {
       } : venue;
       setVenues(current => current.map(update));
       setSelected(current => current ? update(current) : current);
-      setVoteMessage(`${payload.reportCount || 1} verified vote${payload.reportCount === 1 ? "" : "s"} active right now.`);
       setReward({ points: payload.pointsAwarded || 0, total: payload.totalPoints ?? null });
-      window.setTimeout(() => setReward(null), 2600);
+      setVoteMessage(payload.reportCount === 1
+        ? "Verified. Buzz updated this place and saved your report for calibration."
+        : `Verified with ${payload.reportCount} nearby reports. Buzz recalibrated this place.`);
     } catch (voteError) {
-      setVoteMessage(voteError instanceof Error ? voteError.message : "Could not submit your vote");
+      setVoteMessage(voteError instanceof Error ? voteError.message : "Could not verify this report.");
     } finally {
       setVoting(false);
     }
   }
 
+  function toggleFavorite(event: ReactMouseEvent, venue: Venue) {
+    event.stopPropagation();
+    setFavoriteIds(current => {
+      const next = new Set(current);
+      if (next.has(venue.id)) next.delete(venue.id);
+      else next.add(venue.id);
+      localStorage.setItem(FAVORITES_KEY, JSON.stringify([...next]));
+      return next;
+    });
+  }
+
+  async function enableNotifications() {
+    try {
+      if (!("Notification" in window)) return;
+      const permission = await Notification.requestPermission();
+      localStorage.setItem(ALERTS_KEY, permission === "granted" ? "1" : "0");
+    } catch {
+      // Browser support varies.
+    }
+  }
+
+  async function toggleWatch() {
+    if (!selected) return;
+    const next = new Set(watchedIds);
+    const watching = next.has(selected.id);
+    if (watching) next.delete(selected.id);
+    else next.add(selected.id);
+    setWatchedIds(next);
+    localStorage.setItem(VENUE_ALERTS_KEY, JSON.stringify([...next].map(venueId => ({ venueId }))));
+    setWatchMessage(watching ? "Buzz alerts turned off for this place." : "Buzz will alert you when this place starts heating up.");
+    if (!watching) await enableNotifications();
+  }
+
+  function inviteContext(venue: Venue) {
+    const referralId = createReferralId(venue.id);
+    const truthMode = venue.activity?.scoreMode || "forecast";
+    const url = buildInviteCrewUrl(window.location.origin, {
+      venueId: venue.id,
+      source: "invite-the-crew",
+      referralId,
+      truthMode,
+    });
+    return { referralId, truthMode, url };
+  }
+
+  async function trackShare(eventName: ConversionEventName, venue: Venue, referralId: string, truthMode: string, metadata: Record<string, unknown> = {}) {
+    await trackConversion({ eventName, venueId: venue.id, referralId, source: "invite-the-crew", truthMode, metadata }, session?.access_token);
+  }
+
+  async function shareWithCrew(venue: Venue) {
+    const context = inviteContext(venue);
+    const cardUrl = buildStoryCardUrl(window.location.origin, { venueId: venue.id, referralId: context.referralId, truthMode: context.truthMode });
+    const text = buildInviteCrewText({ venueName: venue.name, status: statusFor(venue), mode: context.truthMode });
+    setSharing(true);
+    setShareMessage("");
+    try {
+      const response = await fetch(cardUrl, { cache: "no-store" });
+      if (!response.ok) throw new Error("Could not build the Buzz Story card");
+      const blob = await response.blob();
+      const file = new File([blob], `${venue.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-buzz.png`, { type: "image/png" });
+      const supportsFiles = typeof navigator.canShare === "function" && navigator.canShare({ files: [file] });
+      if (supportsFiles) {
+        await navigator.share({ title: `${venue.name} on Buzz`, text, url: context.url, files: [file] });
+        await trackShare("share_completed", venue, context.referralId, context.truthMode, { method: "native_files" });
+        setShareMessage("Shared. Your crew gets the exact place and current Buzz state.");
+        return;
+      }
+      if (navigator.share) {
+        await navigator.share({ title: `${venue.name} on Buzz`, text, url: context.url });
+        await trackShare("share_completed", venue, context.referralId, context.truthMode, { method: "native_link" });
+        setShareMessage("Shared. Your crew gets the exact venue link.");
+        return;
+      }
+      await navigator.clipboard.writeText(`${text}\n${context.url}`);
+      await trackShare("share_fallback_used", venue, context.referralId, context.truthMode, { method: "clipboard" });
+      setShareMessage("Buzz invite copied. Paste it into your group chat.");
+    } catch (shareError) {
+      if (shareError instanceof DOMException && shareError.name === "AbortError") return;
+      await navigator.clipboard.writeText(`${text}\n${context.url}`).catch(() => undefined);
+      await trackShare("share_fallback_used", venue, context.referralId, context.truthMode, { method: "clipboard_after_error" });
+      setShareMessage("Buzz invite copied. Paste it into your group chat.");
+    } finally {
+      setSharing(false);
+    }
+  }
+
+  async function copyInviteLink(venue: Venue) {
+    const context = inviteContext(venue);
+    await navigator.clipboard.writeText(context.url);
+    await trackShare("share_fallback_used", venue, context.referralId, context.truthMode, { method: "copy_link" });
+    setShareMessage("Invite link copied.");
+  }
+
+  function textCrew(venue: Venue) {
+    const context = inviteContext(venue);
+    const text = buildInviteCrewText({ venueName: venue.name, status: statusFor(venue), mode: context.truthMode });
+    void trackShare("share_fallback_used", venue, context.referralId, context.truthMode, { method: "sms" });
+    window.location.href = `sms:?&body=${encodeURIComponent(`${text}\n${context.url}`)}`;
+  }
+
+  async function downloadStoryCard(venue: Venue) {
+    const context = inviteContext(venue);
+    const cardUrl = buildStoryCardUrl(window.location.origin, { venueId: venue.id, referralId: context.referralId, truthMode: context.truthMode });
+    const response = await fetch(cardUrl, { cache: "no-store" });
+    if (!response.ok) throw new Error("Could not build the Story card");
+    const blob = await response.blob();
+    const href = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = href;
+    anchor.download = `${venue.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-buzz-story.png`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(href);
+    await trackShare("share_fallback_used", venue, context.referralId, context.truthMode, { method: "story_download" });
+    setShareMessage("Story card saved. Post it anywhere.");
+  }
+
+  const selectedWebsite = detail?.website || selected?.website || null;
+  const selectedPhone = detail?.phone || selected?.phone || null;
+  const selectedAddress = detail?.address || selected?.address || null;
   const selectedHours = todayHours(detail?.hours);
-  const selectedPhone = detail?.phone || selected?.phone;
-  const selectedWebsite = detail?.website || selected?.website;
-  const selectedAddress = detail?.address || selected?.address;
   const selectedVibe = selected ? vibeFor(selected) : null;
 
   return (
@@ -930,7 +823,7 @@ async function shareWithCrew(venue: Venue) {
               const vibe = vibeFor(venue);
               return (
                 <article key={venue.id} className={selected?.id === venue.id ? "selected" : ""} onClick={() => selectVenue(venue.id)}>
-                  <div className="buzz-list-photo"><img src={logoUrlFor(venue)} alt={`${venue.name} logo`} loading="lazy" decoding="async" /><b>{score(venue)}</b></div>
+                  <div className="buzz-list-photo"><img src={logoUrlFor(venue)} alt={`${venue.name} logo`} loading="lazy" decoding="async" /></div>
                   <div className="buzz-list-copy"><small>{index === 0 ? "BEST NOW" : `#${index + 1}`} · {categoryFor(venue)} · {milesLabel(venue.distanceMiles) || venue.city || "Nearby"}</small><strong>{venue.name}</strong><span className={`buzz-vibe-tag ${vibe.truth}`}>{vibe.label}<b>{vibe.truth === "live" ? "LIVE" : "FORECAST"}</b></span><p>{venue.event?.name || venue.reason || "Available right now"}</p><span className={`buzz-status s${Math.floor(score(venue) / 20)}`}>{statusFor(venue)}{venue.activity?.scoreMode === "live" ? " · Live" : " · Forecast"}</span></div>
                   <button type="button" className={favoriteIds.has(venue.id) ? "saved" : ""} onClick={event => toggleFavorite(event, venue)} aria-label={`Save ${venue.name}`}><Heart fill={favoriteIds.has(venue.id) ? "currentColor" : "none"} /></button>
                 </article>
@@ -947,7 +840,7 @@ async function shareWithCrew(venue: Venue) {
             <button type="button" onClick={() => void searchThisMap()}><Search /> Search this map</button>
           </div>
           <div className="buzz-map-mode">
-            {mapZoom < 9.8 ? <><Sparkles /><span>Area heat</span><small>Tap a hot zone or zoom in for venues</small></> : mapZoom < 12.6 ? <><Sparkles /><span>Heat hubs</span><small>Tap a glow to reveal its venues</small></> : <><MapPin /><span>Logo pins</span><small>Thick rings show each place’s Buzz</small></>}
+            {mapZoom < 9.8 ? <><Sparkles /><span>City pulse</span><small>Tap a glow or zoom in for live places</small></> : mapZoom < 12.6 ? <><Sparkles /><span>Buzzing zones</span><small>Tap the energy to reveal its venues</small></> : <><MapPin /><span>Live places</span><small>Thicker rings mean stronger Buzz</small></>}
           </div>
           {loading && <div className="buzz-map-loading"><i /> Updating Buzz</div>}
           {error && <button type="button" className="buzz-map-error" onClick={() => void loadNearby()}>{error} · Retry</button>}
@@ -978,28 +871,26 @@ async function shareWithCrew(venue: Venue) {
             </section>
 
             <section className="buzz-invite-card">
-    <header><div><small>FOMO MODE</small><strong>Bring the crew</strong><p>Share this venue’s surge—not your location—with one tap.</p></div><Share2 /></header>
-    <button type="button" className="buzz-invite-primary" disabled={sharing} onClick={() => void shareWithCrew(selected)}><Share2 />{sharing ? "Building the Story card…" : "Invite the Crew"}</button>
-    <div>
-      <button type="button" onClick={() => void copyInviteLink(selected)}><Copy />Copy link</button>
-      <button type="button" onClick={() => textCrew(selected)}><MessageCircle />Text crew</button>
-      <button type="button" disabled={sharing} onClick={() => void downloadStoryCard(selected)}><Download />Save Story</button>
-    </div>
-    {shareMessage && <p>{shareMessage}</p>}
-  </section>
+              <header><div><small>FOMO MODE</small><strong>Bring the crew</strong><p>Share this venue’s surge—not your location—with one tap.</p></div><Share2 /></header>
+              <button type="button" className="buzz-invite-primary" disabled={sharing} onClick={() => void shareWithCrew(selected)}><Share2 />{sharing ? "Building the Story card…" : "Invite the Crew"}</button>
+              <div>
+                <button type="button" onClick={() => void copyInviteLink(selected)}><Copy />Copy link</button>
+                <button type="button" onClick={() => textCrew(selected)}><MessageCircle />Text crew</button>
+                <button type="button" disabled={sharing} onClick={() => void downloadStoryCard(selected)}><Download />Save Story</button>
+              </div>
+              {shareMessage && <p>{shareMessage}</p>}
+            </section>
 
-  <div className="buzz-detail-actions">
-              <button type="button" onClick={() => void toggleWatch(selected)}><Bell fill={watchedIds.has(selected.id) ? "currentColor" : "none"} />{watchedIds.has(selected.id) ? "Watching" : "Alert me"}</button>
-              <button type="button" onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(selectedAddress || `${selected.lat},${selected.lng}`)}`, "_blank")}><Navigation />Directions</button>
+            <div className="buzz-detail-actions">
+              <button type="button" onClick={() => void toggleWatch()}><Bell />{watchedIds.has(selected.id) ? "Watching" : "Alert me"}</button>
               {selectedPhone && <a href={`tel:${selectedPhone}`}><Phone />Call</a>}
-              {selectedWebsite && <a href={selectedWebsite} target="_blank" rel="noreferrer">Website</a>}
+              {selectedAddress && <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selectedAddress)}`} target="_blank" rel="noreferrer"><Navigation />Directions</a>}
             </div>
-            {watchMessage && <p className="buzz-watch-status">{watchMessage}</p>}
+            {watchMessage && <p className="buzz-watch-message">{watchMessage}</p>}
+            {reward && <p className="buzz-points-message">+{reward.points} Buzz Points{reward.total != null ? ` · ${reward.total} total` : ""}</p>}
           </div>
         </aside>
       )}
-
-      {reward && <div className="buzz-points-pop"><strong>+{reward.points || 10}</strong><span>BUZZ POINTS</span>{reward.total != null && <small>{reward.total} total</small>}</div>}
     </div>
   );
 }
