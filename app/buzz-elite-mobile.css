@@ -1,0 +1,366 @@
+/* Buzz mobile command surface — the map and live activity are the product. */
+@media (max-width: 1023px) {
+  :root {
+    --buzz-bg: #05070a;
+    --buzz-panel: rgba(8, 12, 18, 0.9);
+    --buzz-panel-solid: #090d13;
+    --buzz-border: rgba(255,255,255,0.11);
+    --buzz-muted: rgba(255,255,255,0.55);
+    --buzz-hot: #ff5a36;
+    --buzz-warm: #ff9a3d;
+  }
+
+  html,
+  body {
+    overflow: hidden;
+    background: var(--buzz-bg) !important;
+    color: #fff !important;
+  }
+
+  body::selection {
+    background: rgba(255,90,54,0.32);
+  }
+
+  main {
+    position: relative;
+    height: 100dvh !important;
+    min-height: 100dvh !important;
+    overflow: hidden !important;
+    background: var(--buzz-bg) !important;
+    color: #fff !important;
+  }
+
+  main > div {
+    position: relative;
+    display: block !important;
+    height: 100% !important;
+    min-height: 0 !important;
+  }
+
+  /* Map first. */
+  section[aria-label="757 venue map"] {
+    position: absolute !important;
+    inset: 0 !important;
+    z-index: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 100% !important;
+    overflow: hidden !important;
+    background: #070b10 !important;
+  }
+
+  section[aria-label="757 venue map"]::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    pointer-events: none;
+    background:
+      linear-gradient(180deg, rgba(3,5,8,0.94) 0, rgba(3,5,8,0.32) 15%, transparent 31%),
+      linear-gradient(0deg, rgba(3,5,8,0.98) 0, rgba(3,5,8,0.36) 23%, transparent 43%);
+  }
+
+  section[aria-label="757 venue map"]::after {
+    content: "LIVE CITY ENERGY";
+    position: absolute;
+    left: 18px;
+    top: 158px;
+    z-index: 9;
+    padding: 7px 10px;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 999px;
+    background: rgba(4,7,11,0.68);
+    color: rgba(255,255,255,0.72);
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.17em;
+    backdrop-filter: blur(18px);
+  }
+
+  /* Remove the giant HTML Explore bubbles from previous mobile builds. */
+  .mapboxgl-marker:not(:has(.discovery-user-marker)),
+  .mapboxgl-marker:has(button),
+  [class*="explore-marker"],
+  [class*="district-marker"],
+  [data-map-explore],
+  [aria-label^="Explore "] {
+    display: none !important;
+  }
+
+  .mapboxgl-ctrl-top-right,
+  .mapboxgl-ctrl-bottom-right,
+  .mapboxgl-ctrl-bottom-left {
+    display: none !important;
+  }
+
+  /* UI floats over the map instead of stealing the screen. */
+  main > div > section:first-child {
+    position: absolute !important;
+    inset: 0 !important;
+    z-index: 20 !important;
+    display: block !important;
+    min-height: 0 !important;
+    height: 100% !important;
+    overflow: visible !important;
+    border: 0 !important;
+    background: transparent !important;
+    color: #fff !important;
+    pointer-events: none;
+  }
+
+  main > div > section:first-child button,
+  main > div > section:first-child input,
+  main > div > section:first-child select,
+  main > div > section:first-child a {
+    pointer-events: auto;
+  }
+
+  main > div > section:first-child > header {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 30;
+    height: 66px !important;
+    padding: max(12px, env(safe-area-inset-top)) 16px 8px !important;
+    border: 0 !important;
+    background: linear-gradient(180deg, rgba(4,6,9,0.98), rgba(4,6,9,0.72), transparent) !important;
+    color: #fff !important;
+  }
+
+  main > div > section:first-child > header > div:first-child > div:first-child {
+    display: none !important;
+  }
+
+  main > div > section:first-child > header p:first-child {
+    color: #fff !important;
+    font-size: 27px !important;
+    font-weight: 950 !important;
+    line-height: 1 !important;
+    letter-spacing: -0.08em !important;
+    text-transform: uppercase;
+  }
+
+  main > div > section:first-child > header p:first-child::after {
+    content: "BUZZ";
+    font-size: 0;
+  }
+
+  main > div > section:first-child > header p:first-child {
+    font-size: 0 !important;
+  }
+
+  main > div > section:first-child > header p:first-child::before {
+    content: "BUZZ";
+    font-size: 28px;
+  }
+
+  main > div > section:first-child > header p:last-child {
+    display: none !important;
+  }
+
+  main > div > section:first-child > header select {
+    display: none !important;
+  }
+
+  main > div > section:first-child > header button {
+    width: 42px !important;
+    height: 42px !important;
+    border-color: rgba(255,255,255,0.12) !important;
+    background: rgba(9,13,19,0.76) !important;
+    color: #fff !important;
+    backdrop-filter: blur(18px);
+  }
+
+  main > div > section:first-child > div.no-scrollbar {
+    position: absolute !important;
+    inset: 0 !important;
+    z-index: 25;
+    height: 100% !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    background: transparent !important;
+    pointer-events: none;
+  }
+
+  main > div > section:first-child > div.no-scrollbar > :nth-child(1),
+  main > div > section:first-child > div.no-scrollbar > h1,
+  main > div > section:first-child > div.no-scrollbar > p,
+  main > div > section:first-child > div.no-scrollbar > :last-child {
+    display: none !important;
+  }
+
+  /* Compact command search. */
+  main > div > section:first-child > div.no-scrollbar > form {
+    position: absolute;
+    top: 72px;
+    left: 14px;
+    right: 14px;
+    z-index: 31;
+    display: block !important;
+    margin: 0 !important;
+    pointer-events: auto;
+  }
+
+  main > div > section:first-child > div.no-scrollbar > form input {
+    height: 48px !important;
+    border: 1px solid rgba(255,255,255,0.13) !important;
+    background: rgba(8,12,18,0.83) !important;
+    color: #fff !important;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.35), inset 0 1px rgba(255,255,255,0.04);
+    backdrop-filter: blur(22px);
+  }
+
+  main > div > section:first-child > div.no-scrollbar > form input::placeholder {
+    color: rgba(255,255,255,0.42) !important;
+  }
+
+  main > div > section:first-child > div.no-scrollbar > form > button {
+    display: none !important;
+  }
+
+  /* Category rail: small, quiet, premium. */
+  main > div > section:first-child > div.no-scrollbar > [role="tablist"] {
+    position: absolute;
+    top: 128px;
+    left: 14px;
+    right: 14px;
+    z-index: 31;
+    display: flex !important;
+    gap: 7px !important;
+    margin: 0 !important;
+    overflow-x: auto;
+    padding: 0 0 4px !important;
+    pointer-events: auto;
+    scrollbar-width: none;
+  }
+
+  main > div > section:first-child > div.no-scrollbar > [role="tablist"]::-webkit-scrollbar {
+    display: none;
+  }
+
+  main > div > section:first-child > div.no-scrollbar > [role="tablist"] button {
+    flex: 0 0 auto;
+    height: 35px !important;
+    min-width: max-content;
+    padding: 0 15px !important;
+    border: 1px solid rgba(255,255,255,0.12) !important;
+    background: rgba(8,12,18,0.72) !important;
+    color: rgba(255,255,255,0.67) !important;
+    font-size: 10px !important;
+    font-weight: 750 !important;
+    backdrop-filter: blur(18px);
+  }
+
+  main > div > section:first-child > div.no-scrollbar > [role="tablist"] button[aria-selected="true"] {
+    border-color: rgba(255,106,64,0.7) !important;
+    background: rgba(255,90,54,0.94) !important;
+    color: #fff !important;
+    box-shadow: 0 8px 24px rgba(255,90,54,0.28);
+  }
+
+  /* Bottom live stack. */
+  main > div > section:first-child > div.no-scrollbar > div.mt-3 {
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    bottom: max(10px, env(safe-area-inset-bottom));
+    z-index: 32;
+    max-height: 220px;
+    margin: 0 !important;
+    overflow: hidden;
+    padding: 42px 8px 8px;
+    border: 1px solid var(--buzz-border);
+    border-radius: 26px;
+    background: linear-gradient(180deg, rgba(10,14,21,0.93), rgba(6,9,14,0.98));
+    box-shadow: 0 -20px 70px rgba(0,0,0,0.42), inset 0 1px rgba(255,255,255,0.04);
+    backdrop-filter: blur(24px);
+    pointer-events: auto;
+  }
+
+  main > div > section:first-child > div.no-scrollbar > div.mt-3::before {
+    content: "HOT RIGHT NOW";
+    position: absolute;
+    left: 18px;
+    top: 14px;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 900;
+    letter-spacing: 0.15em;
+  }
+
+  main > div > section:first-child > div.no-scrollbar > div.mt-3::after {
+    content: "LIVE";
+    position: absolute;
+    right: 16px;
+    top: 11px;
+    padding: 5px 8px;
+    border-radius: 999px;
+    background: rgba(255,90,54,0.16);
+    color: #ff7655;
+    font-size: 9px;
+    font-weight: 900;
+    letter-spacing: 0.13em;
+  }
+
+  main > div > section:first-child > div.no-scrollbar > div.mt-3 > .space-y-2\.5 {
+    display: grid !important;
+    gap: 7px !important;
+    max-height: 162px;
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+
+  main > div > section:first-child > div.no-scrollbar > div.mt-3 button.group {
+    grid-template-columns: 1fr 62px !important;
+    min-height: 72px;
+    gap: 8px !important;
+    padding: 8px !important;
+    border-color: rgba(255,255,255,0.09) !important;
+    border-radius: 18px !important;
+    background: rgba(255,255,255,0.035) !important;
+    color: #fff !important;
+    box-shadow: none !important;
+    transform: none !important;
+  }
+
+  main > div > section:first-child > div.no-scrollbar > div.mt-3 button.group span,
+  main > div > section:first-child > div.no-scrollbar > div.mt-3 button.group p {
+    color: inherit;
+  }
+
+  main > div > section:first-child > div.no-scrollbar > div.mt-3 button.group span[class*="text-black"] {
+    color: rgba(255,255,255,0.52) !important;
+  }
+
+  main > div > section:first-child > div.no-scrollbar > div.mt-3 button.group > div,
+  main > div > section:first-child > div.no-scrollbar > div.mt-3 button.group img {
+    height: 62px !important;
+    border-radius: 14px !important;
+  }
+
+  /* The location action is the only map control users need. */
+  section[aria-label="757 venue map"] > button {
+    right: 16px !important;
+    bottom: 242px !important;
+    width: 45px !important;
+    height: 45px !important;
+    border-color: rgba(255,255,255,0.14) !important;
+    background: rgba(8,12,18,0.82) !important;
+    color: #fff !important;
+    backdrop-filter: blur(20px);
+  }
+
+  section[aria-label="757 venue map"] > .pointer-events-none.absolute.left-4 {
+    display: none !important;
+  }
+
+  .discovery-user-marker {
+    width: 14px;
+    height: 14px;
+    border: 3px solid #fff;
+    background: #2f8cff;
+    box-shadow: 0 0 0 8px rgba(47,140,255,0.2), 0 0 28px rgba(47,140,255,0.65);
+  }
+}
