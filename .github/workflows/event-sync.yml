@@ -4,9 +4,14 @@ on:
   schedule:
     - cron: "23 */4 * * *"
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/event-sync.yml"
 
 permissions:
   contents: read
+  issues: write
 
 concurrency:
   group: event-discovery-sync
@@ -17,20 +22,96 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
-      - name: Sync ticketed and local events
+      - name: Sync and validate official ticketed-event providers
         env:
           BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        shell: bash
         run: |
           set -euo pipefail
           : "${BASE_URL:?Add BUZZ_PRODUCTION_URL as a GitHub Actions secret}"
           : "${CRON_SECRET:?Add CRON_SECRET as a GitHub Actions secret}"
           BASE_URL="${BASE_URL%/}"
 
-          curl --silent --show-error --fail-with-body --retry 2 --max-time 55 \
+          curl --silent --show-error --fail-with-body --retry 2 --max-time 90 \
             -H "Authorization: Bearer ${CRON_SECRET}" \
-            "${BASE_URL}/api/fetch-events"
+            "${BASE_URL}/api/fetch-events" \
+            | tee event-sync.json
 
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path("event-sync.json").read_text(encoding="utf-8"))
+          assert payload.get("success") is True, payload
+
+          ticketmaster = payload.get("ticketmaster") or {}
+          assert ticketmaster.get("success") is True, f"Ticketmaster sync failed: {ticketmaster}"
+
+          wrapper = payload.get("eventbrite") or {}
+          assert wrapper.get("success") is True, f"Eventbrite internal request failed: {wrapper}"
+          assert int(wrapper.get("status") or 0) == 200, wrapper
+          eventbrite = wrapper.get("data") or {}
+          assert eventbrite.get("success") is True, eventbrite
+          assert eventbrite.get("configured") is True, "EVENTBRITE_PRIVATE_TOKEN is not configured"
+          assert eventbrite.get("authenticated") is True, "Eventbrite token did not authenticate"
+          assert eventbrite.get("scope") == "account_organizations", eventbrite
+          assert eventbrite.get("publicRegionalDiscovery") is False, "Eventbrite account token was misrepresented as public regional coverage"
+          assert eventbrite.get("distributionPartnerApprovalRequired") is True, eventbrite
+          assert eventbrite.get("truthNote"), "Eventbrite forecast-context truth rule is missing"
+
+          summary = {
+              "authenticated": True,
+              "organizationCount": int(eventbrite.get("organizationCount") or 0),
+              "providerEventsFound": int(eventbrite.get("providerEventsFound") or 0),
+              "marketEventsUpserted": int(eventbrite.get("marketEventsUpserted") or 0),
+              "providerErrorCount": len(eventbrite.get("providerErrors") or []),
+              "publicRegionalDiscovery": False,
+              "distributionPartnerApprovalRequired": True,
+              "ticketmasterUpserted": int(ticketmaster.get("upserted") or 0),
+          }
+          Path("eventbrite-summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+          print(json.dumps(summary, indent=2))
+          PY
+
+      - name: Sync official local calendar feeds
+        env:
+          BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_URL="${BASE_URL%/}"
           curl --silent --show-error --fail-with-body --retry 2 --max-time 55 \
             -H "Authorization: Bearer ${CRON_SECRET}" \
             "${BASE_URL}/api/events/local-calendar"
+
+      - name: Record initial Eventbrite production proof
+        if: github.event_name == 'push' && always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          if [ -f eventbrite-summary.json ]; then
+            ORGANIZATIONS=$(jq -r '.organizationCount' eventbrite-summary.json)
+            FOUND=$(jq -r '.providerEventsFound' eventbrite-summary.json)
+            UPSERTED=$(jq -r '.marketEventsUpserted' eventbrite-summary.json)
+            ERRORS=$(jq -r '.providerErrorCount' eventbrite-summary.json)
+            printf '## Eventbrite official API validation passed\n\n- Private token authenticated: **yes**\n- Accessible organizations: **%s**\n- Account events returned: **%s**\n- Hampton Roads events upserted: **%s**\n- Organization request errors: **%s**\n- Broad public discovery: **not included with a personal token**\n- Distribution-partner approval: **required for regional public coverage**\n- Eventbrite remains scheduled forecast context only\n\n[Open workflow run](%s)\n' "$ORGANIZATIONS" "$FOUND" "$UPSERTED" "$ERRORS" "$RUN_URL" > eventbrite-comment.md
+          else
+            printf '## Eventbrite official API validation failed\n\nThe token, official organization endpoint, or production ingestion failed. No token value was exposed.\n\n[Open workflow run](%s)\n' "$RUN_URL" > eventbrite-comment.md
+          fi
+          gh issue comment 68 --repo "$GITHUB_REPOSITORY" --body-file eventbrite-comment.md
+
+      - name: Upload initial Eventbrite validation evidence
+        if: github.event_name == 'push' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eventbrite-production-validation-${{ github.run_id }}
+          path: |
+            event-sync.json
+            eventbrite-summary.json
+            eventbrite-comment.md
+          if-no-files-found: warn
+          retention-days: 7
