@@ -4,7 +4,8 @@ export type BuzzSignalFamily =
   | "first_party_occupancy"
   | "commercial_demand"
   | "event_forecast"
-  | "mobility";
+  | "mobility"
+  | "historical_learning";
 
 export type BuzzSignalType =
   | "besttime_live"
@@ -16,7 +17,8 @@ export type BuzzSignalType =
   | "ticket_inventory"
   | "ticket_scans"
   | "predicted_attendance"
-  | "traffic_congestion";
+  | "traffic_congestion"
+  | "calibration_adjustment";
 
 export type BuzzConfidence = "low" | "medium" | "high";
 export type BuzzScoreMode = "live" | "forecast";
@@ -42,7 +44,7 @@ export type BuzzScoreFactor = {
 };
 
 export type BuzzScoreResult = {
-  version: "buzz-v1" | "buzz-v2";
+  version: "buzz-v1" | "buzz-v2" | "buzz-v3";
   score: number;
   label: "Chill" | "Active" | "Heating Up" | "On Fire";
   mode: BuzzScoreMode;

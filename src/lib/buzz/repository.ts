@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { buildCalibrationProfile, calibrationSignal, type BuzzGroundTruthSample } from "./calibration";
 import { calculateBuzzScore } from "./score-v1";
 import type { BuzzSignal, VenueForBuzz } from "./types";
 
@@ -11,6 +12,13 @@ type SignalRow = {
   confidence: number;
   observed_at: string;
   expires_at: string;
+  metadata?: Record<string, unknown> | null;
+};
+
+type GroundTruthRow = {
+  observed_at: string;
+  occupancy_pct?: number | null;
+  observer_type?: string | null;
   metadata?: Record<string, unknown> | null;
 };
 
@@ -64,8 +72,53 @@ export async function loadActiveSignals(db: SupabaseClient, venueId: string, now
   return (data || []).map(row => rowToSignal(row as SignalRow));
 }
 
+function groundTruthWeight(row: GroundTruthRow) {
+  const observer = String(row.observer_type || "").toLowerCase();
+  const consensus = Number(row.metadata?.consensus || 0);
+  const uniqueUsers = Number(row.metadata?.uniqueUsers || 0);
+  if (/sensor|ticket_scan|partner|door_counter|pos/.test(observer)) return 1.25;
+  if (observer === "verified_user_consensus") {
+    return Math.min(1.15, 0.72 + Math.max(0, consensus) * 0.25 + Math.min(0.18, uniqueUsers * 0.03));
+  }
+  if (observer === "verified_user_observation") return 0.38;
+  if (/field_observer|admin/.test(observer)) return 0.82;
+  return 0.5;
+}
+
+async function loadCalibrationSignal(db: SupabaseClient, venue: VenueForBuzz, now: Date) {
+  const since = new Date(now.getTime() - 180 * 24 * 60 * 60_000).toISOString();
+  const { data, error } = await db
+    .from("buzz_ground_truth")
+    .select("observed_at,occupancy_pct,observer_type,metadata")
+    .eq("venue_id", venue.id)
+    .gte("observed_at", since)
+    .order("observed_at", { ascending: false })
+    .limit(300);
+  if (error) {
+    console.error(`Could not load Buzz calibration samples for ${venue.id}: ${error.message}`);
+    return null;
+  }
+
+  const samples = ((data || []) as GroundTruthRow[]).flatMap(row => {
+    const predictedScore = Number(row.metadata?.predictedScore);
+    const actualScore = Number(row.occupancy_pct ?? row.metadata?.averageCrowdValue);
+    if (!Number.isFinite(predictedScore) || !Number.isFinite(actualScore)) return [];
+    return [{
+      predictedScore,
+      actualScore,
+      observedAt: row.observed_at,
+      weight: groundTruthWeight(row),
+    } satisfies BuzzGroundTruthSample];
+  });
+  return calibrationSignal(buildCalibrationProfile(venue, samples, now), now);
+}
+
 export async function recomputeBuzzScore(db: SupabaseClient, venue: VenueForBuzz, now = new Date()) {
-  const signals = await loadActiveSignals(db, venue.id, now);
+  const activeSignals = await loadActiveSignals(db, venue.id, now);
+  const learned = await loadCalibrationSignal(db, venue, now);
+  const signals = learned ? [...activeSignals.filter(signal => signal.type !== "calibration_adjustment"), learned] : activeSignals;
+  if (learned) await saveBuzzSignals(db, venue.id, [learned]);
+
   const score = calculateBuzzScore(venue, signals, now);
   const snapshot = {
     venue_id: venue.id,

@@ -9,6 +9,7 @@ const FAMILY_CAPS: Record<BuzzSignalFamily, number> = {
   commercial_demand: 22,
   event_forecast: 10,
   mobility: 7,
+  historical_learning: 18,
 };
 
 const SOURCE_RELIABILITY: Record<string, number> = {
@@ -16,8 +17,10 @@ const SOURCE_RELIABILITY: Record<string, number> = {
   lit757_users: 0.95,
   besttime: 0.9,
   ticketmaster: 0.82,
+  seatgeek: 0.76,
   predicthq: 0.72,
   tomtom: 0.7,
+  buzz_ml: 0.9,
 };
 
 function freshness(signal: BuzzSignal, now: number) {
@@ -47,7 +50,7 @@ function sourceReliability(signal: BuzzSignal) {
 }
 
 function signalPoints(signal: BuzzSignal) {
-  const value = clamp(Number(signal.value) || 0, 0, 200);
+  const value = Number(signal.value) || 0;
   switch (signal.type) {
     case "besttime_live": return clamp(value / 100, 0, 1) * 45;
     case "besttime_forecast": return clamp(value / 100, 0, 1) * 14;
@@ -59,6 +62,7 @@ function signalPoints(signal: BuzzSignal) {
     case "ticket_scans": return clamp(value / 100, 0, 1) * 58;
     case "predicted_attendance": return clamp(value / 100, 0, 1) * 8;
     case "traffic_congestion": return clamp(value / 100, 0, 1) * 6;
+    case "calibration_adjustment": return clamp(value, -18, 18);
     default: return 0;
   }
 }
@@ -75,6 +79,7 @@ function signalLabel(signal: BuzzSignal) {
     ticket_scans: "Entry scans",
     predicted_attendance: "Predicted attendance",
     traffic_congestion: "Nearby traffic congestion",
+    calibration_adjustment: "Learned venue calibration",
   };
   return labels[signal.type];
 }
@@ -92,9 +97,13 @@ function confidenceFor(
   activeFamilies: Set<BuzzSignalFamily>,
   directEvidence: boolean,
   liveAge: number | null,
+  calibrationEffectiveSamples: number,
+  calibrationError: number,
 ): BuzzConfidence {
-  if (directEvidence && liveFamilies.size >= 2 && liveSources.size >= 2 && (liveAge ?? 999) <= 20) return "high";
-  if (directEvidence || (liveFamilies.size >= 2 && liveSources.size >= 2) || activeFamilies.size >= 3) return "medium";
+  const matureCalibration = calibrationEffectiveSamples >= 10 && calibrationError <= 12;
+  const usefulCalibration = calibrationEffectiveSamples >= 5 && calibrationError <= 20;
+  if (directEvidence && liveFamilies.size >= 2 && liveSources.size >= 2 && (liveAge ?? 999) <= 20 && matureCalibration) return "high";
+  if (directEvidence || (liveFamilies.size >= 2 && liveSources.size >= 2) || activeFamilies.size >= 3 || usefulCalibration) return "medium";
   return "low";
 }
 
@@ -129,7 +138,7 @@ export function calculateBuzzScore(venue: VenueForBuzz, signals: BuzzSignal[], r
     };
     const key = `${signal.family}:${signal.type}`;
     const existing = strongestByType.get(key);
-    if (!existing || factor.points > existing.points) strongestByType.set(key, factor);
+    if (!existing || Math.abs(factor.points) > Math.abs(existing.points)) strongestByType.set(key, factor);
   }
 
   const familyFactors = new Map<BuzzSignalFamily, BuzzScoreFactor[]>();
@@ -139,13 +148,14 @@ export function calculateBuzzScore(venue: VenueForBuzz, signals: BuzzSignal[], r
   }
 
   for (const [family, candidates] of familyFactors) {
-    const ordered = candidates.sort((a, b) => b.points - a.points);
+    const ordered = candidates.sort((a, b) => Math.abs(b.points) - Math.abs(a.points));
     let remaining = FAMILY_CAPS[family];
     ordered.forEach((factor, index) => {
       const correlationWeight = index === 0 ? 1 : index === 1 ? 0.35 : 0.15;
-      const credited = Math.min(remaining, factor.points * correlationWeight);
-      remaining -= credited;
-      if (credited >= 0.5) factors.push({ ...factor, points: Number(credited.toFixed(1)) });
+      const rawCredited = factor.points * correlationWeight;
+      const credited = rawCredited >= 0 ? Math.min(remaining, rawCredited) : Math.max(-remaining, rawCredited);
+      remaining -= Math.abs(credited);
+      if (Math.abs(credited) >= 0.5) factors.push({ ...factor, points: Number(credited.toFixed(1)) });
     });
   }
 
@@ -161,7 +171,7 @@ export function calculateBuzzScore(venue: VenueForBuzz, signals: BuzzSignal[], r
   const independentCorroboration = liveFamilies.size >= 2 && liveSources.size >= 2;
 
   if (independentCorroboration) {
-    factors.push({ family: "corroboration", label: "Independent live corroboration", points: 6, source: "buzz-v2" });
+    factors.push({ family: "corroboration", label: "Independent live corroboration", points: 6, source: "buzz-v3" });
   }
 
   let score = Math.round(factors.reduce((sum, factor) => sum + factor.points, 0));
@@ -180,16 +190,19 @@ export function calculateBuzzScore(venue: VenueForBuzz, signals: BuzzSignal[], r
     .filter(value => Number.isFinite(value) && value > now);
   const expiresAt = new Date(liveExpiries.length ? Math.min(...liveExpiries) : now + 45 * 60_000).toISOString();
   const leading = factors
-    .filter(factor => factor.family !== "prior" && factor.points >= 1)
-    .sort((a, b) => b.points - a.points)
+    .filter(factor => factor.family !== "prior" && Math.abs(factor.points) >= 1)
+    .sort((a, b) => Math.abs(b.points) - Math.abs(a.points))
     .slice(0, 3);
+  const calibration = active.find(item => item.signal.type === "calibration_adjustment")?.signal;
+  const calibrationEffectiveSamples = Number(calibration?.metadata?.effectiveSampleSize ?? calibration?.metadata?.sampleCount ?? 0);
+  const calibrationError = Number(calibration?.metadata?.meanAbsoluteError || 999);
 
   return {
-    version: "buzz-v2",
+    version: "buzz-v3",
     score,
     label: labelFor(score),
     mode: liveFamilies.size ? "live" : "forecast",
-    confidence: confidenceFor(liveFamilies, liveSources, activeFamilies, verifiedFirstParty, evidenceAgeMinutes),
+    confidence: confidenceFor(liveFamilies, liveSources, activeFamilies, verifiedFirstParty, evidenceAgeMinutes, calibrationEffectiveSamples, calibrationError),
     computedAt: referenceTime.toISOString(),
     expiresAt,
     evidenceAgeMinutes,
@@ -197,6 +210,6 @@ export function calculateBuzzScore(venue: VenueForBuzz, signals: BuzzSignal[], r
     explanation: leading.length
       ? leading.map(factor => factor.label.toLowerCase()).join(", ")
       : "No timely crowd evidence yet; showing a conservative forecast.",
-    factors: factors.sort((a, b) => b.points - a.points),
+    factors: factors.sort((a, b) => Math.abs(b.points) - Math.abs(a.points)),
   };
 }
