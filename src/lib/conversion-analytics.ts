@@ -13,7 +13,8 @@ export type ConversionEventName =
   // Backward-compatible UI aliases. They are canonicalized before transmission.
   | "share_copy"
   | "share_sms"
-  | "share_native";
+  | "share_native"
+  | "share_download";
 
 export type ConversionEvent = {
   eventName: ConversionEventName;
@@ -32,6 +33,7 @@ const CANONICAL_EVENT: Partial<Record<ConversionEventName, ConversionEventName>>
   share_copy: "copy_link",
   share_sms: "sms_open",
   share_native: "share_complete",
+  share_download: "story_download",
 };
 
 function compactId(prefix: string) {
