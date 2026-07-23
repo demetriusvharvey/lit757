@@ -175,7 +175,15 @@ export function enrichVenue(venue: RawVenue, options: { generatedAt?: Date; dist
     signalCount: signals.length,
     trendDelta: trend.delta,
     reason: venue.heat?.detail || venue.reason,
-    sources: signals,
+    sources: signals.map(signal => ({
+      source: signal.source,
+      family: signal.family,
+      observedAt: signal.observedAt,
+      expiresAt: signal.expiresAt,
+      confidence: signal.confidence,
+      isLive: signal.direct,
+      verifiedNearby: signal.verifiedNearby,
+    })),
     now,
   });
   const trip = travelMinutes(options.distanceMiles);
