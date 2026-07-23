@@ -57,10 +57,10 @@ export async function GET(req: Request) {
 
   try {
     const ticketmasterResult = await fetchTicketmasterEvents();
-    const eventbriteResult = await safeInternalFetch(
-      `${baseUrl}/api/fetch-eventbrite`,
-      secret,
-    );
+    const [eventbriteResult, seatGeekResult] = await Promise.all([
+      safeInternalFetch(`${baseUrl}/api/fetch-eventbrite`, secret),
+      safeInternalFetch(`${baseUrl}/api/fetch-seatgeek`, secret),
+    ]);
     const venueScoreResult = await safeInternalFetch(
       `${baseUrl}/api/run-venue-intelligence`,
       secret,
@@ -75,6 +75,7 @@ export async function GET(req: Request) {
       synced_at: new Date().toISOString(),
       ticketmaster: ticketmasterResult,
       eventbrite: eventbriteResult,
+      seatgeek: seatGeekResult,
       venue_scores: venueScoreResult,
       data_quality: dataQualityResult,
     }, {
