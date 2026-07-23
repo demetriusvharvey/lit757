@@ -7,7 +7,7 @@ export const maxDuration = 60;
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
 );
 
 type TicketmasterEvent = {
@@ -57,33 +57,24 @@ export async function GET(req: Request) {
 
   try {
     const ticketmasterResult = await fetchTicketmasterEvents();
-
-    const eventbriteApiResult = await safeInternalFetch(
+    const eventbriteResult = await safeInternalFetch(
       `${baseUrl}/api/fetch-eventbrite`,
-      secret
+      secret,
     );
-
-    const eventbriteScrapeResult = await safeInternalFetch(
-      `${baseUrl}/api/scrape-eventbrite`,
-      secret
-    );
-
     const venueScoreResult = await safeInternalFetch(
       `${baseUrl}/api/run-venue-intelligence`,
-      secret
+      secret,
     );
-
     const dataQualityResult = await safeInternalFetch(
       `${baseUrl}/api/data-quality`,
-      secret
+      secret,
     );
 
     return NextResponse.json({
       success: true,
       synced_at: new Date().toISOString(),
       ticketmaster: ticketmasterResult,
-      eventbrite_api: eventbriteApiResult,
-      eventbrite_scrape: eventbriteScrapeResult,
+      eventbrite: eventbriteResult,
       venue_scores: venueScoreResult,
       data_quality: dataQualityResult,
     }, {
@@ -92,8 +83,8 @@ export async function GET(req: Request) {
   } catch (err) {
     console.error("Pipeline error:", err);
     return NextResponse.json(
-      { error: "Failed to run event pipeline" },
-      { status: 500 }
+      { success: false, error: "Failed to run event pipeline" },
+      { status: 500 },
     );
   }
 }
@@ -137,11 +128,11 @@ async function fetchTicketmasterEvents() {
 
   for (const city of cities) {
     const ticketmasterUrl =
-      `https://app.ticketmaster.com/discovery/v2/events.json?apikey=${API_KEY}` +
-      `&city=${encodeURIComponent(city)}&stateCode=VA&size=100` +
-      `&startDateTime=${encodeURIComponent(startDateTime)}` +
-      `&endDateTime=${encodeURIComponent(endDateTime)}` +
-      `&sort=date,asc`;
+      `https://app.ticketmaster.com/discovery/v2/events.json?apikey=${API_KEY}`
+      + `&city=${encodeURIComponent(city)}&stateCode=VA&size=100`
+      + `&startDateTime=${encodeURIComponent(startDateTime)}`
+      + `&endDateTime=${encodeURIComponent(endDateTime)}`
+      + `&sort=date,asc`;
 
     const res = await fetch(ticketmasterUrl, {
       cache: "no-store",
