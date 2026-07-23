@@ -1,5 +1,5 @@
 name: Apply Buzz v3 data loop once
-# Deterministic source patch; normal PR CI performs validation.
+# Diagnostic trigger: always commits the patch result.
 
 on:
   push:
@@ -20,67 +20,69 @@ jobs:
           ref: feature/buzz-intelligence-v3
           fetch-depth: 0
 
-      - name: Patch the public score and verified beta feedback loop
+      - name: Apply and record result
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
           import re
+          import traceback
 
-          nearby_path = Path("app/api/nearby/route.ts")
-          nearby = nearby_path.read_text(encoding="utf-8")
-
-          if "function snapshotLearningPoints" not in nearby:
-              marker = "\nfunction addVenueEvent(map: Map<string, EventRow[]>, venueId: string, event: EventRow) {"
-              helper = '''
+          status = []
+          try:
+              nearby_path = Path("app/api/nearby/route.ts")
+              nearby = nearby_path.read_text(encoding="utf-8")
+              if "function snapshotLearningPoints" not in nearby:
+                  marker = "\nfunction addVenueEvent(map: Map<string, EventRow[]>, venueId: string, event: EventRow) {"
+                  helper = '''
 function snapshotLearningPoints(factors: unknown) {
   if (!Array.isArray(factors)) return 0;
   const learned = factors.find(factor => String((factor as ScoreFactor).family || "") === "historical_learning") as ScoreFactor | undefined;
   return clamp(Number(learned?.points || 0), -18, 18);
 }
 '''
-              if marker not in nearby:
-                  raise SystemExit("addVenueEvent marker not found")
-              nearby = nearby.replace(marker, helper + marker, 1)
+                  assert marker in nearby, "addVenueEvent marker not found"
+                  nearby = nearby.replace(marker, helper + marker, 1)
+                  status.append("inserted snapshotLearningPoints")
 
-          if "const learnedAdjustment = snapshotLearningPoints" not in nearby:
-              nearby, count = re.subn(
-                  r'(    const providerSupport = snapshotSupportPoints\(snapshot\?\.factors\);\n)(    const expectedPrior = .*?;\n)(    const baseScore = Math\.round\(expectedPrior \+ providerSupport \+ phoneEvidence\.points\);)',
-                  r'\1    const learnedAdjustment = snapshotLearningPoints(snapshot?.factors);\n\2    const baseScore = Math.round(expectedPrior + providerSupport + phoneEvidence.points + learnedAdjustment);',
-                  nearby,
-                  count=1,
-              )
-              if count != 1:
-                  raise SystemExit(f"public score replacement count={count}")
+              if "const learnedAdjustment = snapshotLearningPoints" not in nearby:
+                  nearby, count = re.subn(
+                      r'(    const providerSupport = snapshotSupportPoints\(snapshot\?\.factors\);\n)(    const expectedPrior = .*?;\n)(    const baseScore = Math\.round\(expectedPrior \+ providerSupport \+ phoneEvidence\.points\);)',
+                      r'\1    const learnedAdjustment = snapshotLearningPoints(snapshot?.factors);\n\2    const baseScore = Math.round(expectedPrior + providerSupport + phoneEvidence.points + learnedAdjustment);',
+                      nearby,
+                      count=1,
+                  )
+                  assert count == 1, f"public score replacement count={count}"
+                  status.append("connected learned adjustment to public score")
 
-          if "          learnedAdjustment," not in nearby:
-              nearby, count = re.subn(
-                  r'(          basePrior: Math\.round\(expectedPrior\),\n          providerSupport,\n)',
-                  r'\1          learnedAdjustment,\n',
-                  nearby,
-                  count=1,
-              )
-              if count != 1:
-                  raise SystemExit(f"factor output replacement count={count}")
+              if "          learnedAdjustment," not in nearby:
+                  nearby, count = re.subn(
+                      r'(          basePrior: Math\.round\(expectedPrior\),\n          providerSupport,\n)',
+                      r'\1          learnedAdjustment,\n',
+                      nearby,
+                      count=1,
+                  )
+                  assert count == 1, f"factor output replacement count={count}"
+                  status.append("exposed private learned factor to backend payload")
 
-          if 'Math.abs(learnedAdjustment) >= 0.5' not in nearby:
-              nearby, count = re.subn(
-                  r'(          \.\.\.\(snapshot\?\.source_families \|\| \[\]\),\n)',
-                  r'\1          ...(Math.abs(learnedAdjustment) >= 0.5 ? ["historical_learning"] : []),\n',
-                  nearby,
-                  count=1,
-              )
-              if count != 1:
-                  raise SystemExit(f"source family replacement count={count}")
+              if 'Math.abs(learnedAdjustment) >= 0.5' not in nearby:
+                  nearby, count = re.subn(
+                      r'(          \.\.\.\(snapshot\?\.source_families \|\| \[\]\),\n)',
+                      r'\1          ...(Math.abs(learnedAdjustment) >= 0.5 ? ["historical_learning"] : []),\n',
+                      nearby,
+                      count=1,
+                  )
+                  assert count == 1, f"source family replacement count={count}"
+                  status.append("added historical_learning family")
 
-          nearby = nearby.replace('"buzz-v2.1-public-context"', '"buzz-v3.1-calibrated-context"')
-          nearby_path.write_text(nearby, encoding="utf-8")
+              nearby = nearby.replace('"buzz-v2.1-public-context"', '"buzz-v3.1-calibrated-context"')
+              nearby_path.write_text(nearby, encoding="utf-8")
 
-          report_path = Path("app/api/buzz/report/route.ts")
-          report = report_path.read_text(encoding="utf-8")
-          if 'observer_type: "verified_user_observation"' not in report:
-              marker = '  const since = new Date(observedAt.getTime() - 45 * 60 * 1000).toISOString();'
-              block = '''  const { error: individualTruthError } = await db.from("buzz_ground_truth").insert({
+              report_path = Path("app/api/buzz/report/route.ts")
+              report = report_path.read_text(encoding="utf-8")
+              if 'observer_type: "verified_user_observation"' not in report:
+                  marker = '  const since = new Date(observedAt.getTime() - 45 * 60 * 1000).toISOString();'
+                  block = '''  const { error: individualTruthError } = await db.from("buzz_ground_truth").insert({
     venue_id: venueId,
     observed_at: observedAt.toISOString(),
     occupancy_band: crowdLevel,
@@ -101,28 +103,32 @@ function snapshotLearningPoints(factors: unknown) {
   if (individualTruthError) console.error("Could not record individual verified ground truth", individualTruthError.message);
 
 '''
-              if marker not in report:
-                  raise SystemExit("verified report marker not found")
-              report = report.replace(marker, block + marker, 1)
+                  assert marker in report, "verified report marker not found"
+                  report = report.replace(marker, block + marker, 1)
+                  status.append("added individual GPS-verified training samples")
 
-          if "individualGroundTruthRecorded" not in report:
-              report, count = re.subn(
-                  r'(    groundTruthRecorded,\n)(    buzz,)',
-                  r'\1    individualGroundTruthRecorded: !individualTruthError,\n\2',
-                  report,
-                  count=1,
-              )
-              if count != 1:
-                  raise SystemExit(f"report response replacement count={count}")
-          report_path.write_text(report, encoding="utf-8")
+              if "individualGroundTruthRecorded" not in report:
+                  report, count = re.subn(
+                      r'(    groundTruthRecorded,\n)(    buzz,)',
+                      r'\1    individualGroundTruthRecorded: !individualTruthError,\n\2',
+                      report,
+                      count=1,
+                  )
+                  assert count == 1, f"report response replacement count={count}"
+                  status.append("added training result to report response")
+              report_path.write_text(report, encoding="utf-8")
+              result = "SUCCESS\n\n" + "\n".join(f"- {item}" for item in status)
+          except Exception as error:
+              result = "FAILED\n\n```\n" + traceback.format_exc() + "\n```"
+
+          Path("buzz-v3-patch-status.md").write_text(result + "\n", encoding="utf-8")
           PY
 
-      - name: Commit source changes
+      - name: Commit patch and status
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/api/nearby/route.ts app/api/buzz/report/route.ts
-          git diff --cached --quiet && exit 0
-          git commit -m "Apply learned calibration to public Buzz scores"
+          git add app/api/nearby/route.ts app/api/buzz/report/route.ts buzz-v3-patch-status.md
+          git commit -m "Apply and audit Buzz v3 public scoring loop"
           git push origin feature/buzz-intelligence-v3
