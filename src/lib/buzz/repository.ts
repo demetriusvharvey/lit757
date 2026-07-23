@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { buildCalibrationProfile, calibrationSignal, type BuzzGroundTruthSample } from "./calibration";
 import { calculateBuzzScore } from "./score-v1";
 import type { BuzzSignal, VenueForBuzz } from "./types";
 
@@ -11,6 +12,12 @@ type SignalRow = {
   confidence: number;
   observed_at: string;
   expires_at: string;
+  metadata?: Record<string, unknown> | null;
+};
+
+type GroundTruthRow = {
+  observed_at: string;
+  occupancy_pct?: number | null;
   metadata?: Record<string, unknown> | null;
 };
 
@@ -64,8 +71,35 @@ export async function loadActiveSignals(db: SupabaseClient, venueId: string, now
   return (data || []).map(row => rowToSignal(row as SignalRow));
 }
 
+async function loadCalibrationSignal(db: SupabaseClient, venue: VenueForBuzz, now: Date) {
+  const since = new Date(now.getTime() - 180 * 24 * 60 * 60_000).toISOString();
+  const { data, error } = await db
+    .from("buzz_ground_truth")
+    .select("observed_at,occupancy_pct,metadata")
+    .eq("venue_id", venue.id)
+    .gte("observed_at", since)
+    .order("observed_at", { ascending: false })
+    .limit(250);
+  if (error) {
+    console.error(`Could not load Buzz calibration samples for ${venue.id}: ${error.message}`);
+    return null;
+  }
+
+  const samples = ((data || []) as GroundTruthRow[]).flatMap(row => {
+    const predictedScore = Number(row.metadata?.predictedScore);
+    const actualScore = Number(row.occupancy_pct ?? row.metadata?.averageCrowdValue);
+    if (!Number.isFinite(predictedScore) || !Number.isFinite(actualScore)) return [];
+    return [{ predictedScore, actualScore, observedAt: row.observed_at } satisfies BuzzGroundTruthSample];
+  });
+  return calibrationSignal(buildCalibrationProfile(venue, samples, now), now);
+}
+
 export async function recomputeBuzzScore(db: SupabaseClient, venue: VenueForBuzz, now = new Date()) {
-  const signals = await loadActiveSignals(db, venue.id, now);
+  const activeSignals = await loadActiveSignals(db, venue.id, now);
+  const learned = await loadCalibrationSignal(db, venue, now);
+  const signals = learned ? [...activeSignals.filter(signal => signal.type !== "calibration_adjustment"), learned] : activeSignals;
+  if (learned) await saveBuzzSignals(db, venue.id, [learned]);
+
   const score = calculateBuzzScore(venue, signals, now);
   const snapshot = {
     venue_id: venue.id,
