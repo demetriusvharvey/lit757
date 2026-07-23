@@ -9,7 +9,11 @@ export type ConversionEventName =
   | "shared_link_open"
   | "venue_view"
   | "favorite_add"
-  | "watch_add";
+  | "watch_add"
+  // Backward-compatible UI aliases. They are canonicalized before transmission.
+  | "share_copy"
+  | "share_sms"
+  | "share_native";
 
 export type ConversionEvent = {
   eventName: ConversionEventName;
@@ -23,6 +27,12 @@ export type ConversionEvent = {
 
 const ANONYMOUS_KEY = "buzz-analytics-anonymous-id";
 const SESSION_KEY = "buzz-analytics-session-id";
+
+const CANONICAL_EVENT: Partial<Record<ConversionEventName, ConversionEventName>> = {
+  share_copy: "copy_link",
+  share_sms: "sms_open",
+  share_native: "share_complete",
+};
 
 function compactId(prefix: string) {
   const random = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -71,6 +81,7 @@ export async function trackConversion(event: ConversionEvent, accessToken?: stri
   if (typeof window === "undefined") return;
   const payload = {
     ...event,
+    eventName: CANONICAL_EVENT[event.eventName] || event.eventName,
     anonymousId: analyticsAnonymousId(),
     sessionId: analyticsSessionId(),
     metadata: Object.fromEntries(
