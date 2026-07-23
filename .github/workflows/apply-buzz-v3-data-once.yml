@@ -1,4 +1,5 @@
 name: Apply Buzz v3 data loop once
+# Trigger after the workflow file exists.
 
 on:
   push:
