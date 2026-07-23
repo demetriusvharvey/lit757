@@ -1,0 +1,157 @@
+name: Apply Buzz intelligence v3 once
+
+on:
+  push:
+    branches: [feature/buzz-intelligence-v3]
+    paths:
+      - ".github/workflows/apply-buzz-intelligence-v3-once.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/buzz-intelligence-v3
+          fetch-depth: 0
+
+      - name: Remove Explore hubs and connect learned scoring to the public map
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          map_path = Path("app/buzz-map-app.tsx")
+          map_source = map_path.read_text(encoding="utf-8")
+          map_pattern = re.compile(
+              r'\n    map\.addLayer\(\{\n      id: "buzz-heat-hub-vibe",.*?\n    \}\);(?=\n    map\.addLayer\(\{\n      id: "buzz-pin-glow")',
+              re.S,
+          )
+          map_source, removed = map_pattern.subn("", map_source, count=1)
+          if removed != 1:
+              raise SystemExit(f"Expected one heat-hub text layer, removed {removed}")
+          if '"EXPLORE"' in map_source:
+              raise SystemExit("EXPLORE remains in the map source")
+          map_path.write_text(map_source, encoding="utf-8")
+
+          nearby_path = Path("app/api/nearby/route.ts")
+          nearby = nearby_path.read_text(encoding="utf-8")
+          helper_anchor = '''function addVenueEvent(map: Map<string, EventRow[]>, venueId: string, event: EventRow) {'''
+          helper = '''function snapshotLearningPoints(factors: unknown) {
+            if (!Array.isArray(factors)) return 0;
+            const learned = factors.find(factor => String((factor as ScoreFactor).family || "") === "historical_learning") as ScoreFactor | undefined;
+            return clamp(Number(learned?.points || 0), -18, 18);
+          }
+
+          '''
+          if "function snapshotLearningPoints" not in nearby:
+              if helper_anchor not in nearby:
+                  raise SystemExit("Could not find nearby helper anchor")
+              nearby = nearby.replace(helper_anchor, helper + helper_anchor, 1)
+
+          provider_anchor = '''    const providerSupport = snapshotSupportPoints(snapshot?.factors);
+              const expectedPrior = 12 + clamp(Number(venue.ai_score || 45), 0, 100) * 0.22;
+              const baseScore = Math.round(expectedPrior + providerSupport + phoneEvidence.points);'''
+          provider_replacement = '''    const providerSupport = snapshotSupportPoints(snapshot?.factors);
+              const learnedAdjustment = snapshotLearningPoints(snapshot?.factors);
+              const expectedPrior = 12 + clamp(Number(venue.ai_score || 45), 0, 100) * 0.22;
+              const baseScore = Math.round(expectedPrior + providerSupport + phoneEvidence.points + learnedAdjustment);'''
+          if "const learnedAdjustment = snapshotLearningPoints" not in nearby:
+              if provider_anchor not in nearby:
+                  raise SystemExit("Could not find provider score anchor")
+              nearby = nearby.replace(provider_anchor, provider_replacement, 1)
+
+          factors_anchor = '''          providerSupport,
+                    passivePresencePoints: phoneEvidence.points,'''
+          factors_replacement = '''          providerSupport,
+                    learnedAdjustment,
+                    passivePresencePoints: phoneEvidence.points,'''
+          if "          learnedAdjustment," not in nearby:
+              if factors_anchor not in nearby:
+                  raise SystemExit("Could not find public factors anchor")
+              nearby = nearby.replace(factors_anchor, factors_replacement, 1)
+
+          family_anchor = '''          ...(snapshot?.source_families || []),
+                    ...(district ? ["mobility"] : []),'''
+          family_replacement = '''          ...(snapshot?.source_families || []),
+                    ...(Math.abs(learnedAdjustment) >= 0.5 ? ["historical_learning"] : []),
+                    ...(district ? ["mobility"] : []),'''
+          if 'Math.abs(learnedAdjustment) >= 0.5' not in nearby:
+              if family_anchor not in nearby:
+                  raise SystemExit("Could not find source-family anchor")
+              nearby = nearby.replace(family_anchor, family_replacement, 1)
+
+          nearby = nearby.replace('scoreVersion: "buzz-v2.1-public-context"', 'scoreVersion: "buzz-v3.1-calibrated-context"')
+          nearby = nearby.replace('scoreVersion: "buzz-v2.1-public-context"', 'scoreVersion: "buzz-v3.1-calibrated-context"')
+          nearby_path.write_text(nearby, encoding="utf-8")
+
+          report_path = Path("app/api/buzz/report/route.ts")
+          report = report_path.read_text(encoding="utf-8")
+          individual_anchor = '''  const since = new Date(observedAt.getTime() - 45 * 60 * 1000).toISOString();'''
+          individual_block = '''  const { error: individualTruthError } = await db.from("buzz_ground_truth").insert({
+                venue_id: venueId,
+                observed_at: observedAt.toISOString(),
+                occupancy_band: crowdLevel,
+                occupancy_pct: levelValue(crowdLevel),
+                observer_type: "verified_user_observation",
+                notes: "GPS-verified nearby beta observation",
+                metadata: {
+                  predictedScore: previous.score,
+                  predictedLabel: previous.label,
+                  predictedMode: previous.mode,
+                  predictedConfidence: previous.confidence,
+                  predictedVersion: previous.version,
+                  predictedAt: previous.computedAt,
+                  gpsAccuracyMeters: accuracy,
+                  distanceMeters: Number(distance.toFixed(1)),
+                },
+              });
+              if (individualTruthError) console.error("Could not record individual verified ground truth", individualTruthError.message);
+
+              const since = new Date(observedAt.getTime() - 45 * 60 * 1000).toISOString();'''
+          if 'observer_type: "verified_user_observation"' not in report:
+              if individual_anchor not in report:
+                  raise SystemExit("Could not find report ground-truth anchor")
+              report = report.replace(individual_anchor, individual_block, 1)
+
+          response_anchor = '''    groundTruthRecorded,
+                buzz,'''
+          response_replacement = '''    groundTruthRecorded,
+                individualGroundTruthRecorded: !individualTruthError,
+                buzz,'''
+          if "individualGroundTruthRecorded" not in report:
+              if response_anchor not in report:
+                  raise SystemExit("Could not find report response anchor")
+              report = report.replace(response_anchor, response_replacement, 1)
+          report_path.write_text(report, encoding="utf-8")
+          PY
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Run Buzz intelligence tests
+        run: npx --yes tsx@4.20.6 --test src/lib/buzz/*.test.ts src/lib/integrations/*.test.ts
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: build-placeholder
+          SUPABASE_URL: https://example.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: build-placeholder
+          NEXT_PUBLIC_MAPBOX_TOKEN: build-placeholder
+
+      - name: Commit transformed files
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/buzz-map-app.tsx app/api/nearby/route.ts app/api/buzz/report/route.ts
+          git commit -m "Connect Buzz learning to the public activity map"
+          git push origin feature/buzz-intelligence-v3
