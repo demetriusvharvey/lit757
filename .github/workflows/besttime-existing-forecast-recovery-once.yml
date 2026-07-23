@@ -1,0 +1,146 @@
+name: BestTime existing forecast recovery once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/besttime-existing-forecast-recovery-once.yml"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Recover previously created BestTime forecasts
+        env:
+          BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          export RUN_URL
+
+          if [ -z "${BASE_URL:-}" ] || [ -z "${CRON_SECRET:-}" ]; then
+            printf '## BestTime recovery failed\n\nRequired GitHub production secrets are missing.\n\n[Open workflow run](%s)\n' "$RUN_URL" > besttime-recovery-summary.md
+            exit 1
+          fi
+
+          HTTP_STATUS=$(curl --silent --show-error --max-time 240 \
+            --output besttime-recovery.json \
+            --write-out '%{http_code}' \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${BASE_URL%/}/api/buzz/refresh?provider=besttime&action=bootstrap&limit=15")
+          CURL_STATUS=$?
+          export HTTP_STATUS CURL_STATUS
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          run_url = os.environ.get("RUN_URL", "")
+          http_status = os.environ.get("HTTP_STATUS", "unknown")
+          curl_status = int(os.environ.get("CURL_STATUS", "1"))
+          payload_path = Path("besttime-recovery.json")
+          payload = None
+          parse_error = None
+
+          if payload_path.exists():
+              try:
+                  payload = json.loads(payload_path.read_text(encoding="utf-8"))
+              except Exception as error:
+                  parse_error = str(error)
+
+          failure = None
+          if curl_status != 0:
+              failure = f"The protected production endpoint could not be reached (curl status {curl_status})."
+          elif http_status != "200":
+              failure = f"The protected production endpoint returned HTTP {http_status}."
+          elif parse_error:
+              failure = f"The production response was not valid JSON: {parse_error}"
+          elif not isinstance(payload, dict) or payload.get("success") is not True:
+              failure = f"The production endpoint reported failure: {str((payload or {}).get('error') or 'unknown error')[:500]}"
+
+          result = None
+          if not failure:
+              result = next((item for item in (payload.get("results") or []) if item.get("provider") == "besttime"), None)
+              if result is None:
+                  failure = "The response did not include a BestTime result."
+
+          details = (result or {}).get("details") or []
+          attempted = int((result or {}).get("attempted") or 0)
+          succeeded = int((result or {}).get("succeeded") or 0)
+          failed = int((result or {}).get("failed") or 0)
+          coverage = {}
+          for item in details:
+              status = str(item.get("status") or "unknown")
+              coverage[status] = coverage.get(status, 0) + 1
+
+          if not failure and succeeded <= 0:
+              sample = next((str(item.get("error")) for item in details if item.get("error")), "No provider error returned")
+              failure = f"No existing BestTime forecasts were recovered. First error: {sample[:500]}"
+
+          if failure:
+              lines = [
+                  "## BestTime existing-forecast recovery failed",
+                  "",
+                  failure,
+                  "",
+                  f"- Attempted: **{attempted}**",
+                  f"- Successful mappings: **{succeeded}**",
+                  f"- Failed: **{failed}**",
+                  "",
+                  f"[Open workflow run]({run_url})",
+              ]
+              Path("besttime-recovery-summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+              raise SystemExit(1)
+
+          lines = [
+              "## BestTime existing forecasts recovered",
+              "",
+              f"- Attempted: **{attempted}**",
+              f"- Successful mappings: **{succeeded}**",
+              f"- Failed/unsupported: **{failed}**",
+              "- Recovery limit: **15 venues**",
+              "",
+              "### Coverage stored",
+          ]
+          for status, count in sorted(coverage.items()):
+              lines.append(f"- `{status}`: **{count}**")
+          lines.extend([
+              "",
+              "Recovered mappings now remain stored even when BestTime has forecast data but no live reading. Forecast-only values remain non-live evidence inside Buzz Score v2.",
+              "",
+              f"[Open workflow run]({run_url})",
+          ])
+          Path("besttime-recovery-summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+          print(json.dumps({"attempted": attempted, "succeeded": succeeded, "failed": failed, "coverage": coverage}, indent=2))
+          PY
+
+      - name: Record recovery result on integration issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if [ ! -f besttime-recovery-summary.md ]; then
+            RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            printf '## BestTime existing-forecast recovery failed\n\nThe workflow stopped before producing a provider summary.\n\n[Open workflow run](%s)\n' "$RUN_URL" > besttime-recovery-summary.md
+          fi
+          gh issue comment 68 --repo "$GITHUB_REPOSITORY" --body-file besttime-recovery-summary.md
+
+      - name: Upload recovery evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: besttime-existing-forecast-recovery-${{ github.run_id }}
+          path: |
+            besttime-recovery.json
+            besttime-recovery-summary.md
+          if-no-files-found: warn
+          retention-days: 7
