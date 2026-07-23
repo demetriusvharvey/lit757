@@ -4,9 +4,14 @@ on:
   schedule:
     - cron: "*/15 * * * *"
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/buzz-quarter-hour.yml"
 
 permissions:
   contents: read
+  issues: write
 
 concurrency:
   group: buzz-quarter-hour-refresh
@@ -17,10 +22,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
-      - name: Refresh traffic and first-party signals
+      - name: Refresh and validate TomTom district traffic
         env:
           BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        shell: bash
         run: |
           set -euo pipefail
           : "${BASE_URL:?Add BUZZ_PRODUCTION_URL as a GitHub Actions secret}"
@@ -29,8 +35,90 @@ jobs:
 
           curl --silent --show-error --fail-with-body --retry 2 --max-time 55 \
             -H "Authorization: Bearer ${CRON_SECRET}" \
-            "${BASE_URL}/api/buzz/traffic"
+            "${BASE_URL}/api/buzz/traffic" \
+            | tee tomtom-refresh.json
 
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path("tomtom-refresh.json").read_text(encoding="utf-8"))
+          assert payload.get("success") is True, payload
+          assert payload.get("provider") == "tomtom", payload
+          assert payload.get("skipped") is not True, "TomTom was skipped; TOMTOM_API_KEY is not active in production"
+
+          calls = int(payload.get("calls") or 0)
+          failed_calls = int(payload.get("failedCalls") or 0)
+          venue_signals = int(payload.get("venueSignals") or 0)
+          zones = payload.get("zones") or []
+          covered = [zone for zone in zones if zone.get("status") == "covered"]
+
+          assert calls == 24, f"Expected 24 TomTom road samples, received {calls}"
+          assert len(zones) == 8, f"Expected 8 activity districts, received {len(zones)}"
+          assert len(covered) >= 6, f"Only {len(covered)} of 8 TomTom districts returned usable traffic"
+          assert failed_calls <= 8, f"TomTom failed {failed_calls} of {calls} road samples"
+          assert venue_signals > 0, "TomTom returned traffic but no venue-support signals were stored"
+          assert payload.get("truthNote"), "TomTom traffic truth rule is missing"
+
+          summary = {
+              "calls": calls,
+              "failedCalls": failed_calls,
+              "coveredDistricts": len(covered),
+              "venueSignals": venue_signals,
+              "model": payload.get("model"),
+              "zones": [
+                  {
+                      "id": zone.get("id"),
+                      "status": zone.get("status"),
+                      "samples": zone.get("samples"),
+                      "venuesSupported": zone.get("venuesSupported"),
+                      "baselineReady": bool((zone.get("baseline") or {}).get("ready")),
+                  }
+                  for zone in zones
+              ],
+          }
+          Path("tomtom-summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+          print(json.dumps(summary, indent=2))
+          PY
+
+      - name: Refresh first-party signals
+        env:
+          BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_URL="${BASE_URL%/}"
           curl --silent --show-error --fail-with-body --retry 2 --max-time 55 \
             -H "Authorization: Bearer ${CRON_SECRET}" \
             "${BASE_URL}/api/buzz/refresh?provider=first_party&limit=100"
+
+      - name: Record initial TomTom production proof
+        if: github.event_name == 'push' && always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          if [ -f tomtom-summary.json ]; then
+            CALLS=$(jq -r '.calls' tomtom-summary.json)
+            FAILED=$(jq -r '.failedCalls' tomtom-summary.json)
+            DISTRICTS=$(jq -r '.coveredDistricts' tomtom-summary.json)
+            SIGNALS=$(jq -r '.venueSignals' tomtom-summary.json)
+            printf '## TomTom production validation passed\n\n- Road samples requested: **%s**\n- Failed road samples: **%s**\n- Covered activity districts: **%s/8**\n- Venue-support signals stored: **%s**\n- Traffic remains forecast-only supporting evidence\n\n[Open workflow run](%s)\n' "$CALLS" "$FAILED" "$DISTRICTS" "$SIGNALS" "$RUN_URL" > tomtom-comment.md
+          else
+            printf '## TomTom production validation failed\n\nReview the protected traffic refresh logs. No API key was exposed.\n\n[Open workflow run](%s)\n' "$RUN_URL" > tomtom-comment.md
+          fi
+          gh issue comment 68 --repo "$GITHUB_REPOSITORY" --body-file tomtom-comment.md
+
+      - name: Upload initial TomTom validation evidence
+        if: github.event_name == 'push' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tomtom-production-validation-${{ github.run_id }}
+          path: |
+            tomtom-refresh.json
+            tomtom-summary.json
+            tomtom-comment.md
+          if-no-files-found: warn
+          retention-days: 7
