@@ -51,7 +51,7 @@ export type BestTimeAccountVenue = {
   epoch_analysis?: number;
   forecast_updated_on?: string;
   venue_address?: string;
-  venue_forecasted?: boolean;
+  venue_forecasted?: boolean | string | number;
   venue_id?: string;
   venue_name?: string;
   venue_timezone?: string;
@@ -166,6 +166,41 @@ function namesMatch(localName: string, providerName: string) {
   return Math.min(local.length, provider.length) >= 7 && (local.includes(provider) || provider.includes(local));
 }
 
+function accountVenueArray(value: unknown): BestTimeAccountVenue[] | null {
+  if (!Array.isArray(value)) return null;
+  return value.filter(item => item && typeof item === "object" && !Array.isArray(item)) as BestTimeAccountVenue[];
+}
+
+export function extractBestTimeAccountVenues(payload: unknown): BestTimeAccountVenue[] {
+  const direct = accountVenueArray(payload);
+  if (direct) return direct;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return [];
+
+  const record = payload as Record<string, unknown>;
+  for (const key of ["venues", "data", "results", "items"]) {
+    const candidate = accountVenueArray(record[key]);
+    if (candidate) return candidate;
+  }
+
+  const data = record.data;
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    const nested = data as Record<string, unknown>;
+    for (const key of ["venues", "results", "items"]) {
+      const candidate = accountVenueArray(nested[key]);
+      if (candidate) return candidate;
+    }
+  }
+
+  const arrays = Object.values(record).map(accountVenueArray).filter((value): value is BestTimeAccountVenue[] => value !== null);
+  return arrays.length === 1 ? arrays[0] : [];
+}
+
+export function isBestTimeAccountVenueForecasted(venue: BestTimeAccountVenue) {
+  return venue.venue_forecasted === true
+    || venue.venue_forecasted === 1
+    || String(venue.venue_forecasted).toLowerCase() === "true";
+}
+
 export function findBestTimeAccountVenue(venue: VenueForBuzz, accountVenues: BestTimeAccountVenue[]) {
   const nameMatches = accountVenues.filter(candidate => namesMatch(venue.name, candidate.venue_name || ""));
   if (!nameMatches.length) return null;
@@ -188,11 +223,11 @@ export function findBestTimeAccountVenue(venue: VenueForBuzz, accountVenues: Bes
 export async function listBestTimeAccountVenues() {
   if (!isBestTimeConfigured()) throw new Error("BESTTIME_API_KEY_PRIVATE is not configured");
   if (!accountVenuesPromise) {
-    accountVenuesPromise = bestTimeRequest<BestTimeAccountVenue[] | { venues?: BestTimeAccountVenue[] }>(
+    accountVenuesPromise = bestTimeRequest<unknown>(
       "/venues",
       new URLSearchParams({ limit: "1000", page: "0" }),
       { method: "GET", keyKind: "private" },
-    ).then(payload => Array.isArray(payload) ? payload : payload.venues || []);
+    ).then(extractBestTimeAccountVenues);
   }
   return accountVenuesPromise;
 }
@@ -201,7 +236,7 @@ export function resetBestTimeAccountVenueCacheForTests() {
   accountVenuesPromise = null;
 }
 
-function mappingFromAccountVenue(venue: VenueForBuzz, accountVenue: BestTimeAccountVenue): BestTimeVenueMapping {
+export function mappingFromBestTimeAccountVenue(venue: VenueForBuzz, accountVenue: BestTimeAccountVenue): BestTimeVenueMapping {
   if (!accountVenue.venue_id) throw new Error(`BestTime account venue is missing an id for ${venue.name}`);
   return {
     venueId: venue.id,
@@ -217,17 +252,27 @@ function mappingFromAccountVenue(venue: VenueForBuzz, accountVenue: BestTimeAcco
   };
 }
 
+export async function findExistingBestTimeForecast(
+  venue: VenueForBuzz,
+  accountVenues: BestTimeAccountVenue[] = await listBestTimeAccountVenues(),
+) {
+  const accountVenue = findBestTimeAccountVenue(venue, accountVenues);
+  if (!accountVenue || !isBestTimeAccountVenueForecasted(accountVenue) || !accountVenue.venue_id) return null;
+  return mappingFromBestTimeAccountVenue(venue, accountVenue);
+}
+
 export async function createBestTimeForecast(venue: VenueForBuzz): Promise<BestTimeVenueMapping> {
   if (!isBestTimeConfigured()) throw new Error("BESTTIME_API_KEY_PRIVATE is not configured");
   const address = [venue.address, venue.city].filter(Boolean).join(", ");
   if (!address) throw new Error(`Cannot create BestTime forecast for ${venue.name} without an address`);
 
-  const accountVenue = findBestTimeAccountVenue(venue, await listBestTimeAccountVenues());
+  const accountVenues = await listBestTimeAccountVenues();
+  const accountVenue = findBestTimeAccountVenue(venue, accountVenues);
   if (accountVenue) {
-    if (!accountVenue.venue_forecasted) {
+    if (!isBestTimeAccountVenueForecasted(accountVenue)) {
       throw new Error(`BestTime found ${venue.name}, but does not have enough visitor history to forecast it`);
     }
-    return mappingFromAccountVenue(venue, accountVenue);
+    return mappingFromBestTimeAccountVenue(venue, accountVenue);
   }
 
   const params = new URLSearchParams({ venue_name: venue.name, venue_address: address });
@@ -280,6 +325,10 @@ function forecastAsLiveCompatible(payload: BestTimeLiveResponse): BestTimeLiveRe
   };
 }
 
+export async function fetchBestTimeCurrentForecast(providerVenueId: string) {
+  return forecastAsLiveCompatible(await fetchBestTimeForecastNow(providerVenueId));
+}
+
 function noLiveData(error: unknown) {
   return error instanceof Error && /no live data available/i.test(error.message);
 }
@@ -319,7 +368,7 @@ export async function fetchBestTimeLive(providerVenueId: string) {
         venue_info: { venue_id: providerVenueId },
       } satisfies BestTimeLiveResponse;
     }
-    return forecastAsLiveCompatible(await fetchBestTimeForecastNow(providerVenueId));
+    return fetchBestTimeCurrentForecast(providerVenueId);
   }
 }
 
