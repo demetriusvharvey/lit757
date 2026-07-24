@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import "./desktop-home.css";
 import { Bell, CalendarDays, ChevronRight, Compass, Heart, MapPin, Music2, Search, ShoppingBag, TreePine, Utensils, Wine, X } from "lucide-react";
+import { RemoteVenueImage } from "./components/remote-venue-image";
 
 type Venue={id:string;name:string;city?:string;kind?:string;type?:string;lat:number|string;lng:number|string;photoUrl?:string|null;reason?:string;openNow?:boolean|null;event?:{name?:string|null}|null;activity?:{score:number;label:string;trendLabel:string}};
 type Payload={venues?:Venue[];picks?:Venue[]};
@@ -20,9 +22,8 @@ export default function DesktopHome(){
   const [searchOpen,setSearchOpen]=useState(false);
   const [selected,setSelected]=useState<Venue|null>(null);
   const mapEl=useRef<HTMLDivElement|null>(null);
-  const mapRef=useRef<any>(null);
-  const mapboxRef=useRef<any>(null);
-  const markersRef=useRef<any[]>([]);
+  const mapRef=useRef<mapboxgl.Map|null>(null);
+  const markersRef=useRef<mapboxgl.Marker[]>([]);
 
   useEffect(()=>{fetch("/api/discover?city=All%20757&mode=all",{cache:"no-store"}).then(r=>r.json()).then((p:Payload)=>setVenues(p.venues||p.picks||[])).catch(()=>undefined);},[]);
   const filtered=useMemo(()=>venues.filter(v=>(active==="All"||category(v)===active)&&(!query.trim()||`${v.name} ${v.city||""} ${v.kind||""} ${v.type||""} ${v.event?.name||""}`.toLowerCase().includes(query.toLowerCase()))).sort((a,b)=>score(b)-score(a)),[venues,active,query]);
@@ -30,26 +31,22 @@ export default function DesktopHome(){
 
   useEffect(()=>{
     let cancelled=false;
-    let map:any=null;
+    let map:mapboxgl.Map|null=null;
     (async()=>{
       const token=process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
       if(!mapEl.current||!token||mapRef.current)return;
-      const imported=await import("mapbox-gl");
       if(cancelled||!mapEl.current)return;
-      const mapboxgl=(imported as any).default||imported;
-      mapboxRef.current=mapboxgl;
       mapboxgl.accessToken=token;
       map=new mapboxgl.Map({container:mapEl.current,style:"mapbox://styles/mapbox/dark-v11",center:[-76.17,36.88],zoom:9,minZoom:4,maxZoom:17});
       map.addControl(new mapboxgl.NavigationControl({showCompass:false}),"top-right");
       mapRef.current=map;
     })().catch(()=>undefined);
-    return()=>{cancelled=true;markersRef.current.forEach(marker=>marker.remove());markersRef.current=[];map?.remove();mapRef.current=null;mapboxRef.current=null;};
+    return()=>{cancelled=true;markersRef.current.forEach(marker=>marker.remove());markersRef.current=[];map?.remove();mapRef.current=null;};
   },[]);
 
   useEffect(()=>{
     const map=mapRef.current;
-    const mapboxgl=mapboxRef.current;
-    if(!map||!mapboxgl)return;
+    if(!map)return;
     markersRef.current.forEach(marker=>marker.remove());
     markersRef.current=[];
     filtered.filter(valid).forEach(v=>{
@@ -73,7 +70,7 @@ export default function DesktopHome(){
     <main>
       <section className="desktop-hero"><div><span className="eyebrow">LIVE AROUND YOU</span><h1>Know where to go <em>right now.</em></h1><p>Discover restaurants, nightlife, events, and places heating up near you—before everyone else gets there.</p><div className="hero-actions"><button onClick={()=>setSearchOpen(true)}><Search/> Search what’s happening</button><button onClick={useLocation}><MapPin/> Use my location</button></div></div><div className="hero-buzz"><span>BEST MOVE RIGHT NOW</span><strong>{hottest?.name||"Finding your move..."}</strong><small>{hottest?.city||"Near you"}</small><b>{hottest?score(hottest):"--"}</b></div></section>
       <section className="desktop-categories">{categories.map(([name,Icon])=><button key={name} className={active===name?"active":""} onClick={()=>setActive(name)}><span><Icon/></span><strong>{name}</strong></button>)}</section>
-      <section className="desktop-discovery"><div className="desktop-list"><div className="section-heading"><div><span>BUZZ NEAR YOU</span><h2>Places worth leaving home for</h2></div><button onClick={()=>setSearchOpen(true)}>View all <ChevronRight/></button></div><div className="desktop-card-grid">{filtered.slice(0,6).map(v=><article key={v.id} onClick={()=>openVenue(v)}><div className="card-photo">{v.photoUrl?<img src={v.photoUrl} alt=""/>:<span>{v.name[0]}</span>}<b>{score(v)}</b></div><div><small>{category(v)} · {v.city||"Hampton Roads"}</small><h3>{v.name}</h3><p>{v.event?.name||v.reason||"Popular nearby right now"}</p></div><button><Heart/></button></article>)}</div></div><div className="desktop-map-wrap"><div className="map-toolbar"><button onClick={useLocation}><MapPin/> Near me</button><span>{filtered.length} places</span></div><div ref={mapEl} className="desktop-map"/></div></section>
+      <section className="desktop-discovery"><div className="desktop-list"><div className="section-heading"><div><span>BUZZ NEAR YOU</span><h2>Places worth leaving home for</h2></div><button onClick={()=>setSearchOpen(true)}>View all <ChevronRight/></button></div><div className="desktop-card-grid">{filtered.slice(0,6).map(v=><article key={v.id} onClick={()=>openVenue(v)}><div className="card-photo"><RemoteVenueImage src={v.photoUrl} alt="" fallback={<span>{v.name[0]}</span>} sizes="(max-width: 1023px) 100vw, 280px"/><b>{score(v)}</b></div><div><small>{category(v)} · {v.city||"Hampton Roads"}</small><h3>{v.name}</h3><p>{v.event?.name||v.reason||"Popular nearby right now"}</p></div><button><Heart/></button></article>)}</div></div><div className="desktop-map-wrap"><div className="map-toolbar"><button onClick={useLocation}><MapPin/> Near me</button><span>{filtered.length} places</span></div><div ref={mapEl} className="desktop-map"/></div></section>
     </main>
     {selected&&<aside className="desktop-detail"><button onClick={()=>setSelected(null)}><X/></button><span>{category(selected).toUpperCase()}</span><h2>{selected.name}</h2><p>{selected.city||"Hampton Roads"} · {selected.openNow===false?"Closed":"Open now"}</p><div><b>{score(selected)}</b><small>Buzz Score</small></div><p>{selected.event?.name||selected.reason||"Strong live activity and nearby interest."}</p><button className="primary">View details</button></aside>}
   </div>;

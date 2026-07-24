@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { getRequestUser } from "../../../src/lib/server-auth";
+import {
+  exceedsRequestRate,
+  guardErrorResponse,
+  readBoundedJson,
+  requestClientKey,
+} from "../../../src/lib/server/request-guards";
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false, autoRefreshToken: false } }
-);
+const supabaseAdmin = getSupabaseAdmin();
 
 function distanceMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
   const radius = 6_371_000;
@@ -22,11 +24,19 @@ function distanceMeters(a: { lat: number; lng: number }, b: { lat: number; lng: 
 export async function POST(request: Request) {
   const user = await getRequestUser(request);
   if (!user) return NextResponse.json({ error: "Sign in required" }, { status: 401 });
+  if (exceedsRequestRate(`presence:${user.id}:${requestClientKey(request)}`, 12, 60_000)) {
+    return NextResponse.json({ error: "Too many presence checks" }, { status: 429 });
+  }
 
-  const body = await request.json().catch(() => null);
-  const latitude = Number(body?.latitude);
-  const longitude = Number(body?.longitude);
-  const accuracy = Number(body?.accuracy);
+  let body: Record<string, unknown>;
+  try {
+    body = await readBoundedJson(request, 4_096);
+  } catch (error) {
+    return guardErrorResponse(error);
+  }
+  const latitude = Number(body.latitude);
+  const longitude = Number(body.longitude);
+  const accuracy = Number(body.accuracy);
 
   if (
     !Number.isFinite(latitude) ||

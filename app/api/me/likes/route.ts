@@ -1,13 +1,9 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { getRequestUser } from "../../../../src/lib/server-auth";
 import { getVenueImage } from "../../../../src/lib/venue-image";
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false, autoRefreshToken: false } }
-);
+const supabaseAdmin = getSupabaseAdmin();
 
 async function requireUser(request: Request) {
   const user = await getRequestUser(request);

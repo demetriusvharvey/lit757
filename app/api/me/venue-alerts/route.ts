@@ -1,14 +1,11 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { getRequestUser } from "../../../../src/lib/server-auth";
+import { guardErrorResponse, readBoundedJson } from "../../../../src/lib/server/request-guards";
 
 export const dynamic = "force-dynamic";
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false, autoRefreshToken: false } }
-);
+const supabaseAdmin = getSupabaseAdmin();
 
 export async function GET(request: Request) {
   const user = await getRequestUser(request);
@@ -27,9 +24,16 @@ export async function POST(request: Request) {
   const user = await getRequestUser(request);
   if (!user) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
 
-  const body = (await request.json()) as { venueId?: string; enabled?: boolean };
-  const venueId = body.venueId?.trim();
-  if (!venueId) return NextResponse.json({ error: "venueId is required." }, { status: 400 });
+  let body: Record<string, unknown>;
+  try {
+    body = await readBoundedJson(request, 4_096);
+  } catch (error) {
+    return guardErrorResponse(error);
+  }
+  const venueId = typeof body.venueId === "string" ? body.venueId.trim() : "";
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(venueId)) {
+    return NextResponse.json({ error: "A valid venueId is required." }, { status: 400 });
+  }
 
   const { error } = await supabaseAdmin.from("venue_alerts").upsert(
     {

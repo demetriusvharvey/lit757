@@ -50,12 +50,16 @@ alter table public.points_ledger enable row level security;
 alter table public.activity_reports enable row level security;
 alter table public.owner_signup_notifications enable row level security;
 
+drop policy if exists "members can read own profile" on public.member_profiles;
 create policy "members can read own profile" on public.member_profiles
   for select using (auth.uid() = user_id);
+drop policy if exists "members can update own profile" on public.member_profiles;
 create policy "members can update own profile" on public.member_profiles
-  for update using (auth.uid() = user_id);
+  for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists "members can read own points" on public.points_ledger;
 create policy "members can read own points" on public.points_ledger
   for select using (auth.uid() = user_id);
+drop policy if exists "members can read own activity reports" on public.activity_reports;
 create policy "members can read own activity reports" on public.activity_reports
   for select using (auth.uid() = user_id);
 

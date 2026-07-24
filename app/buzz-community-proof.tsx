@@ -61,10 +61,7 @@ export default function BuzzCommunityProof() {
   }, []);
 
   useEffect(() => {
-    if (!selectedVenueId) {
-      setPayload(null);
-      return;
-    }
+    if (!selectedVenueId) return;
     let cancelled = false;
     const load = async () => {
       setLoading(true);
@@ -92,10 +89,13 @@ export default function BuzzCommunityProof() {
     };
   }, [selectedVenueId]);
 
-  if (!selected || (!loading && !payload?.community && !payload?.partner)) return null;
+  // Keep the previous response cached for fast re-selection, but never show it
+  // when there is no active venue.
+  const visiblePayload = selectedVenueId ? payload : null;
+  if (!selected || (!loading && !visiblePayload?.community && !visiblePayload?.partner)) return null;
 
-  const community = payload?.community;
-  const partner = payload?.partner;
+  const community = visiblePayload?.community;
+  const partner = visiblePayload?.partner;
   const hasReports = Boolean(community?.verifiedReportCount);
   const consensus = community?.consensus == null ? null : Math.round(community.consensus * 100);
   const liveLabel = partner?.occupancyBand || community?.crowdLevel || "Waiting for live reports";

@@ -1,5 +1,14 @@
 import { NextResponse } from "next/server";
-import { supabase } from "../../../src/lib/supabase";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import {
+  exceedsRequestRate,
+  requestClientKey,
+} from "../../../src/lib/server/request-guards";
+import { generateShortOpenAiText } from "../../../src/lib/server/openai-chat";
+
+export const dynamic = "force-dynamic";
+
+const db = getSupabaseAdmin();
 
 type Vibe = "lit" | "decent" | "dead" | "line_crazy";
 
@@ -27,15 +36,12 @@ function getStatus(score: number, voteCount: number) {
   return "dead";
 }
 
-export async function GET() {
-  if (!process.env.OPENAI_API_KEY) {
-    return NextResponse.json(
-      { summary: "OpenAI key is not configured." },
-      { status: 500 }
-    );
+export async function GET(request: Request) {
+  if (exceedsRequestRate(`summary:${requestClientKey(request)}`, 10, 60_000)) {
+    return NextResponse.json({ summary: "Try again in a minute." }, { status: 429 });
   }
 
-  const { data: venuesData, error: venuesError } = await supabase
+  const { data: venuesData, error: venuesError } = await db
     .from("venues")
     .select("id,name,city,music_genre");
 
@@ -47,7 +53,7 @@ export async function GET() {
   }
 
   const since = new Date(Date.now() - 90 * 60 * 1000).toISOString();
-  const { data: votesData, error: votesError } = await supabase
+  const { data: votesData, error: votesError } = await db
     .from("votes")
     .select("venue_id,vibe,created_at")
     .in("vibe", ["lit", "decent", "dead", "line_crazy"])
@@ -101,40 +107,14 @@ ${venues
 
 Return only the summary sentence.`;
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: "You are a nightlife copywriter writing short, hype, punchy nightlife tips.",
-        },
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-      max_tokens: 50,
-      temperature: 0.95,
-    }),
-  });
+  const summary = await generateShortOpenAiText({
+    prompt,
+    system: "You are a nightlife copywriter writing short, hype, punchy nightlife tips.",
+    maxTokens: 50,
+  }).catch(() => null) || "The nightlife scene is warming up across the 757.";
 
-  if (!response.ok) {
-    return NextResponse.json(
-      { summary: "Unable to generate nightlife summary." },
-      { status: 500 }
-    );
-  }
-
-  const data = await response.json();
-  const summary =
-    data?.choices?.[0]?.message?.content?.trim() ||
-    "The nightlife scene is warming up across the 757.";
-
-  return NextResponse.json({ summary });
+  return NextResponse.json(
+    { summary },
+    { headers: { "cache-control": "no-store" } },
+  );
 }

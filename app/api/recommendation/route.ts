@@ -1,5 +1,14 @@
 import { NextResponse } from "next/server";
-import { supabase } from "../../../src/lib/supabase";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import {
+  exceedsRequestRate,
+  requestClientKey,
+} from "../../../src/lib/server/request-guards";
+import { generateShortOpenAiText } from "../../../src/lib/server/openai-chat";
+
+export const dynamic = "force-dynamic";
+
+const db = getSupabaseAdmin();
 
 type Vibe = "lit" | "decent" | "dead" | "line_crazy";
 
@@ -28,17 +37,19 @@ function getStatus(score: number, voteCount: number) {
 }
 
 export async function GET(request: Request) {
-  if (!process.env.OPENAI_API_KEY) {
-    return NextResponse.json(
-      { recommendation: "OpenAI key is not configured.", venueName: "" },
-      { status: 500 }
-    );
+  if (exceedsRequestRate(`recommendation:${requestClientKey(request)}`, 10, 60_000)) {
+    return NextResponse.json({ recommendation: "Try again in a minute.", venueName: "" }, { status: 429 });
   }
 
   const { searchParams } = new URL(request.url);
-  const preference = searchParams.get("preference");
+  // Preference is untrusted prompt input: remove control characters and keep
+  // it too small to dominate the server-authored instruction.
+  const preference = (searchParams.get("preference") || "")
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .trim()
+    .slice(0, 160);
 
-  const { data: venuesData, error: venuesError } = await supabase
+  const { data: venuesData, error: venuesError } = await db
     .from("venues")
     .select("id,name,city,type,music_genre,age_limit,cover");
 
@@ -50,7 +61,7 @@ export async function GET(request: Request) {
   }
 
   const since = new Date(Date.now() - 90 * 60 * 1000).toISOString();
-  const { data: votesData, error: votesError } = await supabase
+  const { data: votesData, error: votesError } = await db
     .from("votes")
     .select("venue_id,vibe,created_at")
     .in("vibe", ["lit", "decent", "dead", "line_crazy"])
@@ -141,40 +152,15 @@ ${venues
 
 Return only the recommendation text.`;
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: "You are a nightlife copywriter writing short direct recommendations.",
-        },
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-      max_tokens: 70,
-      temperature: 0.95,
-    }),
-  });
+  const fallback = `Go to ${topVenue.name} — it looks like the best live move tonight.`;
+  const recommendation = await generateShortOpenAiText({
+    prompt,
+    system: "You are a nightlife copywriter writing short direct recommendations.",
+    maxTokens: 70,
+  }).catch(() => null) || fallback;
 
-  if (!response.ok) {
-    return NextResponse.json({
-      recommendation: "Unable to generate a recommendation right now.",
-      venueName: topVenue.name,
-    });
-  }
-
-  const data = await response.json();
-  const recommendation =
-    data?.choices?.[0]?.message?.content?.trim() ||
-    `Go to ${topVenue.name} — it looks like the best live move tonight.`;
-
-  return NextResponse.json({ recommendation, venueName: topVenue.name });
+  return NextResponse.json(
+    { recommendation, venueName: topVenue.name },
+    { headers: { "cache-control": "no-store" } },
+  );
 }

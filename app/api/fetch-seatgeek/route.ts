@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { isCronAuthorized } from "../../../src/lib/cron-auth";
 import {
   normalizeSeatGeekEvent,
@@ -11,11 +11,7 @@ import {
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const db = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false, autoRefreshToken: false } },
-);
+const db = getSupabaseAdmin();
 
 const SEATGEEK_API_BASE = "https://api.seatgeek.com/2";
 const CENTER_LATITUDE = 36.8508;

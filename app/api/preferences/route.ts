@@ -1,4 +1,5 @@
 import { getSupabaseAdmin, jsonError, requireAuthenticatedUser } from "@/lib/supabase-admin";
+import { guardErrorResponse, readBoundedJson } from "@/src/lib/server/request-guards";
 
 type SavedVenueInput = { venueId: string; venueName?: string };
 type VenueAlertInput = { venueId: string; venueName?: string; threshold?: number };
@@ -25,9 +26,24 @@ export async function POST(request: Request) {
   try {
     const user = await requireAuthenticatedUser(request);
     const admin = getSupabaseAdmin();
-    const body = (await request.json()) as { saved?: SavedVenueInput[]; alerts?: VenueAlertInput[] };
-    const saved = Array.isArray(body.saved) ? body.saved.filter(item => item?.venueId) : [];
-    const alerts = Array.isArray(body.alerts) ? body.alerts.filter(item => item?.venueId) : [];
+    const body = await readBoundedJson(request, 65_536);
+    const saved = (Array.isArray(body.saved) ? body.saved : [])
+      .filter((item: unknown): item is SavedVenueInput => Boolean(item && typeof item === "object" && "venueId" in item))
+      .map((item: SavedVenueInput) => ({
+        venueId: String(item.venueId).trim().slice(0, 128),
+        venueName: typeof item.venueName === "string" ? item.venueName.trim().slice(0, 200) : undefined,
+      }))
+      .filter((item: SavedVenueInput) => /^[A-Za-z0-9_-]{1,128}$/.test(item.venueId))
+      .slice(0, 100);
+    const alerts = (Array.isArray(body.alerts) ? body.alerts : [])
+      .filter((item: unknown): item is VenueAlertInput => Boolean(item && typeof item === "object" && "venueId" in item))
+      .map((item: VenueAlertInput) => ({
+        venueId: String(item.venueId).trim().slice(0, 128),
+        venueName: typeof item.venueName === "string" ? item.venueName.trim().slice(0, 200) : undefined,
+        threshold: Number(item.threshold),
+      }))
+      .filter((item: VenueAlertInput) => /^[A-Za-z0-9_-]{1,128}$/.test(item.venueId))
+      .slice(0, 100);
 
     const { error: deleteSavedError } = await admin.from("saved_venues").delete().eq("user_id", user.id);
     if (deleteSavedError) throw deleteSavedError;
@@ -67,6 +83,7 @@ export async function POST(request: Request) {
 
     return Response.json({ success: true, savedCount: saved.length, alertCount: alerts.length });
   } catch (error) {
+    if (error instanceof Error && error.name === "RequestGuardError") return guardErrorResponse(error);
     return jsonError(error);
   }
 }

@@ -26,6 +26,7 @@ import {
   Wine,
   X,
 } from "lucide-react";
+import { RemoteVenueImage } from "./components/remote-venue-image";
 
 type Venue = {
   id: string;
@@ -156,6 +157,9 @@ export default function BuzzDesktopHome() {
 
   useEffect(() => {
     try {
+      // Browser storage is deliberately hydrated after SSR to avoid a
+      // server/client markup mismatch.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setFavoriteIds(new Set(JSON.parse(localStorage.getItem(FAVORITES_KEY) || "[]") as string[]));
     } catch {
       setFavoriteIds(new Set());
@@ -184,6 +188,8 @@ export default function BuzzDesktopHome() {
 
   useEffect(() => {
     if (!searchOpen || query.trim().length < 2) {
+      // Search results are transient state scoped to an open, valid query.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLocationResults([]);
       setSearchingLocations(false);
       return;
@@ -218,7 +224,11 @@ export default function BuzzDesktopHome() {
     setSelected(venue);
     if (valid(venue)) mapRef.current?.easeTo({ center: coords(venue), zoom: Math.max(mapRef.current.getZoom(), 13.5), duration: 520 });
   }, [venues]);
-  selectedRef.current = selectVenue;
+  useEffect(() => {
+    // Mapbox installs its click handler once; the ref keeps that imperative
+    // handler pointed at the latest React selection callback.
+    selectedRef.current = selectVenue;
+  }, [selectVenue]);
 
   useEffect(() => {
     const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
@@ -247,7 +257,7 @@ export default function BuzzDesktopHome() {
     if (!map || !mapReady || map.getSource("buzz-desktop-venues")) return;
     const empty: GeoJSON.FeatureCollection<GeoJSON.Point> = { type: "FeatureCollection", features: [] };
     map.addSource("buzz-desktop-venues", { type: "geojson", data: empty, cluster: true, clusterMaxZoom: 12.5, clusterRadius: 68 });
-    const heatColor: any = ["interpolate", ["linear"], ["get", "score"], 0, "#667085", 45, "#3DDC97", 60, "#C6E84B", 72, "#FFD54A", 82, "#FF9F43", 90, "#FF5C5C"];
+    const heatColor: mapboxgl.ExpressionSpecification = ["interpolate", ["linear"], ["get", "score"], 0, "#667085", 45, "#3DDC97", 60, "#C6E84B", 72, "#FFD54A", 82, "#FF9F43", 90, "#FF5C5C"];
     map.addLayer({ id: "buzz-desktop-clusters", type: "circle", source: "buzz-desktop-venues", filter: ["has", "point_count"], paint: { "circle-color": ["step", ["get", "point_count"], "#FFD54A", 18, "#FF9F43", 45, "#FF5C5C"], "circle-radius": ["step", ["get", "point_count"], 18, 18, 22, 45, 27], "circle-stroke-width": 2, "circle-stroke-color": "#fff" } });
     map.addLayer({ id: "buzz-desktop-cluster-count", type: "symbol", source: "buzz-desktop-venues", filter: ["has", "point_count"], layout: { "text-field": ["get", "point_count_abbreviated"], "text-size": 11 }, paint: { "text-color": "#101114" } });
     map.addLayer({ id: "buzz-desktop-halo", type: "circle", source: "buzz-desktop-venues", filter: ["!", ["has", "point_count"]], paint: { "circle-radius": ["case", ["==", ["get", "selected"], true], 22, ["interpolate", ["linear"], ["get", "score"], 40, 9, 100, 17]], "circle-color": heatColor, "circle-opacity": ["case", ["==", ["get", "selected"], true], .34, .16], "circle-blur": .8 } });
@@ -298,7 +308,8 @@ export default function BuzzDesktopHome() {
     event.stopPropagation();
     setFavoriteIds(current => {
       const next = new Set(current);
-      next.has(venue.id) ? next.delete(venue.id) : next.add(venue.id);
+      if (next.has(venue.id)) next.delete(venue.id);
+      else next.add(venue.id);
       localStorage.setItem(FAVORITES_KEY, JSON.stringify([...next]));
       return next;
     });
@@ -415,7 +426,7 @@ export default function BuzzDesktopHome() {
               </div>
             )}
             <div className="buzz-section-heading"><div><span>{selectedDistrict ? "IN THIS AREA" : "HAPPENING NOW"}</span><h2>{selectedDistrict?.shortName || "Things to do nearby"}</h2><p>{loading ? "Refreshing activity…" : `${filtered.length} places ${scopeLabel}`}</p></div><button type="button" onClick={() => setSearchOpen(true)}>Search all <ChevronRight /></button></div>
-            {filtered.length ? <div className="buzz-desktop-card-grid">{filtered.slice(0, 12).map((venue, index) => <article key={venue.id} onClick={() => selectVenue(venue.id)}><div className="buzz-card-photo">{venue.photoUrl ? <img src={venue.photoUrl} alt="" /> : <span>{venue.name[0]}</span>}<div><b>{score(venue)}</b><small>BUZZ</small></div>{index === 0 && <em>BEST NOW</em>}</div><div className="buzz-card-copy"><small>{categoryFor(venue)} · {distanceLabel(venue.distanceMiles) || venue.city || "Nearby"}</small><h3>{venue.name}</h3><p>{venue.event?.name || venue.reason || "Available to do right now"}</p><span>{statusFor(venue)} · {venue.activity?.trendLabel || "Steady"}</span></div><button type="button" className={favoriteIds.has(venue.id) ? "saved" : ""} onClick={event => toggleFavorite(event, venue)} aria-label={favoriteIds.has(venue.id) ? `Remove ${venue.name} from saved places` : `Save ${venue.name}`}><Heart fill={favoriteIds.has(venue.id) ? "currentColor" : "none"} /></button></article>)}</div> : <div className="buzz-desktop-empty"><Search /><strong>No places match this view</strong><p>Try another category, clear the search, or choose a different area.</p></div>}
+            {filtered.length ? <div className="buzz-desktop-card-grid">{filtered.slice(0, 12).map((venue, index) => <article key={venue.id} onClick={() => selectVenue(venue.id)}><div className="buzz-card-photo"><RemoteVenueImage src={venue.photoUrl} alt="" fallback={<span>{venue.name[0]}</span>} sizes="(max-width: 1023px) 100vw, 280px" /><div><b>{score(venue)}</b><small>BUZZ</small></div>{index === 0 && <em>BEST NOW</em>}</div><div className="buzz-card-copy"><small>{categoryFor(venue)} · {distanceLabel(venue.distanceMiles) || venue.city || "Nearby"}</small><h3>{venue.name}</h3><p>{venue.event?.name || venue.reason || "Available to do right now"}</p><span>{statusFor(venue)} · {venue.activity?.trendLabel || "Steady"}</span></div><button type="button" className={favoriteIds.has(venue.id) ? "saved" : ""} onClick={event => toggleFavorite(event, venue)} aria-label={favoriteIds.has(venue.id) ? `Remove ${venue.name} from saved places` : `Save ${venue.name}`}><Heart fill={favoriteIds.has(venue.id) ? "currentColor" : "none"} /></button></article>)}</div> : <div className="buzz-desktop-empty"><Search /><strong>No places match this view</strong><p>Try another category, clear the search, or choose a different area.</p></div>}
           </section>
 
           <div ref={mapSectionRef} className="buzz-desktop-map-wrap"><div className="buzz-map-toolbar"><button type="button" onClick={useLocation}><LocateFixed /> Near me</button><button type="button" onClick={searchThisMap}><Search /> Search this map</button><span>{selectedDistrict?.shortName || `${filtered.length} places`}</span></div><div className="buzz-desktop-map-hint">Click a place to see what is happening now</div><div ref={mapEl} className="buzz-desktop-map" /></div>

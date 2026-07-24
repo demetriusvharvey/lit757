@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { getRequestUser } from "../../../../src/lib/server-auth";
+import {
+  exceedsRequestRate,
+  guardErrorResponse,
+  readBoundedJson,
+  requestClientKey,
+} from "../../../../src/lib/server/request-guards";
 
 export const dynamic = "force-dynamic";
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false, autoRefreshToken: false } }
-);
+const supabaseAdmin = getSupabaseAdmin();
 
 const VALID_STATUSES = new Set([
   "active",
@@ -24,16 +26,20 @@ const VALID_STATUSES = new Set([
 export async function POST(request: Request) {
   const user = await getRequestUser(request);
   if (!user) return NextResponse.json({ error: "Sign in to report activity." }, { status: 401 });
+  if (exceedsRequestRate(`activity:${user.id}:${requestClientKey(request)}`, 12, 60_000)) {
+    return NextResponse.json({ error: "Too many activity updates." }, { status: 429 });
+  }
 
-  const body = await request.json().catch(() => null) as {
-    venueId?: string;
-    status?: string;
-    verifiedNearby?: boolean;
-  } | null;
+  let body: Record<string, unknown>;
+  try {
+    body = await readBoundedJson(request, 4_096);
+  } catch (error) {
+    return guardErrorResponse(error);
+  }
 
-  const venueId = body?.venueId?.trim();
-  const status = body?.status?.trim();
-  if (!venueId || !status || !VALID_STATUSES.has(status)) {
+  const venueId = typeof body.venueId === "string" ? body.venueId.trim() : "";
+  const status = typeof body.status === "string" ? body.status.trim() : "";
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(venueId) || !VALID_STATUSES.has(status)) {
     return NextResponse.json({ error: "Choose a valid activity update." }, { status: 400 });
   }
 
@@ -54,7 +60,9 @@ export async function POST(request: Request) {
     );
   }
 
-  const verifiedNearby = Boolean(body?.verifiedNearby);
+  // Proximity is established only by /api/presence. A browser-provided boolean
+  // must never increase reputation or points.
+  const verifiedNearby = false;
   const { data: report, error: reportError } = await supabaseAdmin
     .from("activity_reports")
     .insert({
@@ -70,13 +78,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: reportError.message }, { status: 500 });
   }
 
-  const awarded = verifiedNearby ? 10 : 3;
+  const awarded = 3;
   const { error: pointsError } = await supabaseAdmin.from("points_ledger").insert({
     user_id: user.id,
-    action: verifiedNearby ? "verified_activity_report" : "activity_report",
+    action: "activity_report",
     points: awarded,
     reference_key: `activity:${report.id}`,
-    metadata: { venueId, status, verifiedNearby },
+    metadata: { venueId, status, verifiedNearby: false },
   });
 
   if (pointsError) console.error("Could not award Points", pointsError.message);

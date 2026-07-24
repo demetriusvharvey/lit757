@@ -56,8 +56,13 @@ function makeFeed(venues: ActivityVenue[]) {
     const row = document.createElement("button");
     row.type = "button";
     row.className = "approved-feed-row";
-    const img = venue.photoUrl ? `<img src="${venue.photoUrl}" alt="" />` : `<div class="approved-feed-placeholder">${venue.name.slice(0,1)}</div>`;
-    row.innerHTML = `${img}<span class="approved-score score-${index}">${venue.activity?.score||0}</span><span class="approved-feed-copy"><strong>${venue.name}</strong><span><em>${venue.activity?.trendLabel||"Steady"}</em> · ${venue.activity?.label||"Moderate"}</span><small>${iconFor(venue)} ${venue.event?.name||venue.reason||"Popular nearby right now"}</small></span><span class="approved-feed-time">${index===0?"Just now":`${index*2+1}m ago`}<i>›</i><b>♡</b></span>`;
+    row.innerHTML = `<span class="approved-score score-${index}">${venue.activity?.score||0}</span><span class="approved-feed-copy"><strong>${venue.name}</strong><span><em>${venue.activity?.trendLabel||"Steady"}</em> · ${venue.activity?.label||"Moderate"}</span><small>${iconFor(venue)} ${venue.event?.name||venue.reason||"Popular nearby right now"}</small></span><span class="approved-feed-time">${index===0?"Just now":`${index*2+1}m ago`}<i>›</i><b>♡</b></span>`;
+    // This legacy DOM enhancer cannot render Next/Image safely. Keep its local
+    // initial fallback instead of bypassing the shared provider-image boundary.
+    const thumbnail = document.createElement("div");
+    thumbnail.className = "approved-feed-placeholder";
+    thumbnail.textContent = venue.name.slice(0, 1);
+    row.prepend(thumbnail);
     row.addEventListener("click",()=>openVenue(venue));
     list.appendChild(row);
   });

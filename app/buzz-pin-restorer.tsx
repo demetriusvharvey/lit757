@@ -44,7 +44,11 @@ export default function BuzzPinRestorer() {
   const mappedRef = useRef<Venue[]>([]);
 
   const mapped = useMemo(() => venues.filter(validVenue), [venues]);
-  mappedRef.current = mapped;
+  useEffect(() => {
+    // The Mapbox click listener is imperative and needs the latest filtered
+    // venue list without being reinstalled on every data refresh.
+    mappedRef.current = mapped;
+  }, [mapped]);
 
   useEffect(() => {
     const receive = (event: Event) => {
@@ -115,7 +119,7 @@ export default function BuzzPinRestorer() {
       const empty: GeoJSON.FeatureCollection<GeoJSON.Point> = { type: "FeatureCollection", features: [] };
       map.addSource(SOURCE_ID, { type: "geojson", data: empty });
 
-      const heatColor: any = [
+      const heatColor: mapboxgl.ExpressionSpecification = [
         "interpolate", ["linear"], ["get", "score"],
         0, "#667085",
         42, "#3DDC97",

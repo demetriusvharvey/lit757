@@ -15,7 +15,7 @@ import {
   TrainFront,
   XCircle,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -108,7 +108,12 @@ export default function ProviderHealthDashboard() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    // This dashboard is intentionally client-refreshed because every provider
+    // status must bypass caches and represent current production health.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refresh();
+  }, [refresh]);
 
   const dataHealth = record(payload.dataHealth);
   const cityCalendars = record(payload.cityCalendars);
@@ -127,12 +132,12 @@ export default function ProviderHealthDashboard() {
   const integrationCounts = record(integrations.counts);
   const institutionSources = rows(institutions.sources);
 
-  const cityRows = useMemo(() => Object.entries(cityHealth).map(([city, value]) => {
+  const cityRows = Object.entries(cityHealth).map(([city, value]) => {
     const details = record(value);
     const working = numberValue(details.successfulFeeds);
     const registered = numberValue(details.registeredFeeds);
     return { city, working, registered, status: working > 0 ? working === registered ? "healthy" : "degraded" : "error" };
-  }), [cityHealth]);
+  });
 
   const failedInstitutions = institutionSources.filter(source => String(source.status) !== "ok");
   const healthyInstitutions = institutionSources.filter(source => String(source.status) === "ok");

@@ -1,15 +1,18 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { recomputeBuzzScore, saveBuzzSignals } from "../../../../src/lib/buzz/repository";
 import type { BuzzSignal, VenueForBuzz } from "../../../../src/lib/buzz/types";
+import {
+  exceedsRequestRate,
+  guardErrorResponse,
+  hasBearerSecret,
+  readBoundedJson,
+  requestClientKey,
+} from "../../../../src/lib/server/request-guards";
 
 export const dynamic = "force-dynamic";
 
-const db = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false, autoRefreshToken: false } },
-);
+const db = getSupabaseAdmin();
 
 const bands = new Set(["quiet", "steady", "busy", "packed"]);
 
@@ -20,31 +23,42 @@ function bandValue(band: string) {
   return 15;
 }
 
-function authorized(request: Request) {
-  const secret = process.env.BUZZ_PARTNER_INGEST_SECRET;
-  if (!secret) return process.env.NODE_ENV !== "production";
-  return request.headers.get("authorization") === `Bearer ${secret}` || request.headers.get("x-buzz-partner-secret") === secret;
-}
-
 export async function POST(request: Request) {
-  if (!authorized(request)) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
-  const body = await request.json().catch(() => null) as {
-    venueId?: string;
-    occupancyBand?: string;
-    occupancyPct?: number | null;
-    waitMinutes?: number | null;
-    reservationsStatus?: string | null;
-    ticketsStatus?: string | null;
-    submittedBy?: string | null;
-  } | null;
+  if (!hasBearerSecret(request, process.env.BUZZ_PARTNER_INGEST_SECRET)) {
+    return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  }
+  if (exceedsRequestRate(`partner-pulse:${requestClientKey(request)}`, 30, 60_000)) {
+    return NextResponse.json({ success: false, error: "Too many requests" }, { status: 429 });
+  }
 
-  const venueId = String(body?.venueId || "");
-  const occupancyBand = String(body?.occupancyBand || "").toLowerCase();
-  const occupancyPct = body?.occupancyPct == null ? null : Math.max(0, Math.min(100, Number(body.occupancyPct)));
-  const waitMinutes = body?.waitMinutes == null ? null : Math.max(0, Math.round(Number(body.waitMinutes)));
-  if (!venueId || !bands.has(occupancyBand)) {
+  let body: Record<string, unknown>;
+  try {
+    body = await readBoundedJson(request, 16_384);
+  } catch (error) {
+    return guardErrorResponse(error);
+  }
+
+  const venueId = typeof body.venueId === "string" ? body.venueId.trim() : "";
+  const occupancyBand = typeof body.occupancyBand === "string" ? body.occupancyBand.toLowerCase() : "";
+  const occupancyPct = body.occupancyPct == null ? null : Number(body.occupancyPct);
+  const waitMinutes = body.waitMinutes == null ? null : Number(body.waitMinutes);
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(venueId) || !bands.has(occupancyBand)) {
     return NextResponse.json({ success: false, error: "venueId and a valid occupancyBand are required" }, { status: 400 });
   }
+  if ((occupancyPct != null && (!Number.isFinite(occupancyPct) || occupancyPct < 0 || occupancyPct > 100))
+    || (waitMinutes != null && (!Number.isFinite(waitMinutes) || waitMinutes < 0 || waitMinutes > 360))) {
+    return NextResponse.json({ success: false, error: "Invalid occupancy or wait time" }, { status: 400 });
+  }
+
+  const reservationsStatus = typeof body.reservationsStatus === "string"
+    ? body.reservationsStatus.trim().slice(0, 120)
+    : null;
+  const ticketsStatus = typeof body.ticketsStatus === "string"
+    ? body.ticketsStatus.trim().slice(0, 120)
+    : null;
+  const submittedBy = typeof body.submittedBy === "string"
+    ? body.submittedBy.trim().slice(0, 120)
+    : null;
 
   const { data: venue, error: venueError } = await db
     .from("venues")
@@ -58,11 +72,11 @@ export async function POST(request: Request) {
   const { error: pulseError } = await db.from("venue_partner_pulses").insert({
     venue_id: venueId,
     occupancy_band: occupancyBand,
-    occupancy_pct: occupancyPct,
-    wait_minutes: waitMinutes,
-    reservations_status: body?.reservationsStatus || null,
-    tickets_status: body?.ticketsStatus || null,
-    submitted_by: body?.submittedBy || null,
+    occupancy_pct: occupancyPct == null ? null : Math.round(occupancyPct),
+    wait_minutes: waitMinutes == null ? null : Math.round(waitMinutes),
+    reservations_status: reservationsStatus,
+    tickets_status: ticketsStatus,
+    submitted_by: submittedBy,
     verified: true,
     observed_at: observedAt.toISOString(),
     expires_at: expiresAt.toISOString(),
@@ -73,17 +87,17 @@ export async function POST(request: Request) {
     source: "venue_partner",
     family: "first_party_occupancy",
     type: "partner_pulse",
-    value: occupancyPct ?? bandValue(occupancyBand),
+    value: occupancyPct == null ? bandValue(occupancyBand) : Math.round(occupancyPct),
     isLive: true,
     confidence: 0.9,
     observedAt: observedAt.toISOString(),
     expiresAt: expiresAt.toISOString(),
     metadata: {
       occupancyBand,
-      waitMinutes,
-      reservationsStatus: body?.reservationsStatus || null,
-      ticketStatus: body?.ticketsStatus || null,
-      submittedBy: body?.submittedBy || null,
+      waitMinutes: waitMinutes == null ? null : Math.round(waitMinutes),
+      reservationsStatus,
+      ticketStatus: ticketsStatus,
+      submittedBy,
       verified: true,
     },
   };

@@ -1,24 +1,35 @@
-import { createClient, type User } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient, type User } from "@supabase/supabase-js";
+import { readSupabaseServerEnvironment } from "@/src/lib/server/env";
 
-function supabaseUrl() {
-  return process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-}
+let adminClient: SupabaseClient | null = null;
 
+/**
+ * Returns one service-role client per server runtime. Centralizing creation
+ * keeps auth settings consistent and makes the service key impossible to
+ * accidentally copy into browser code.
+ */
 export function getSupabaseAdmin() {
-  const url = supabaseUrl();
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+  if (adminClient) return adminClient;
 
-  if (!url || !serviceRoleKey) {
-    throw new Error("Supabase server environment variables are not configured.");
-  }
-
-  return createClient(url, serviceRoleKey, {
+  const { url, serviceRoleKey } = readSupabaseServerEnvironment();
+  adminClient = createClient(url, serviceRoleKey, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
       detectSessionInUrl: false,
     },
   });
+  return adminClient;
+}
+
+export function getSupabaseAdminIfConfigured() {
+  if (
+    !process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ||
+    !process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
+  ) {
+    return null;
+  }
+  return getSupabaseAdmin();
 }
 
 export async function requireAuthenticatedUser(request: Request): Promise<User> {

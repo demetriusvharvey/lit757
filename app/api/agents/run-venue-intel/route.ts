@@ -1,12 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- Legacy venue rows are schemaless Supabase payloads. */
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { isCronAuthorized } from "../../../../src/lib/cron-auth";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+const supabase = getSupabaseAdmin();
 
 function getStatus(score: number) {
   if (score >= 85) return "Packed";

@@ -55,7 +55,7 @@ export default function MapLayerGuard(){
       map.on("mouseleave","mobile-venue-hit",onLeave);
     };
 
-    map.isStyleLoaded()?install():map.once("load",install);
+    if(map.isStyleLoaded())install();else map.once("load",install);
     return()=>{
       cancelled=true;
       if(retryTimer)window.clearTimeout(retryTimer);
