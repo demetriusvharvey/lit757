@@ -1,3 +1,4 @@
+import { localParts } from "./local-time";
 import type { BuzzSignal, VenueForBuzz } from "./types";
 
 export type BuzzCalibrationProfile = {
@@ -43,21 +44,6 @@ function effectiveSize(rows: WeightedError[]) {
 
 function shrink(value: number, sampleWeight: number, priorWeight: number, cap: number) {
   return clamp(value * (sampleWeight / (sampleWeight + priorWeight)), -cap, cap);
-}
-
-function localParts(date: Date) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    weekday: "short",
-    month: "numeric",
-    hour: "numeric",
-    hour12: false,
-  }).formatToParts(date);
-  return {
-    weekday: parts.find(part => part.type === "weekday")?.value || "Mon",
-    month: Number(parts.find(part => part.type === "month")?.value || 1),
-    hour: Number(parts.find(part => part.type === "hour")?.value || 0) % 24,
-  };
 }
 
 function recencyWeight(observedAt: Date, referenceTime: Date) {

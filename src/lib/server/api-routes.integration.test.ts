@@ -22,6 +22,41 @@ test("ground-truth API rejects requests without its server secret", async () => 
   assert.match((await response.json()).error, /Unauthorized/);
 });
 
+test("calibration training rejects requests without the ground-truth secret", async () => {
+  const { GET } = await import("../../../app/api/buzz/calibrate/route");
+  const response = await GET(new Request("https://buzz.example/api/buzz/calibrate"));
+
+  assert.equal(response.status, 401);
+  assert.match((await response.json()).error, /Unauthorized/);
+});
+
+test("calibration training does not accept CRON_SECRET as a substitute", async () => {
+  // CRON_SECRET is handed to schedulers for refresh work. Training reads raw
+  // ground truth and writes the artifact that can move public scores, so it
+  // must stay on the narrower ground-truth boundary.
+  const cronSecret = "cron-secret-value-at-least-32-characters-long";
+  const previousCron = process.env.CRON_SECRET;
+  const previousTruth = process.env.BUZZ_GROUND_TRUTH_SECRET;
+  process.env.CRON_SECRET = cronSecret;
+  delete process.env.BUZZ_GROUND_TRUTH_SECRET;
+
+  try {
+    const { GET } = await import("../../../app/api/buzz/calibrate/route");
+    const response = await GET(
+      new Request("https://buzz.example/api/buzz/calibrate", {
+        headers: { authorization: `Bearer ${cronSecret}` },
+      }),
+    );
+
+    assert.equal(response.status, 401);
+  } finally {
+    if (previousCron === undefined) delete process.env.CRON_SECRET;
+    else process.env.CRON_SECRET = previousCron;
+    if (previousTruth === undefined) delete process.env.BUZZ_GROUND_TRUTH_SECRET;
+    else process.env.BUZZ_GROUND_TRUTH_SECRET = previousTruth;
+  }
+});
+
 test("partner ingestion enforces its request-size limit before database work", async () => {
   const secret = "partner-integration-secret-at-least-32-characters";
   process.env.BUZZ_PARTNER_INGEST_SECRET = secret;

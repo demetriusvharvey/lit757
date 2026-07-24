@@ -1,0 +1,50 @@
+name: Buzz calibration
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: buzz-calibration
+  cancel-in-progress: false
+
+jobs:
+  calibrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Train and store the candidate Buzz calibration model
+        env:
+          BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
+          # Training sits on the ground-truth trust boundary, not the cron one.
+          BUZZ_GROUND_TRUTH_SECRET: ${{ secrets.BUZZ_GROUND_TRUTH_SECRET }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${BASE_URL:?Add BUZZ_PRODUCTION_URL as a GitHub Actions secret}"
+          : "${BUZZ_GROUND_TRUTH_SECRET:?Add BUZZ_GROUND_TRUTH_SECRET as a GitHub Actions secret}"
+          BASE_URL="${BASE_URL%/}"
+          curl --silent --show-error --fail-with-body --retry 2 --max-time 55 \
+            -H "Authorization: Bearer ${BUZZ_GROUND_TRUTH_SECRET}" \
+            "${BASE_URL}/api/buzz/calibrate" \
+            | tee buzz-calibration.json
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          payload = json.loads(Path("buzz-calibration.json").read_text(encoding="utf-8"))
+          assert payload.get("success") is True, payload
+          assert payload.get("version") == "buzz-ml-v1", payload
+          assert "trainingRows" in payload, payload
+          assert payload.get("truthNote"), payload
+          print(json.dumps({
+              "trainingRows": payload.get("trainingRows"),
+              "skippedWithoutFrozenPrediction": payload.get("skippedWithoutFrozenPrediction"),
+              "meanAbsoluteError": payload.get("meanAbsoluteError"),
+              "ready": payload.get("ready"),
+          }, indent=2))
+          PY
