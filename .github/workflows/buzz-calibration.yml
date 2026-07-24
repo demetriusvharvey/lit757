@@ -33,18 +33,18 @@ jobs:
             "${BASE_URL}/api/buzz/calibrate" \
             | tee buzz-calibration.json
 
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          payload = json.loads(Path("buzz-calibration.json").read_text(encoding="utf-8"))
-          assert payload.get("success") is True, payload
-          assert payload.get("version") == "buzz-ml-v1", payload
-          assert "trainingRows" in payload, payload
-          assert payload.get("truthNote"), payload
-          print(json.dumps({
-              "trainingRows": payload.get("trainingRows"),
-              "skippedWithoutFrozenPrediction": payload.get("skippedWithoutFrozenPrediction"),
-              "meanAbsoluteError": payload.get("meanAbsoluteError"),
-              "ready": payload.get("ready"),
-          }, indent=2))
-          PY
+          node -e '
+            const fs = require("node:fs");
+            const payload = JSON.parse(fs.readFileSync("buzz-calibration.json", "utf8"));
+            const fail = (message) => { console.error(message, payload); process.exit(1); };
+            if (payload.success !== true) fail("training did not succeed");
+            if (payload.version !== "buzz-ml-v1") fail("unexpected model version");
+            if (typeof payload.trainingRows !== "number") fail("missing trainingRows");
+            if (!payload.truthNote) fail("missing truthNote");
+            console.log(JSON.stringify({
+              trainingRows: payload.trainingRows,
+              skippedWithoutFrozenPrediction: payload.skippedWithoutFrozenPrediction,
+              meanAbsoluteError: payload.meanAbsoluteError,
+              ready: payload.ready,
+            }, null, 2));
+          '
