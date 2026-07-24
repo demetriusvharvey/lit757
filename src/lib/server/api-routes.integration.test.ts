@@ -57,6 +57,15 @@ test("calibration training does not accept CRON_SECRET as a substitute", async (
   }
 });
 
+test("the evaluation report rejects requests without the ground-truth secret", async () => {
+  // The report exposes raw per-venue prediction quality.
+  const { GET } = await import("../../../app/api/buzz/evaluation/route");
+  const response = await GET(new Request("https://buzz.example/api/buzz/evaluation"));
+
+  assert.equal(response.status, 401);
+  assert.match((await response.json()).error, /Unauthorized/);
+});
+
 test("partner ingestion enforces its request-size limit before database work", async () => {
   const secret = "partner-integration-secret-at-least-32-characters";
   process.env.BUZZ_PARTNER_INGEST_SECRET = secret;
