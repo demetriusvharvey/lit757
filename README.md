@@ -135,6 +135,14 @@ The responsive map uses the same presentation rules on desktop and mobile:
 heat-only at city zoom, collision-aware hottest-venue logos at medium zoom, and
 the wider logo set at close zoom. A provider image failure becomes an initials
 logo with the same Buzz activity ring instead of an anonymous map bubble.
+Heating Up venues receive an orange pulse and On Fire venues receive a red
+pulse; reduced-motion clients receive the same signal as a static halo. The
+Buzzing filter isolates those Heating Up and On Fire venues with one tap.
+The map screen delegates Mapbox behavior, the responsive venue list, and the
+responsive venue-detail surface to focused shared modules so desktop and mobile
+use the same activity thresholds and interactions. Venue cards are native
+keyboard controls; opening details moves focus into the panel, Escape closes
+it, and focus returns to the launching venue.
 
 ## Environment variables
 

@@ -13,8 +13,13 @@ import {
   ALL_LOGO_MIN_ZOOM,
   DENSE_LOGO_MIN_ZOOM,
   FEATURED_LOGO_MIN_ZOOM,
+  isBuzzingPinScore,
   selectFeaturedVenueIds,
 } from "../buzz-map-presentation";
+import {
+  addBuzzPulseLayers,
+  startBuzzPulseAnimation,
+} from "../buzz-map-pulse";
 import {
   activityColor,
   createVenueLogoSprite,
@@ -141,6 +146,8 @@ export function useBuzzMapbox({
       },
     });
 
+    addBuzzPulseLayers(map);
+
     // Medium zoom shows only the hottest real places. Collision handling
     // naturally reveals fewer logos on mobile without maintaining two maps.
     map.addLayer({
@@ -149,7 +156,11 @@ export function useBuzzMapbox({
       source: "buzz-map-featured",
       minzoom: FEATURED_LOGO_MIN_ZOOM,
       maxzoom: ALL_LOGO_MIN_ZOOM,
-      filter: ["==", ["get", "selected"], false],
+      filter: [
+        "all",
+        ["==", ["get", "selected"], false],
+        ["==", ["get", "buzzing"], false],
+      ],
       layout: {
         "icon-image": ["get", "logoKey"],
         "icon-size": [
@@ -167,6 +178,32 @@ export function useBuzzMapbox({
         "symbol-sort-key": ["-", 100, ["get", "score"]],
       },
     });
+    map.addLayer({
+      id: "buzz-featured-hot-logo",
+      type: "symbol",
+      source: "buzz-map-featured",
+      minzoom: FEATURED_LOGO_MIN_ZOOM,
+      maxzoom: ALL_LOGO_MIN_ZOOM,
+      filter: [
+        "all",
+        ["==", ["get", "selected"], false],
+        ["==", ["get", "buzzing"], true],
+      ],
+      layout: {
+        "icon-image": ["get", "logoKey"],
+        "icon-size": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          FEATURED_LOGO_MIN_ZOOM,
+          0.5,
+          ALL_LOGO_MIN_ZOOM,
+          0.6,
+        ],
+        "icon-allow-overlap": true,
+        "icon-ignore-placement": true,
+      },
+    });
     // Close zoom reveals the wider logo set. The map becomes denser only
     // after users intentionally zoom into a smaller geographic area.
     map.addLayer({
@@ -175,7 +212,11 @@ export function useBuzzMapbox({
       source: "buzz-map-venues",
       minzoom: ALL_LOGO_MIN_ZOOM,
       maxzoom: DENSE_LOGO_MIN_ZOOM,
-      filter: ["==", ["get", "selected"], false],
+      filter: [
+        "all",
+        ["==", ["get", "selected"], false],
+        ["==", ["get", "buzzing"], false],
+      ],
       layout: {
         "icon-image": ["get", "logoKey"],
         "icon-size": [
@@ -191,6 +232,32 @@ export function useBuzzMapbox({
         "icon-ignore-placement": false,
         "icon-padding": 8,
         "symbol-sort-key": ["-", 100, ["get", "score"]],
+      },
+    });
+    map.addLayer({
+      id: "buzz-all-hot-logo",
+      type: "symbol",
+      source: "buzz-map-venues",
+      minzoom: ALL_LOGO_MIN_ZOOM,
+      maxzoom: DENSE_LOGO_MIN_ZOOM,
+      filter: [
+        "all",
+        ["==", ["get", "selected"], false],
+        ["==", ["get", "buzzing"], true],
+      ],
+      layout: {
+        "icon-image": ["get", "logoKey"],
+        "icon-size": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          ALL_LOGO_MIN_ZOOM,
+          0.54,
+          DENSE_LOGO_MIN_ZOOM,
+          0.66,
+        ],
+        "icon-allow-overlap": true,
+        "icon-ignore-placement": true,
       },
     });
     map.addLayer({
@@ -240,10 +307,13 @@ export function useBuzzMapbox({
 
     const logoLayerIds = [
       "buzz-featured-logo",
+      "buzz-featured-hot-logo",
       "buzz-all-logo",
+      "buzz-all-hot-logo",
       "buzz-all-logo-dense",
       "buzz-selected-logo",
     ];
+    const stopBuzzPulse = startBuzzPulseAnimation(map);
     const handleMissingLogo = (event: { id: string }) => {
       const id = event.id;
       if (
@@ -302,6 +372,7 @@ export function useBuzzMapbox({
     map.on("click", "buzz-area-heat", handleHeatClick);
 
     return () => {
+      stopBuzzPulse();
       map.off("styleimagemissing", handleMissingLogo);
       logoLayerIds.forEach((layerId) => {
         map.off("click", layerId, handleVenueClick);
@@ -329,6 +400,7 @@ export function useBuzzMapbox({
           properties: {
             id: venue.id,
             score,
+            buzzing: isBuzzingPinScore(score),
             logoKey,
             selected: selectedVenueId === venue.id,
           },

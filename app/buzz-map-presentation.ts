@@ -1,3 +1,13 @@
+import {
+  BUZZING_PIN_MIN_SCORE,
+  ON_FIRE_PIN_MIN_SCORE,
+} from "./buzz-map-model";
+
+export {
+  BUZZING_PIN_MIN_SCORE,
+  ON_FIRE_PIN_MIN_SCORE,
+} from "./buzz-map-model";
+
 export const FEATURED_LOGO_MIN_ZOOM = 9.3;
 export const ALL_LOGO_MIN_ZOOM = 11.7;
 export const DENSE_LOGO_MIN_ZOOM = 14;
@@ -7,6 +17,14 @@ type MapVenueCandidate = {
   id: string;
   score: number;
 };
+
+export function isBuzzingPinScore(score: number) {
+  return score >= BUZZING_PIN_MIN_SCORE;
+}
+
+export function isOnFirePinScore(score: number) {
+  return score >= ON_FIRE_PIN_MIN_SCORE;
+}
 
 /**
  * Keeps the medium-zoom map useful without covering it in pins. The hottest

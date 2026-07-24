@@ -88,6 +88,9 @@ export type LoadRequest = {
 };
 
 export const DEFAULT_BUZZ_CENTER: [number, number] = [-76.17, 36.88];
+export const ACTIVE_MIN_SCORE = 60;
+export const BUZZING_PIN_MIN_SCORE = 76;
+export const ON_FIRE_PIN_MIN_SCORE = 88;
 
 export function venueScore(venue: BuzzVenue) {
   return Math.max(0, Math.min(100, Number(venue.activity?.score ?? 35)));
@@ -109,10 +112,14 @@ export function hasValidVenueCoordinates(venue: BuzzVenue) {
 
 export function venueStatus(venue: BuzzVenue) {
   const score = venueScore(venue);
-  if (score >= 88) return "On fire";
-  if (score >= 76) return "Heating up";
-  if (score >= 60) return "Active";
+  if (score >= ON_FIRE_PIN_MIN_SCORE) return "On Fire";
+  if (score >= BUZZING_PIN_MIN_SCORE) return "Heating Up";
+  if (score >= ACTIVE_MIN_SCORE) return "Active";
   return "Chill";
+}
+
+export function venueTruthLabel(venue: BuzzVenue) {
+  return venue.activity?.scoreMode === "live" ? "Live" : "Forecast";
 }
 
 export function milesLabel(value?: number | null) {

@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { activityColor } from "../../../app/buzz-map-logo-sprite";
-import { selectFeaturedVenueIds } from "../../../app/buzz-map-presentation";
+import { buzzPulseFrame } from "../../../app/buzz-map-pulse";
+import {
+  isBuzzingPinScore,
+  isOnFirePinScore,
+  selectFeaturedVenueIds,
+} from "../../../app/buzz-map-presentation";
 
 test("medium zoom reserves logo slots for the hottest venues", () => {
   const featured = selectFeaturedVenueIds(
@@ -37,4 +42,22 @@ test("logo activity rings retain the Buzz heat scale", () => {
   assert.equal(activityColor(75), "#facc15");
   assert.equal(activityColor(85), "#fb923c");
   assert.equal(activityColor(95), "#ef4444");
+});
+
+test("animated pin thresholds match Heating Up and On Fire scores", () => {
+  assert.equal(isBuzzingPinScore(75), false);
+  assert.equal(isBuzzingPinScore(76), true);
+  assert.equal(isOnFirePinScore(87), false);
+  assert.equal(isOnFirePinScore(88), true);
+});
+
+test("buzz pulse expands while fading before restarting", () => {
+  const start = buzzPulseFrame(0);
+  const middle = buzzPulseFrame(900);
+  const restart = buzzPulseFrame(1_800);
+
+  assert.ok(middle.radius > start.radius);
+  assert.ok(middle.opacity < start.opacity);
+  assert.ok(middle.strokeOpacity < start.strokeOpacity);
+  assert.deepEqual(restart, start);
 });
