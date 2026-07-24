@@ -10,6 +10,7 @@ body.buzz-map-active{overflow:hidden;background:#080b10}
 .buzz-map-app *{box-sizing:border-box}
 .buzz-map-app button,.buzz-map-app input,.buzz-map-app a{font:inherit}
 .buzz-map-app button{color:inherit}
+.buzz-map-app button:focus-visible,.buzz-map-app input:focus-visible,.buzz-map-app a:focus-visible{outline:2px solid #a78bfa;outline-offset:2px}
 .buzz-map-header{display:grid;grid-template-columns:230px minmax(260px,620px) 1fr;align-items:center;gap:22px;padding:0 22px;border-bottom:1px solid #202630;background:rgba(8,11,16,.97);backdrop-filter:blur(18px)}
 .buzz-map-brand{display:flex;align-items:baseline;gap:9px;border:0;background:none;cursor:pointer;text-align:left}
 .buzz-map-brand strong{font-size:30px;line-height:1;font-weight:950;letter-spacing:-.06em}
@@ -31,6 +32,11 @@ body.buzz-map-active{overflow:hidden;background:#080b10}
 .buzz-map-filters button:hover{border-color:#4d5968;background:#18202b}
 .buzz-map-filters button.active{border-color:#fff;background:#fff;color:#0b1016}
 .buzz-map-filters button.active svg{color:#0b1016}
+.buzz-filter-divider{flex:0 0 auto;width:1px;height:24px;background:#303946}
+.buzz-map-filters button.buzzing{border-color:#653429;background:linear-gradient(135deg,rgba(249,115,22,.12),rgba(239,68,68,.08))}
+.buzz-map-filters button.buzzing svg{color:#fb923c}
+.buzz-map-filters button.buzzing.active{border-color:#fb923c;background:linear-gradient(135deg,#f97316,#dc2626);color:#fff;box-shadow:0 0 18px rgba(239,68,68,.24)}
+.buzz-map-filters button.buzzing.active svg{color:#fff}
 .buzz-map-layout{min-height:0;display:grid;grid-template-columns:360px minmax(0,1fr)}
 .buzz-map-list{min-height:0;display:flex;flex-direction:column;border-right:1px solid #202630;background:#0b1016}
 .buzz-map-list-head{display:flex;justify-content:space-between;gap:12px;padding:18px 16px 14px;border-bottom:1px solid #202630}
@@ -41,8 +47,10 @@ body.buzz-map-active{overflow:hidden;background:#080b10}
 .buzz-heat-key i{width:8px;height:8px;border-radius:50%;background:#f97316;box-shadow:0 0 12px #f97316}
 .buzz-heat-key b{color:#cbd5e1}
 .buzz-map-list-scroll{min-height:0;overflow-y:auto;padding:8px;scrollbar-width:thin;scrollbar-color:#3a4452 transparent}
-.buzz-map-list-scroll article{position:relative;display:grid;grid-template-columns:76px minmax(0,1fr) 30px;gap:11px;min-height:92px;padding:8px;border:1px solid #222a35;border-radius:14px;background:#10161e;cursor:pointer;margin-bottom:8px;transition:.16s ease}
+.buzz-map-list-scroll article{position:relative;display:grid;grid-template-columns:minmax(0,1fr) 30px;gap:11px;min-height:92px;padding:8px;border:1px solid #222a35;border-radius:14px;background:#10161e;margin-bottom:8px;transition:.16s ease}
 .buzz-map-list-scroll article:hover,.buzz-map-list-scroll article.selected{border-color:#7457d8;background:#151c27;transform:translateY(-1px)}
+.buzz-map-list-scroll article:focus-within{border-color:#a78bfa}
+.buzz-list-select{min-width:0;display:grid;grid-template-columns:76px minmax(0,1fr);gap:11px;padding:0;border:0;border-radius:10px;background:transparent;text-align:left;cursor:pointer}
 .buzz-list-photo{position:relative;overflow:hidden;border-radius:10px;background:linear-gradient(145deg,#23193d,#111827);display:grid;place-items:center;font-size:25px;font-weight:900}
 .buzz-list-photo img{width:100%;height:100%;object-fit:cover}
 .buzz-list-photo b{position:absolute;right:5px;bottom:5px;min-width:31px;height:31px;display:grid;place-items:center;padding:0 4px;border:2px solid #fff;border-radius:50%;background:#10141b;color:#fff;font-size:11px;box-shadow:0 3px 12px rgba(0,0,0,.5)}
@@ -54,8 +62,8 @@ body.buzz-map-active{overflow:hidden;background:#080b10}
 .buzz-detail-vibe{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;padding:9px 11px;border:1px solid #3b4654;border-radius:13px;background:#121923;font-size:10px;font-weight:850}.buzz-detail-vibe b{padding:4px 7px;border-radius:999px;font-size:7px;letter-spacing:.1em}.buzz-detail-vibe.live{border-color:#8b4a27}.buzz-detail-vibe.live b{background:#fb923c;color:#1a0e05}.buzz-detail-vibe.forecast{border-color:#51418a}.buzz-detail-vibe.forecast b{background:#6d54bb;color:#fff}
 .buzz-status{display:inline-flex;padding:3px 7px;border:1px solid #3a4655;border-radius:999px;color:#aab4c0;font-size:7px;font-weight:900;text-transform:uppercase;letter-spacing:.04em}
 .buzz-status.s3{border-color:#bb8a18;color:#facc15}.buzz-status.s4{border-color:#c65b2a;color:#fb923c}.buzz-status.s5{border-color:#bf3d48;color:#fb7185}
-.buzz-map-list-scroll article>button{align-self:start;width:30px;height:30px;display:grid;place-items:center;border:1px solid #2d3744;border-radius:50%;background:#151c25;cursor:pointer}
-.buzz-map-list-scroll article>button svg{width:14px}.buzz-map-list-scroll article>button.saved{color:#fb7185}
+.buzz-list-favorite{align-self:start;width:30px;height:30px;display:grid;place-items:center;border:1px solid #2d3744;border-radius:50%;background:#151c25;cursor:pointer}
+.buzz-list-favorite svg{width:14px}.buzz-list-favorite.saved{color:#fb7185}
 .buzz-mobile-list-handle{display:none}
 .buzz-map-stage{position:relative;min-width:0;min-height:0;background:#10141b}
 .buzz-map-canvas{position:absolute;inset:0}
@@ -114,7 +122,8 @@ body.buzz-map-active{overflow:hidden;background:#080b10}
   .buzz-map-list-scroll{padding:6px;overflow-x:hidden}
   .buzz-map-list:not(.expanded) .buzz-map-list-scroll{display:flex;gap:7px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
   .buzz-map-list:not(.expanded) .buzz-map-list-scroll article{flex:0 0 285px;margin:0;min-height:91px}
-  .buzz-map-list-scroll article{grid-template-columns:70px minmax(0,1fr) 29px;min-height:88px;margin-bottom:6px}
+  .buzz-map-list-scroll article{grid-template-columns:minmax(0,1fr) 29px;min-height:88px;margin-bottom:6px}
+  .buzz-list-select{grid-template-columns:70px minmax(0,1fr)}
   .buzz-list-copy>p{-webkit-line-clamp:1}
   .buzz-venue-detail{position:fixed;z-index:20000;left:7px;right:7px;top:auto;bottom:7px;width:auto;max-height:84vh;border-radius:24px;overscroll-behavior:contain}
   .buzz-detail-photo{height:170px}

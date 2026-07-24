@@ -8,23 +8,21 @@ import {
   Search,
 } from "lucide-react";
 import type { MouseEvent } from "react";
+import type { ContextualVibe } from "../../src/lib/adaptive-discovery";
 import {
   milesLabel,
   venueCategory,
   venueScore,
   venueStatus,
+  venueTruthLabel,
   type BuzzCategory,
   type BuzzVenue,
 } from "../buzz-map-model";
 import { RemoteVenueImage } from "./remote-venue-image";
 
-type VenueVibe = {
-  label: string;
-  truth: string;
-};
-
 type BuzzVenueListProps = {
   activeCategory: BuzzCategory;
+  buzzingOnly: boolean;
   venues: BuzzVenue[];
   selectedVenueId?: string | null;
   favoriteIds: Set<string>;
@@ -32,7 +30,7 @@ type BuzzVenueListProps = {
   loading: boolean;
   scopeLabel: string;
   logoUrlFor: (venue: BuzzVenue) => string;
-  vibeFor: (venue: BuzzVenue) => VenueVibe;
+  vibeFor: (venue: BuzzVenue) => ContextualVibe;
   onToggleExpanded: () => void;
   onSelectVenue: (venueId: string) => void;
   onToggleFavorite: (
@@ -48,6 +46,7 @@ type BuzzVenueListProps = {
  */
 export function BuzzVenueList({
   activeCategory,
+  buzzingOnly,
   venues,
   selectedVenueId,
   favoriteIds,
@@ -60,6 +59,14 @@ export function BuzzVenueList({
   onSelectVenue,
   onToggleFavorite,
 }: BuzzVenueListProps) {
+  const heading = buzzingOnly
+    ? activeCategory === "All"
+      ? "Buzzing now"
+      : `${activeCategory} buzzing now`
+    : activeCategory === "All"
+      ? "Places buzzing now"
+      : activeCategory;
+
   return (
     <aside className={`buzz-map-list${expanded ? " expanded" : ""}`}>
       <button
@@ -68,16 +75,16 @@ export function BuzzVenueList({
         onClick={onToggleExpanded}
         aria-expanded={expanded}
       >
-        <span><List /> Top Buzz</span>
+        <span><List /> {buzzingOnly ? "Buzzing Now" : "Top Buzz"}</span>
         {expanded ? <ChevronDown /> : <ChevronUp />}
       </button>
       <div className="buzz-map-list-head">
         <div>
           <small>HIGHEST BUZZ FIRST</small>
-          <h1>{activeCategory === "All" ? "Places buzzing now" : activeCategory}</h1>
+          <h1>{heading}</h1>
           <p>{loading ? "Updating activity…" : `${venues.length} places ${scopeLabel}`}</p>
         </div>
-        <span className="buzz-heat-key"><i /> Heat map <b>→</b> logo pins</span>
+        <span className="buzz-heat-key"><i /> Heat map <b>→</b> logos · pulse = hot</span>
       </div>
       <div className="buzz-map-list-scroll">
         {venues.map((venue, index) => {
@@ -87,36 +94,44 @@ export function BuzzVenueList({
             <article
               key={venue.id}
               className={selectedVenueId === venue.id ? "selected" : ""}
-              onClick={() => onSelectVenue(venue.id)}
             >
-              <div className="buzz-list-photo">
-                <RemoteVenueImage
-                  src={logoUrlFor(venue)}
-                  alt={`${venue.name} logo`}
-                  fallback={venue.name.slice(0, 1)}
-                  width={96}
-                  height={96}
-                  sizes="64px"
-                />
-              </div>
-              <div className="buzz-list-copy">
-                <small>
-                  {index === 0 ? "BEST NOW" : `#${index + 1}`} · {venueCategory(venue)} ·{" "}
-                  {milesLabel(venue.distanceMiles) || venue.city || "Nearby"}
-                </small>
-                <strong>{venue.name}</strong>
-                <span className={`buzz-vibe-tag ${vibe.truth}`}>
-                  {vibe.label}<b>{vibe.truth === "live" ? "LIVE" : "FORECAST"}</b>
-                </span>
-                <p>{venue.event?.name || venue.reason || "Available right now"}</p>
-                <span className={`buzz-status s${Math.floor(venueScore(venue) / 20)}`}>
-                  {venueStatus(venue)}
-                  {venue.activity?.scoreMode === "live" ? " · Live" : " · Forecast"}
-                </span>
-              </div>
               <button
                 type="button"
-                className={saved ? "saved" : ""}
+                className="buzz-list-select"
+                onClick={() => onSelectVenue(venue.id)}
+                aria-label={`Open ${venue.name} details, ${venueStatus(venue)}, ${venueTruthLabel(venue)}`}
+                aria-haspopup="dialog"
+                aria-expanded={selectedVenueId === venue.id}
+              >
+                <div className="buzz-list-photo">
+                  <RemoteVenueImage
+                    src={logoUrlFor(venue)}
+                    alt={`${venue.name} logo`}
+                    fallback={venue.name.slice(0, 1)}
+                    width={96}
+                    height={96}
+                    sizes="64px"
+                  />
+                </div>
+                <div className="buzz-list-copy">
+                  <small>
+                    {index === 0 ? "BEST NOW" : `#${index + 1}`} · {venueCategory(venue)} ·{" "}
+                    {milesLabel(venue.distanceMiles) || venue.city || "Nearby"}
+                  </small>
+                  <strong>{venue.name}</strong>
+                  <span className={`buzz-vibe-tag ${vibe.truth}`}>
+                    {vibe.label}<b>{vibe.truth === "live" ? "LIVE" : "FORECAST"}</b>
+                  </span>
+                  <p>{venue.event?.name || venue.reason || "Available right now"}</p>
+                  <span className={`buzz-status s${Math.floor(venueScore(venue) / 20)}`}>
+                    {venueStatus(venue)}
+                    {" · "}{venueTruthLabel(venue)}
+                  </span>
+                </div>
+              </button>
+              <button
+                type="button"
+                className={`buzz-list-favorite${saved ? " saved" : ""}`}
                 onClick={(event) => onToggleFavorite(event, venue)}
                 aria-label={saved ? `Remove ${venue.name} from saved places` : `Save ${venue.name}`}
               >
@@ -129,7 +144,7 @@ export function BuzzVenueList({
           <div className="buzz-map-empty">
             <Search />
             <strong>No places match this filter</strong>
-            <p>Try All or zoom to another area.</p>
+            <p>{buzzingOnly ? "Turn off Buzzing or try another area." : "Try All or zoom to another area."}</p>
           </div>
         )}
       </div>

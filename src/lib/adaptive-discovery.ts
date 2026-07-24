@@ -11,6 +11,11 @@ export type VibeVenue = {
   scoreMode?: string | null;
 };
 
+export type ContextualVibe = {
+  label: string;
+  truth: "live" | "forecast";
+};
+
 export function discoveryDaypart(date = new Date()): DiscoveryDaypart {
   const hour = date.getHours();
   return hour >= 6 && hour < 16 ? "day" : "night";
@@ -26,12 +31,16 @@ function normalized(value: unknown) {
   return String(value || "").toLowerCase();
 }
 
-export function contextualVibe(venue: VibeVenue, daypart: DiscoveryDaypart) {
+export function contextualVibe(
+  venue: VibeVenue,
+  daypart: DiscoveryDaypart,
+): ContextualVibe {
   const category = normalized(venue.category);
   const type = normalized(venue.type);
   const score = Number(venue.score) || 0;
   const trend = normalized(venue.trend);
-  const truth = normalized(venue.scoreMode) === "live" ? "live" : "forecast";
+  const truth: ContextualVibe["truth"] =
+    normalized(venue.scoreMode) === "live" ? "live" : "forecast";
 
   if (daypart === "day") {
     if (category.includes("outdoor") || type.includes("park") || type.includes("beach")) {

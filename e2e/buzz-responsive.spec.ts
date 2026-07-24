@@ -13,7 +13,7 @@ const venues = [
     reason: "Dinner service is building",
     distanceMiles: 1.2,
     activity: {
-      score: 84,
+      score: 68,
       label: "Busy",
       trendLabel: "Getting Busier",
       scoreMode: "forecast",
@@ -118,6 +118,16 @@ test("responsive Buzz discovery supports filtering and venue details", async (
   }
   await expect(page.locator(".buzz-map-list-scroll article")).toHaveCount(2);
 
+  const buzzingFilter = page.getByRole("button", { name: "Buzzing", exact: true });
+  await buzzingFilter.click();
+  await expect(buzzingFilter).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".buzz-map-list-scroll article")).toHaveCount(1);
+  await expect(page.getByRole("button", {
+    name: /Open Neon Sound details/,
+  })).toBeVisible();
+  await buzzingFilter.click();
+  await expect(page.locator(".buzz-map-list-scroll article")).toHaveCount(2);
+
   const foodFilter = page.getByRole("button", { name: "Food", exact: true });
   await foodFilter.click();
   await expect(foodFilter).toHaveAttribute("aria-pressed", "true");
@@ -126,9 +136,19 @@ test("responsive Buzz discovery supports filtering and venue details", async (
   }
   await expect(page.locator(".buzz-map-list-scroll article")).toHaveCount(1);
 
-  await page.locator(".buzz-map-list-scroll article").first().click();
+  const venueButton = page.getByRole("button", {
+    name: /Open Harbor Kitchen details/,
+  });
+  await venueButton.focus();
+  await expect(venueButton).toBeFocused();
+  await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", { name: "Harbor Kitchen" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Close venue" })).toBeVisible();
+  const closeButton = page.getByRole("button", { name: "Close venue" });
+  await expect(closeButton).toBeFocused();
+
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Harbor Kitchen" })).toHaveCount(0);
+  await expect(venueButton).toBeFocused();
 });
 
 test("responsive shell has no serious or critical accessibility violations", async ({
