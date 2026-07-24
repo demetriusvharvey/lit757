@@ -1,11 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- Legacy geocoder records are normalized at runtime. */
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+const supabase = getSupabaseAdmin();
 
 function cleanName(value?: string | null) {
   return String(value || "")

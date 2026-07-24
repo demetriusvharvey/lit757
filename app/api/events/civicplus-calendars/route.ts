@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import {
   CIVICPLUS_CALENDAR_FEEDS,
   fetchAllCivicPlusCalendars,
@@ -9,11 +9,7 @@ import type { NormalizedCityEvent } from "../../../../src/lib/events/city-calend
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const db = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false, autoRefreshToken: false } },
-);
+const db = getSupabaseAdmin();
 
 const WINDOW_PAST_MS = 6 * 60 * 60 * 1000;
 const WINDOW_FUTURE_MS = 120 * 24 * 60 * 60 * 1000;

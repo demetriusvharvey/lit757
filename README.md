@@ -71,11 +71,15 @@ npm run lint
 npm run typecheck
 npm run build
 npm run security:audit
+npm run test:e2e
 ```
 
 Tests use Node's built-in test runner with `tsx`; no external test service is
-required. GitHub Actions runs tests, changed-file lint, TypeScript, a production
-build, a production dependency audit, and CodeQL.
+required. Playwright runs the same discovery smoke and accessibility contracts
+at desktop and iPhone-sized viewports. Install its local browser once with
+`npx playwright install chromium`. GitHub Actions installs Chromium and runs
+both viewport projects automatically, alongside TypeScript, lint, the
+production build, dependency audit, and CodeQL.
 
 ## Architecture
 
@@ -97,6 +101,11 @@ Important directories:
 | `src/lib/events/` | Official/public event adapters and normalization |
 | `src/lib/integrations/` | Weather, transit, coastal, and public-context adapters |
 | `src/lib/server/` | Shared request size, secret, client-key, and rate-limit guards |
+| `app/hooks/use-buzz-mapbox.ts` | Mapbox lifecycle, layers, logo pins, and responsive map synchronization |
+| `app/components/buzz-venue-list.tsx` | One venue-list implementation shared by desktop and mobile layouts |
+| `lib/supabase-admin.ts` | Singleton service-role client and authenticated-user boundary |
+| `instrumentation.ts` | Core environment validation before a Node server becomes ready |
+| `e2e/` | Playwright desktop/mobile smoke and accessibility coverage |
 | `supabase/migrations/` | Ordered database schema, RLS, policy, and reconciliation changes |
 | `.github/workflows/` | Build, security, dependency, and CodeQL checks |
 
@@ -113,6 +122,12 @@ Important directories:
 
 The service-role key belongs only in server routes. Any variable prefixed
 `NEXT_PUBLIC_` is shipped to browsers and must be safe to expose.
+
+All App Router endpoints obtain service-role access through
+`getSupabaseAdmin()`. Do not create ad hoc service-role clients in route files.
+At Node server startup, instrumentation verifies that the Supabase URL, anon
+key, service-role key, and Mapbox token exist and that the Supabase URL is
+valid. Optional provider keys remain lazy and non-blocking.
 
 ## Environment variables
 
@@ -272,6 +287,8 @@ functions can read them.
   behavior. Avoid comments that merely restate the next line of code.
 - Add tests alongside deterministic scoring, parsing, guard, and migration
   behavior.
+- Keep responsive behavior in shared components and verify changes in both
+  Playwright viewport projects.
 
 ## Known setup-dependent work
 
@@ -282,7 +299,7 @@ These items cannot be completed from source code alone:
 - Registering provider applications and accepting gated-model terms
 - Deploying a dedicated external ML worker
 - Configuring production backups, usage alerts, monitoring destinations, and
-  branch-protection settings in their respective services
+  provider-specific alert destinations
 
 The app can still be tested, documented, linted, type-checked, audited, and
 built while those credentials are pending.

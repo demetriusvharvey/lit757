@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { getVenueImage } from "../../../src/lib/venue-image";
 import { ACTIVITY_DISTRICTS, distanceMiles, type ActivityDistrict } from "../../../src/lib/buzz/districts";
 import { clamp, openHoursAdjustment, passivePresenceEvidence, trafficEvidence } from "../../../src/lib/buzz/forecast-v2";
@@ -12,9 +12,7 @@ import {
 
 export const dynamic = "force-dynamic";
 
-const db = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
-  auth: { persistSession: false, autoRefreshToken: false },
-});
+const db = getSupabaseAdmin();
 
 type Bounds = { west: number; south: number; east: number; north: number };
 type VenueRow = Record<string, unknown> & { id: string; name: string; lat?: number; lng?: number };

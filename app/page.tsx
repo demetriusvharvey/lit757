@@ -29,6 +29,7 @@ import AccountPanel, {
   type MemberPreferences,
   type SavedPlace,
 } from "./account-panel";
+import { canInitializeMapbox } from "./mapbox-config";
 
 type DiscoveryMode = "all" | "food" | "explore" | "events";
 
@@ -493,7 +494,9 @@ export default function Home() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [mapReady, setMapReady] = useState(false);
-  const [mapUnavailable] = useState(() => !process.env.NEXT_PUBLIC_MAPBOX_TOKEN);
+  const [mapUnavailable] = useState(
+    () => !canInitializeMapbox(process.env.NEXT_PUBLIC_MAPBOX_TOKEN),
+  );
 
   useEffect(() => {
     void fetch("/api/auth/providers", { cache: "no-store" })
@@ -710,7 +713,7 @@ export default function Home() {
     const mapContainer = mapContainerRef.current;
     const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
 
-    if (!token) {
+    if (!canInitializeMapbox(token)) {
       return;
     }
 

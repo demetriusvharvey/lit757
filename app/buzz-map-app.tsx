@@ -8,19 +8,15 @@ import {
   useRef,
   useState,
 } from "react";
-import type { Session, SupabaseClient } from "@supabase/supabase-js";
-import mapboxgl from "mapbox-gl";
+import type { Session } from "@supabase/supabase-js";
 import "mapbox-gl/dist/mapbox-gl.css";
 import "./buzz-map-app.css";
 import "./buzz-map-notifications.css";
 import {
   Bell,
   CalendarDays,
-  ChevronDown,
-  ChevronUp,
   Compass,
   Heart,
-  List,
   LocateFixed,
   MapPin,
   Music2,
@@ -57,65 +53,28 @@ import {
   orderedDiscoveryCategories,
   type DiscoveryDaypart,
 } from "../src/lib/adaptive-discovery";
-
-type CrowdLevel = "quiet" | "steady" | "busy" | "packed";
-type Venue = {
-  id: string;
-  name: string;
-  city?: string;
-  address?: string | null;
-  kind?: string;
-  type?: string;
-  category?: string;
-  lat: number | string;
-  lng: number | string;
-  photoUrl?: string | null;
-  reason?: string;
-  openNow?: boolean | null;
-  phone?: string | null;
-  website?: string | null;
-  distanceMiles?: number | null;
-  area?: { shortName?: string; status?: string; traffic?: number; eventsActive?: number; eventsSoon?: number } | null;
-  event?: { name?: string | null; startTime?: string | null; sourceUrl?: string | null; ticketStatus?: string | null } | null;
-  activity?: {
-    score: number;
-    label: string;
-    trendLabel: string;
-    confidence?: string;
-    scoreMode?: "live" | "forecast";
-    updatedAt?: string;
-  };
-};
-
-type VenueDetail = {
-  hours?: unknown;
-  phone?: string | null;
-  website?: string | null;
-  address?: string | null;
-  upcomingEvents?: Array<{ id: string; name?: string | null; start_time?: string | null; source_url?: string | null }>;
-};
-
-type NearbyPayload = {
-  success?: boolean;
-  venues?: Venue[];
-  picks?: Venue[];
-  scope?: { label?: string };
-  error?: string;
-};
-
-type VotePayload = {
-  success?: boolean;
-  error?: string;
-  verifiedNearby?: boolean;
-  reportCount?: number;
-  pointsAwarded?: number;
-  totalPoints?: number | null;
-  buzz?: { score?: number; label?: string; mode?: string; confidence?: string };
-  message?: string;
-};
-
-type LoadRequest = { lat?: number; lng?: number; radius?: number; bounds?: string; label?: string };
-type Category = typeof categories[number][0];
+import {
+  DEFAULT_BUZZ_CENTER as DEFAULT_CENTER,
+  formatEventTime,
+  getBrowserPosition as getPosition,
+  hasValidVenueCoordinates as validVenue,
+  milesLabel,
+  todayHours,
+  venueCategory as categoryFor,
+  venueCoordinates as coordinates,
+  venueScore as score,
+  venueStatus as statusFor,
+  type BuzzCategory as Category,
+  type BuzzVenue as Venue,
+  type CrowdLevel,
+  type LoadRequest,
+  type NearbyPayload,
+  type VenueDetail,
+  type VotePayload,
+} from "./buzz-map-model";
+import { useBuzzMapbox } from "./hooks/use-buzz-mapbox";
+import { RemoteVenueImage } from "./components/remote-venue-image";
+import { BuzzVenueList } from "./components/buzz-venue-list";
 
 const categories = [
   ["All", Compass],
@@ -137,57 +96,8 @@ const crowdOptions: Array<{ level: CrowdLevel; label: string; emoji: string }> =
 const FAVORITES_KEY = "lit757-mobile-favorites";
 const ALERTS_KEY = "lit757-mobile-alerts";
 const VENUE_ALERTS_KEY = "lit757-venue-alerts";
-const DEFAULT_CENTER: [number, number] = [-76.17, 36.88];
-const score = (venue: Venue) => Math.max(0, Math.min(100, Number(venue.activity?.score ?? 35)));
-const coordinates = (venue: Venue): [number, number] => [Number(venue.lng), Number(venue.lat)];
-const validVenue = (venue: Venue) => {
-  const [lng, lat] = coordinates(venue);
-  return Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0 && lng !== 0;
-};
-const statusFor = (venue: Venue) => score(venue) >= 88 ? "On fire" : score(venue) >= 76 ? "Heating up" : score(venue) >= 60 ? "Active" : "Chill";
-const milesLabel = (value?: number | null) => value == null ? null : value < 0.1 ? "Here" : value < 10 ? `${value.toFixed(1)} mi` : `${Math.round(value)} mi`;
-const categoryFor = (venue: Venue): Category => {
-  const text = `${venue.name} ${venue.kind || ""} ${venue.type || ""} ${venue.category || ""} ${venue.reason || ""} ${venue.event?.name || ""}`.toLowerCase();
-  if (venue.event?.name || venue.kind === "events") return "Events";
-  if (/restaurant|food|cafe|pizza|grill|seafood|bakery|burger|brunch|kitchen/.test(text)) return "Food";
-  if (/bar|brew|wine|drink|pub|cocktail/.test(text)) return "Drinks";
-  if (/club|music|nightlife|dj|lounge|concert/.test(text)) return "Nightlife";
-  if (/park|trail|beach|garden|museum|outdoor/.test(text)) return "Outdoors";
-  if (/shop|mall|market|store/.test(text)) return "Shopping";
-  return "All";
-};
 const logoKeyFor = (venue: Venue) => `venue-logo-${String(venue.id).replace(/[^a-zA-Z0-9_-]/g, "")}`;
 const logoUrlFor = (venue: Pick<Venue, "name" | "website">) => getVenueLogo({ name: venue.name, website: venue.website });
-
-function formatEventTime(value?: string | null) {
-  if (!value) return null;
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return null;
-  return new Intl.DateTimeFormat("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" }).format(date);
-}
-
-function todayHours(hours: unknown) {
-  if (!hours) return "Hours not available";
-  if (typeof hours === "string") return hours;
-  if (Array.isArray(hours)) return hours.map(String).join(" · ");
-  if (typeof hours !== "object") return "Hours not available";
-  const row = hours as Record<string, unknown>;
-  const day = new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(new Date());
-  const keys = [day, day.toLowerCase(), day.slice(0, 3), day.slice(0, 3).toLowerCase()];
-  for (const key of keys) {
-    const value = row[key];
-    if (typeof value === "string") return `Today: ${value}`;
-    if (Array.isArray(value)) return `Today: ${value.map(String).join(", ")}`;
-  }
-  return "Hours available on venue page";
-}
-
-function getPosition() {
-  return new Promise<GeolocationPosition>((resolve, reject) => {
-    if (!navigator.geolocation) reject(new Error("Location is not available on this device."));
-    else navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 15_000, maximumAge: 15_000 });
-  });
-}
 
 export default function BuzzMapApp() {
   const [venues, setVenues] = useState<Venue[]>([]);
@@ -198,8 +108,6 @@ export default function BuzzMapApp() {
   const [detail, setDetail] = useState<VenueDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [mapReady, setMapReady] = useState(false);
-  const [mapZoom, setMapZoom] = useState(8.8);
   const [daypart, setDaypart] = useState<DiscoveryDaypart>(() => discoveryDaypart());
   const [listExpanded, setListExpanded] = useState(false);
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(() => new Set());
@@ -212,14 +120,8 @@ export default function BuzzMapApp() {
   const [sharing, setSharing] = useState(false);
   const [reward, setReward] = useState<{ points: number; total: number | null } | null>(null);
 
-  const mapEl = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<mapboxgl.Map | null>(null);
-  const selectedRef = useRef<(id: string) => void>(() => undefined);
-  const authRef = useRef<SupabaseClient | null>(null);
   const requestSequenceRef = useRef(0);
   const deepLinkHandledRef = useRef(false);
-  const logoUrlsRef = useRef(new Map<string, string>());
-  const loadingLogosRef = useRef(new Set<string>());
 
   const loadNearby = useCallback(async (request: LoadRequest = {}) => {
     const sequence = ++requestSequenceRef.current;
@@ -245,48 +147,6 @@ export default function BuzzMapApp() {
       if (sequence === requestSequenceRef.current) setLoading(false);
     }
   }, []);
-
-  useEffect(() => {
-    document.body.classList.add("buzz-map-active");
-    try {
-      // Browser storage is hydrated after SSR so the server and first client
-      // render remain deterministic.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setFavoriteIds(new Set(JSON.parse(localStorage.getItem(FAVORITES_KEY) || "[]") as string[]));
-      const alerts = JSON.parse(localStorage.getItem(VENUE_ALERTS_KEY) || "[]") as Array<{ venueId: string }>;
-      setWatchedIds(new Set(alerts.map(item => item.venueId)));
-    } catch {
-      // Safe defaults.
-    }
-
-    void loadNearby();
-    void getPosition().then(position => {
-      const latitude = position.coords.latitude;
-      const longitude = position.coords.longitude;
-      mapRef.current?.easeTo({ center: [longitude, latitude], zoom: 12.2, duration: 700 });
-      void loadNearby({ lat: latitude, lng: longitude, radius: 10, label: "near you" });
-    }).catch(() => undefined);
-
-    let unsubscribe: (() => void) | null = null;
-    const bootAuth = async () => {
-      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-      if (!url || !key) return;
-      const { createClient } = await import("@supabase/supabase-js");
-      const client = createClient(url, key, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
-      authRef.current = client;
-      const { data } = await client.auth.getSession();
-      setSession(data.session);
-      const listener = client.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession));
-      unsubscribe = () => listener.data.subscription.unsubscribe();
-    };
-    void bootAuth();
-
-    return () => {
-      document.body.classList.remove("buzz-map-active");
-      unsubscribe?.();
-    };
-  }, [loadNearby]);
 
   useEffect(() => {
     const syncDaypart = () => setDaypart(discoveryDaypart());
@@ -334,13 +194,69 @@ export default function BuzzMapApp() {
         selectedFilter: active,
       },
     }, session?.access_token);
-    if (validVenue(venue)) mapRef.current?.easeTo({ center: coordinates(venue), zoom: Math.max(13.2, mapRef.current.getZoom()), duration: 500 });
   }, [venues, active, session?.access_token]);
+
+  const {
+    mapElementRef: mapEl,
+    mapRef,
+    mapZoom,
+  } = useBuzzMapbox({
+    venues: filtered,
+    selectedVenueId: selected?.id,
+    onSelectVenue: selectVenue,
+    logoKeyFor,
+    logoUrlFor,
+  });
+
   useEffect(() => {
-    // Mapbox owns the long-lived event listener; update only its callback
-    // pointer when React state changes.
-    selectedRef.current = selectVenue;
-  }, [selectVenue]);
+    document.body.classList.add("buzz-map-active");
+    try {
+      // Browser storage is hydrated after SSR so the server and first client
+      // render remain deterministic.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setFavoriteIds(new Set(JSON.parse(localStorage.getItem(FAVORITES_KEY) || "[]") as string[]));
+      const alerts = JSON.parse(localStorage.getItem(VENUE_ALERTS_KEY) || "[]") as Array<{ venueId: string }>;
+      setWatchedIds(new Set(alerts.map(item => item.venueId)));
+    } catch {
+      // Safe defaults.
+    }
+
+    void loadNearby();
+    void getPosition().then(position => {
+      const latitude = position.coords.latitude;
+      const longitude = position.coords.longitude;
+      mapRef.current?.easeTo({ center: [longitude, latitude], zoom: 12.2, duration: 700 });
+      void loadNearby({ lat: latitude, lng: longitude, radius: 10, label: "near you" });
+    }).catch(() => undefined);
+
+    let unsubscribe: (() => void) | null = null;
+    const bootAuth = async () => {
+      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      if (!url || !key) return;
+      const { createClient } = await import("@supabase/supabase-js");
+      const client = createClient(url, key, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+      const { data } = await client.auth.getSession();
+      setSession(data.session);
+      const listener = client.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession));
+      unsubscribe = () => listener.data.subscription.unsubscribe();
+    };
+    void bootAuth();
+
+    return () => {
+      document.body.classList.remove("buzz-map-active");
+      unsubscribe?.();
+    };
+  }, [loadNearby, mapRef]);
+
+  useEffect(() => {
+    if (!selected || !validVenue(selected)) return;
+    mapRef.current?.easeTo({
+      center: coordinates(selected),
+      zoom: Math.max(13.2, mapRef.current.getZoom()),
+      duration: 500,
+    });
+  }, [mapRef, selected]);
 
   useEffect(() => {
     if (deepLinkHandledRef.current || !venues.length) return;
@@ -383,222 +299,6 @@ export default function BuzzMapApp() {
       .catch(() => undefined);
     return () => { cancelled = true; };
   }, [selected]);
-
-  useEffect(() => {
-    const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
-    if (!mapEl.current || !token || mapRef.current) return;
-    mapboxgl.accessToken = token;
-    const map = new mapboxgl.Map({
-      container: mapEl.current,
-      style: "mapbox://styles/mapbox/dark-v11",
-      center: DEFAULT_CENTER,
-      zoom: 8.8,
-      minZoom: 3,
-      maxZoom: 18,
-      attributionControl: true,
-    });
-    map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-right");
-    map.on("load", () => setMapReady(true));
-    map.on("zoom", () => setMapZoom(map.getZoom()));
-    mapRef.current = map;
-    return () => {
-      setMapReady(false);
-      map.remove();
-      mapRef.current = null;
-    };
-  }, []);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapReady || map.getSource("buzz-map-venues")) return;
-    const empty: GeoJSON.FeatureCollection<GeoJSON.Point> = { type: "FeatureCollection", features: [] };
-    map.addSource("buzz-map-venues", { type: "geojson", data: empty });
-    map.addSource("buzz-map-clusters", {
-      type: "geojson",
-      data: empty,
-      cluster: true,
-      clusterRadius: 54,
-      clusterMaxZoom: 12,
-      clusterProperties: {
-        maxScore: ["max", ["get", "score"]],
-      },
-    } as mapboxgl.GeoJSONSourceSpecification);
-
-    const buzzColor: mapboxgl.ExpressionSpecification = [
-      "interpolate", ["linear"], ["get", "score"],
-      0, "#64748b",
-      45, "#34d399",
-      60, "#a3e635",
-      72, "#facc15",
-      82, "#fb923c",
-      90, "#ef4444",
-    ];
-
-    map.addLayer({
-      id: "buzz-area-heat",
-      type: "heatmap",
-      source: "buzz-map-venues",
-      maxzoom: 12,
-      paint: {
-        "heatmap-weight": ["interpolate", ["linear"], ["get", "score"], 0, 0.03, 45, 0.18, 65, 0.48, 80, 0.8, 100, 1],
-        "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 4, 0.5, 9, 1.05, 11.8, 1.8],
-        "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 4, 18, 8, 32, 11.8, 58],
-        "heatmap-opacity": ["interpolate", ["linear"], ["zoom"], 4, 0.78, 10.5, 0.94, 12, 0],
-        "heatmap-color": [
-          "interpolate", ["linear"], ["heatmap-density"],
-          0, "rgba(15,23,42,0)",
-          0.15, "rgba(52,211,153,.35)",
-          0.35, "rgba(163,230,53,.55)",
-          0.58, "rgba(250,204,21,.72)",
-          0.78, "rgba(251,146,60,.88)",
-          1, "rgba(239,68,68,1)",
-        ],
-      },
-    });
-
-    map.addLayer({
-      id: "buzz-heat-hub-glow",
-      type: "circle",
-      source: "buzz-map-clusters",
-      minzoom: 9,
-      maxzoom: 13,
-      filter: ["has", "point_count"],
-      paint: {
-        "circle-radius": ["step", ["get", "point_count"], 18, 8, 23, 20, 29],
-        "circle-color": ["interpolate", ["linear"], ["coalesce", ["get", "maxScore"], 40], 35, "#34d399", 60, "#facc15", 78, "#fb923c", 90, "#ef4444"],
-        "circle-opacity": 0.26,
-        "circle-blur": 0.8,
-      },
-    });
-    map.addLayer({
-      id: "buzz-heat-hubs",
-      type: "circle",
-      source: "buzz-map-clusters",
-      minzoom: 9,
-      maxzoom: 13,
-      filter: ["has", "point_count"],
-      paint: {
-        "circle-radius": ["step", ["get", "point_count"], 7, 8, 10, 20, 13],
-        "circle-color": ["interpolate", ["linear"], ["coalesce", ["get", "maxScore"], 40], 35, "#34d399", 60, "#facc15", 78, "#fb923c", 90, "#ef4444"],
-        "circle-opacity": 0.9,
-        "circle-stroke-width": 2,
-        "circle-stroke-color": "rgba(255,255,255,.72)",
-      },
-    });
-    map.addLayer({
-      id: "buzz-pin-glow",
-      type: "circle",
-      source: "buzz-map-clusters",
-      minzoom: 10.5,
-      filter: ["!", ["has", "point_count"]],
-      paint: {
-        "circle-radius": ["case", ["==", ["get", "selected"], true], 29, ["interpolate", ["linear"], ["get", "score"], 20, 13, 100, 24]],
-        "circle-color": buzzColor,
-        "circle-opacity": ["case", ["==", ["get", "selected"], true], 0.55, 0.32],
-        "circle-blur": 0.76,
-      },
-    });
-    map.addLayer({
-      id: "buzz-venue-pins",
-      type: "circle",
-      source: "buzz-map-clusters",
-      minzoom: 10.5,
-      filter: ["!", ["has", "point_count"]],
-      paint: {
-        "circle-radius": ["case", ["==", ["get", "selected"], true], 18, ["interpolate", ["linear"], ["zoom"], 10.5, 12.5, 15, 15.5]],
-        "circle-color": "#ffffff",
-        "circle-stroke-width": ["case", ["==", ["get", "selected"], true], 6, 4],
-        "circle-stroke-color": buzzColor,
-      },
-    });
-    map.addLayer({
-      id: "buzz-pin-logo",
-      type: "symbol",
-      source: "buzz-map-clusters",
-      minzoom: 10.5,
-      filter: ["!", ["has", "point_count"]],
-      layout: {
-        "icon-image": ["get", "logoKey"],
-        "icon-size": ["interpolate", ["linear"], ["zoom"], 10.5, 0.2, 15, 0.25],
-        "icon-allow-overlap": true,
-        "icon-ignore-placement": true,
-      },
-    });
-    map.addLayer({
-      id: "buzz-pin-hitbox",
-      type: "circle",
-      source: "buzz-map-clusters",
-      minzoom: 10.2,
-      filter: ["!", ["has", "point_count"]],
-      paint: { "circle-radius": 30, "circle-color": "rgba(0,0,0,.01)", "circle-opacity": 0.01 },
-    });
-
-    const onStyleImageMissing = (event: { id: string }) => {
-      const id = event.id;
-      if (!id.startsWith("venue-logo-") || map.hasImage(id) || loadingLogosRef.current.has(id)) return;
-      const logoUrl = logoUrlsRef.current.get(id);
-      if (!logoUrl) return;
-      loadingLogosRef.current.add(id);
-      void map.loadImage(logoUrl)
-        .then(image => {
-          if (!map.hasImage(id)) map.addImage(id, image.data, { pixelRatio: 2 });
-        })
-        .catch(() => undefined)
-        .finally(() => loadingLogosRef.current.delete(id));
-    };
-    const onVenueClick = (event: mapboxgl.MapLayerMouseEvent) => {
-      const id = String(event.features?.[0]?.properties?.id || "");
-      if (id) selectedRef.current(id);
-    };
-    const onHeatClick = (event: mapboxgl.MapLayerMouseEvent) => {
-      if (map.getZoom() >= 10.5) return;
-      map.easeTo({ center: event.lngLat, zoom: Math.min(12, map.getZoom() + 2.3), duration: 520 });
-    };
-    const onHeatHubClick = (event: mapboxgl.MapLayerMouseEvent) => {
-      map.easeTo({ center: event.lngLat, zoom: Math.min(14, map.getZoom() + 2.4), duration: 520 });
-    };
-    const enter = () => { map.getCanvas().style.cursor = "pointer"; };
-    const leave = () => { map.getCanvas().style.cursor = ""; };
-    map.on("styleimagemissing", onStyleImageMissing);
-    map.on("click", "buzz-pin-hitbox", onVenueClick);
-    map.on("click", "buzz-area-heat", onHeatClick);
-    map.on("click", "buzz-heat-hubs", onHeatHubClick);
-    map.on("mouseenter", "buzz-pin-hitbox", enter);
-    map.on("mouseleave", "buzz-pin-hitbox", leave);
-    map.on("mouseenter", "buzz-heat-hubs", enter);
-    map.on("mouseleave", "buzz-heat-hubs", leave);
-
-    return () => {
-      map.off("styleimagemissing", onStyleImageMissing);
-      map.off("click", "buzz-pin-hitbox", onVenueClick);
-      map.off("click", "buzz-area-heat", onHeatClick);
-      map.off("click", "buzz-heat-hubs", onHeatHubClick);
-      map.off("mouseenter", "buzz-pin-hitbox", enter);
-      map.off("mouseleave", "buzz-pin-hitbox", leave);
-      map.off("mouseenter", "buzz-heat-hubs", enter);
-      map.off("mouseleave", "buzz-heat-hubs", leave);
-    };
-  }, [mapReady]);
-
-  useEffect(() => {
-    const features: GeoJSON.Feature<GeoJSON.Point>[] = filtered.filter(validVenue).map(venue => {
-      const logoKey = logoKeyFor(venue);
-      logoUrlsRef.current.set(logoKey, logoUrlFor(venue));
-      return {
-        type: "Feature",
-        geometry: { type: "Point", coordinates: coordinates(venue) },
-        properties: {
-          id: venue.id,
-          score: score(venue),
-          logoKey,
-          selected: selected?.id === venue.id,
-        },
-      };
-    });
-    const collection: GeoJSON.FeatureCollection<GeoJSON.Point> = { type: "FeatureCollection", features };
-    (mapRef.current?.getSource("buzz-map-venues") as mapboxgl.GeoJSONSource | undefined)?.setData(collection);
-    (mapRef.current?.getSource("buzz-map-clusters") as mapboxgl.GeoJSONSource | undefined)?.setData(collection);
-  }, [filtered, selected?.id]);
 
   async function requestMyLocation() {
     try {
@@ -803,28 +503,20 @@ export default function BuzzMapApp() {
       </nav>
 
       <main className="buzz-map-layout">
-        <aside className={`buzz-map-list${listExpanded ? " expanded" : ""}`}>
-          <button type="button" className="buzz-mobile-list-handle" onClick={() => setListExpanded(current => !current)}>
-            <span><List /> Top Buzz</span>{listExpanded ? <ChevronDown /> : <ChevronUp />}
-          </button>
-          <div className="buzz-map-list-head">
-            <div><small>HIGHEST BUZZ FIRST</small><h1>{active === "All" ? "Places buzzing now" : active}</h1><p>{loading ? "Updating activity…" : `${filtered.length} places ${scopeLabel}`}</p></div>
-            <span className="buzz-heat-key"><i /> Heat map <b>→</b> logo pins</span>
-          </div>
-          <div className="buzz-map-list-scroll">
-            {filtered.map((venue, index) => {
-              const vibe = vibeFor(venue);
-              return (
-                <article key={venue.id} className={selected?.id === venue.id ? "selected" : ""} onClick={() => selectVenue(venue.id)}>
-                  <div className="buzz-list-photo"><img src={logoUrlFor(venue)} alt={`${venue.name} logo`} loading="lazy" decoding="async" /></div>
-                  <div className="buzz-list-copy"><small>{index === 0 ? "BEST NOW" : `#${index + 1}`} · {categoryFor(venue)} · {milesLabel(venue.distanceMiles) || venue.city || "Nearby"}</small><strong>{venue.name}</strong><span className={`buzz-vibe-tag ${vibe.truth}`}>{vibe.label}<b>{vibe.truth === "live" ? "LIVE" : "FORECAST"}</b></span><p>{venue.event?.name || venue.reason || "Available right now"}</p><span className={`buzz-status s${Math.floor(score(venue) / 20)}`}>{statusFor(venue)}{venue.activity?.scoreMode === "live" ? " · Live" : " · Forecast"}</span></div>
-                  <button type="button" className={favoriteIds.has(venue.id) ? "saved" : ""} onClick={event => toggleFavorite(event, venue)} aria-label={`Save ${venue.name}`}><Heart fill={favoriteIds.has(venue.id) ? "currentColor" : "none"} /></button>
-                </article>
-              );
-            })}
-            {!loading && !filtered.length && <div className="buzz-map-empty"><Search /><strong>No places match this filter</strong><p>Try All or zoom to another area.</p></div>}
-          </div>
-        </aside>
+        <BuzzVenueList
+          activeCategory={active}
+          venues={filtered}
+          selectedVenueId={selected?.id}
+          favoriteIds={favoriteIds}
+          expanded={listExpanded}
+          loading={loading}
+          scopeLabel={scopeLabel}
+          logoUrlFor={logoUrlFor}
+          vibeFor={vibeFor}
+          onToggleExpanded={() => setListExpanded(current => !current)}
+          onSelectVenue={selectVenue}
+          onToggleFavorite={toggleFavorite}
+        />
 
         <section className="buzz-map-stage" aria-label="Buzz activity map">
           <div ref={mapEl} className="buzz-map-canvas" />
@@ -843,7 +535,7 @@ export default function BuzzMapApp() {
       {selected && (
         <aside className="buzz-venue-detail">
           <button type="button" className="buzz-detail-close" onClick={() => setSelected(null)} aria-label="Close venue"><X /></button>
-          <div className="buzz-detail-photo"><img src={getVenueLogo({ name: selected.name, website: selectedWebsite })} alt={`${selected.name} logo`} /><div><b>{score(selected)}</b><small>BUZZ</small></div></div>
+          <div className="buzz-detail-photo"><RemoteVenueImage src={getVenueLogo({ name: selected.name, website: selectedWebsite })} alt={`${selected.name} logo`} fallback={selected.name.slice(0, 1)} width={640} height={360} sizes="(max-width: 1023px) 100vw, 420px" priority /><div><b>{score(selected)}</b><small>BUZZ</small></div></div>
           <div className="buzz-detail-body">
             <div className="buzz-detail-title"><div><small>{statusFor(selected).toUpperCase()} · {selected.activity?.scoreMode === "live" ? "LIVE" : "FORECAST"}</small><h2>{selected.name}</h2><p><MapPin /> {milesLabel(selected.distanceMiles) || selected.city || "Nearby"}{selected.area?.shortName ? ` · ${selected.area.shortName}` : ""}</p></div><button type="button" className={favoriteIds.has(selected.id) ? "saved" : ""} onClick={event => toggleFavorite(event, selected)}><Heart fill={favoriteIds.has(selected.id) ? "currentColor" : "none"} /></button></div>
 

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { bestTimeSignals, createBestTimeForecast, fetchBestTimeLive, isBestTimeConfigured } from "../../../../src/lib/buzz/providers/besttime";
 import { fetchTicketmasterInventory, isTicketmasterInventoryConfigured, ticketmasterInventorySignal } from "../../../../src/lib/buzz/providers/ticketmaster";
 import { fetchPredictedEvents, isPredictHQConfigured, predictedAttendanceSignal } from "../../../../src/lib/buzz/providers/predicthq";
@@ -9,11 +9,7 @@ import type { BuzzSignal, VenueForBuzz } from "../../../../src/lib/buzz/types";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const db = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false, autoRefreshToken: false } },
-);
+const db = getSupabaseAdmin();
 
 type VenueRow = VenueForBuzz & {
   lat?: number | null;
