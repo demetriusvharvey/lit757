@@ -9,6 +9,17 @@ import {
   venueCoordinates,
   venueScore,
 } from "../buzz-map-model";
+import {
+  ALL_LOGO_MIN_ZOOM,
+  DENSE_LOGO_MIN_ZOOM,
+  FEATURED_LOGO_MIN_ZOOM,
+  selectFeaturedVenueIds,
+} from "../buzz-map-presentation";
+import {
+  activityColor,
+  createVenueLogoSprite,
+  type MapLogoPresentation,
+} from "../buzz-map-logo-sprite";
 import { canInitializeMapbox } from "../mapbox-config";
 
 type UseBuzzMapboxOptions = {
@@ -35,6 +46,7 @@ export function useBuzzMapbox({
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const selectVenueRef = useRef(onSelectVenue);
   const logoUrlsRef = useRef(new Map<string, string>());
+  const logoPresentationRef = useRef(new Map<string, MapLogoPresentation>());
   const loadingLogosRef = useRef(new Set<string>());
   const [mapReady, setMapReady] = useState(false);
   const [mapZoom, setMapZoom] = useState(8.8);
@@ -83,34 +95,7 @@ export function useBuzzMapbox({
       features: [],
     };
     map.addSource("buzz-map-venues", { type: "geojson", data: empty });
-    map.addSource("buzz-map-clusters", {
-      type: "geojson",
-      data: empty,
-      cluster: true,
-      clusterRadius: 54,
-      clusterMaxZoom: 12,
-      clusterProperties: {
-        maxScore: ["max", ["get", "score"]],
-      },
-    } as mapboxgl.GeoJSONSourceSpecification);
-
-    const buzzColor: mapboxgl.ExpressionSpecification = [
-      "interpolate",
-      ["linear"],
-      ["get", "score"],
-      0,
-      "#64748b",
-      45,
-      "#34d399",
-      60,
-      "#a3e635",
-      72,
-      "#facc15",
-      82,
-      "#fb923c",
-      90,
-      "#ef4444",
-    ];
+    map.addSource("buzz-map-featured", { type: "geojson", data: empty });
 
     map.addLayer({
       id: "buzz-area-heat",
@@ -156,121 +141,109 @@ export function useBuzzMapbox({
       },
     });
 
+    // Medium zoom shows only the hottest real places. Collision handling
+    // naturally reveals fewer logos on mobile without maintaining two maps.
     map.addLayer({
-      id: "buzz-heat-hub-glow",
-      type: "circle",
-      source: "buzz-map-clusters",
-      minzoom: 9,
-      maxzoom: 13,
-      filter: ["has", "point_count"],
-      paint: {
-        "circle-radius": ["step", ["get", "point_count"], 18, 8, 23, 20, 29],
-        "circle-color": [
-          "interpolate",
-          ["linear"],
-          ["coalesce", ["get", "maxScore"], 40],
-          35,
-          "#34d399",
-          60,
-          "#facc15",
-          78,
-          "#fb923c",
-          90,
-          "#ef4444",
-        ],
-        "circle-opacity": 0.26,
-        "circle-blur": 0.8,
-      },
-    });
-    map.addLayer({
-      id: "buzz-heat-hubs",
-      type: "circle",
-      source: "buzz-map-clusters",
-      minzoom: 9,
-      maxzoom: 13,
-      filter: ["has", "point_count"],
-      paint: {
-        "circle-radius": ["step", ["get", "point_count"], 7, 8, 10, 20, 13],
-        "circle-color": [
-          "interpolate",
-          ["linear"],
-          ["coalesce", ["get", "maxScore"], 40],
-          35,
-          "#34d399",
-          60,
-          "#facc15",
-          78,
-          "#fb923c",
-          90,
-          "#ef4444",
-        ],
-        "circle-opacity": 0.9,
-        "circle-stroke-width": 2,
-        "circle-stroke-color": "rgba(255,255,255,.72)",
-      },
-    });
-    map.addLayer({
-      id: "buzz-pin-glow",
-      type: "circle",
-      source: "buzz-map-clusters",
-      minzoom: 10.5,
-      filter: ["!", ["has", "point_count"]],
-      paint: {
-        "circle-radius": [
-          "case",
-          ["==", ["get", "selected"], true],
-          29,
-          ["interpolate", ["linear"], ["get", "score"], 20, 13, 100, 24],
-        ],
-        "circle-color": buzzColor,
-        "circle-opacity": ["case", ["==", ["get", "selected"], true], 0.55, 0.32],
-        "circle-blur": 0.76,
-      },
-    });
-    map.addLayer({
-      id: "buzz-venue-pins",
-      type: "circle",
-      source: "buzz-map-clusters",
-      minzoom: 10.5,
-      filter: ["!", ["has", "point_count"]],
-      paint: {
-        "circle-radius": [
-          "case",
-          ["==", ["get", "selected"], true],
-          18,
-          ["interpolate", ["linear"], ["zoom"], 10.5, 12.5, 15, 15.5],
-        ],
-        "circle-color": "#ffffff",
-        "circle-stroke-width": ["case", ["==", ["get", "selected"], true], 6, 4],
-        "circle-stroke-color": buzzColor,
-      },
-    });
-    map.addLayer({
-      id: "buzz-pin-logo",
+      id: "buzz-featured-logo",
       type: "symbol",
-      source: "buzz-map-clusters",
-      minzoom: 10.5,
-      filter: ["!", ["has", "point_count"]],
+      source: "buzz-map-featured",
+      minzoom: FEATURED_LOGO_MIN_ZOOM,
+      maxzoom: ALL_LOGO_MIN_ZOOM,
+      filter: ["==", ["get", "selected"], false],
       layout: {
         "icon-image": ["get", "logoKey"],
-        "icon-size": ["interpolate", ["linear"], ["zoom"], 10.5, 0.2, 15, 0.25],
+        "icon-size": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          FEATURED_LOGO_MIN_ZOOM,
+          0.46,
+          ALL_LOGO_MIN_ZOOM,
+          0.56,
+        ],
+        "icon-allow-overlap": false,
+        "icon-ignore-placement": false,
+        "icon-padding": 10,
+        "symbol-sort-key": ["-", 100, ["get", "score"]],
+      },
+    });
+    // Close zoom reveals the wider logo set. The map becomes denser only
+    // after users intentionally zoom into a smaller geographic area.
+    map.addLayer({
+      id: "buzz-all-logo",
+      type: "symbol",
+      source: "buzz-map-venues",
+      minzoom: ALL_LOGO_MIN_ZOOM,
+      maxzoom: DENSE_LOGO_MIN_ZOOM,
+      filter: ["==", ["get", "selected"], false],
+      layout: {
+        "icon-image": ["get", "logoKey"],
+        "icon-size": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          ALL_LOGO_MIN_ZOOM,
+          0.5,
+          DENSE_LOGO_MIN_ZOOM,
+          0.62,
+        ],
+        "icon-allow-overlap": false,
+        "icon-ignore-placement": false,
+        "icon-padding": 8,
+        "symbol-sort-key": ["-", 100, ["get", "score"]],
+      },
+    });
+    map.addLayer({
+      id: "buzz-all-logo-dense",
+      type: "symbol",
+      source: "buzz-map-venues",
+      minzoom: DENSE_LOGO_MIN_ZOOM,
+      filter: ["==", ["get", "selected"], false],
+      layout: {
+        "icon-image": ["get", "logoKey"],
+        "icon-size": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          DENSE_LOGO_MIN_ZOOM,
+          0.58,
+          17,
+          0.74,
+        ],
         "icon-allow-overlap": true,
         "icon-ignore-placement": true,
       },
     });
+    // A selected venue remains prominent at every logo zoom, even when nearby
+    // labels would normally win Mapbox collision placement.
     map.addLayer({
-      id: "buzz-pin-hitbox",
-      type: "circle",
-      source: "buzz-map-clusters",
-      minzoom: 10.2,
-      filter: ["!", ["has", "point_count"]],
-      paint: {
-        "circle-radius": 30,
-        "circle-color": "rgba(0,0,0,.01)",
-        "circle-opacity": 0.01,
+      id: "buzz-selected-logo",
+      type: "symbol",
+      source: "buzz-map-venues",
+      minzoom: FEATURED_LOGO_MIN_ZOOM,
+      filter: ["==", ["get", "selected"], true],
+      layout: {
+        "icon-image": ["get", "logoKey"],
+        "icon-size": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          FEATURED_LOGO_MIN_ZOOM,
+          0.64,
+          16,
+          0.82,
+        ],
+        "icon-allow-overlap": true,
+        "icon-ignore-placement": true,
       },
     });
 
+    const logoLayerIds = [
+      "buzz-featured-logo",
+      "buzz-all-logo",
+      "buzz-all-logo-dense",
+      "buzz-selected-logo",
+    ];
     const handleMissingLogo = (event: { id: string }) => {
       const id = event.id;
       if (
@@ -281,14 +254,21 @@ export function useBuzzMapbox({
         return;
       }
       const logoUrl = logoUrlsRef.current.get(id);
-      if (!logoUrl) return;
+      const presentation = logoPresentationRef.current.get(id);
+      if (!logoUrl || !presentation) return;
+
+      const addLogoSprite = (image?: ImageBitmap | ImageData) => {
+        const sprite = createVenueLogoSprite(image, presentation);
+        if (sprite && !map.hasImage(id)) {
+          map.addImage(id, sprite, { pixelRatio: 2 });
+        }
+      };
+
       loadingLogosRef.current.add(id);
       void map
         .loadImage(logoUrl)
-        .then((image) => {
-          if (!map.hasImage(id)) map.addImage(id, image.data, { pixelRatio: 2 });
-        })
-        .catch(() => undefined)
+        .then((image) => addLogoSprite(image.data))
+        .catch(() => addLogoSprite())
         .finally(() => loadingLogosRef.current.delete(id));
     };
     const handleVenueClick = (event: mapboxgl.MapLayerMouseEvent) => {
@@ -296,17 +276,13 @@ export function useBuzzMapbox({
       if (id) selectVenueRef.current(id);
     };
     const handleHeatClick = (event: mapboxgl.MapLayerMouseEvent) => {
-      if (map.getZoom() >= 10.5) return;
+      const logoAtPoint = map.queryRenderedFeatures(event.point, {
+        layers: logoLayerIds,
+      }).length > 0;
+      if (logoAtPoint || map.getZoom() >= ALL_LOGO_MIN_ZOOM) return;
       map.easeTo({
         center: event.lngLat,
         zoom: Math.min(12, map.getZoom() + 2.3),
-        duration: 520,
-      });
-    };
-    const handleHeatHubClick = (event: mapboxgl.MapLayerMouseEvent) => {
-      map.easeTo({
-        center: event.lngLat,
-        zoom: Math.min(14, map.getZoom() + 2.4),
         duration: 520,
       });
     };
@@ -318,23 +294,21 @@ export function useBuzzMapbox({
     };
 
     map.on("styleimagemissing", handleMissingLogo);
-    map.on("click", "buzz-pin-hitbox", handleVenueClick);
+    logoLayerIds.forEach((layerId) => {
+      map.on("click", layerId, handleVenueClick);
+      map.on("mouseenter", layerId, showPointer);
+      map.on("mouseleave", layerId, hidePointer);
+    });
     map.on("click", "buzz-area-heat", handleHeatClick);
-    map.on("click", "buzz-heat-hubs", handleHeatHubClick);
-    map.on("mouseenter", "buzz-pin-hitbox", showPointer);
-    map.on("mouseleave", "buzz-pin-hitbox", hidePointer);
-    map.on("mouseenter", "buzz-heat-hubs", showPointer);
-    map.on("mouseleave", "buzz-heat-hubs", hidePointer);
 
     return () => {
       map.off("styleimagemissing", handleMissingLogo);
-      map.off("click", "buzz-pin-hitbox", handleVenueClick);
+      logoLayerIds.forEach((layerId) => {
+        map.off("click", layerId, handleVenueClick);
+        map.off("mouseenter", layerId, showPointer);
+        map.off("mouseleave", layerId, hidePointer);
+      });
       map.off("click", "buzz-area-heat", handleHeatClick);
-      map.off("click", "buzz-heat-hubs", handleHeatHubClick);
-      map.off("mouseenter", "buzz-pin-hitbox", showPointer);
-      map.off("mouseleave", "buzz-pin-hitbox", hidePointer);
-      map.off("mouseenter", "buzz-heat-hubs", showPointer);
-      map.off("mouseleave", "buzz-heat-hubs", hidePointer);
     };
   }, [mapReady]);
 
@@ -342,14 +316,19 @@ export function useBuzzMapbox({
     const features: GeoJSON.Feature<GeoJSON.Point>[] = venues
       .filter(hasValidVenueCoordinates)
       .map((venue) => {
-        const logoKey = logoKeyFor(venue);
+        const score = venueScore(venue);
+        const logoKey = `${logoKeyFor(venue)}-buzz-${activityColor(score).slice(1)}`;
         logoUrlsRef.current.set(logoKey, logoUrlFor(venue));
+        logoPresentationRef.current.set(logoKey, {
+          name: venue.name,
+          score,
+        });
         return {
           type: "Feature",
           geometry: { type: "Point", coordinates: venueCoordinates(venue) },
           properties: {
             id: venue.id,
-            score: venueScore(venue),
+            score,
             logoKey,
             selected: selectedVenueId === venue.id,
           },
@@ -359,8 +338,22 @@ export function useBuzzMapbox({
       type: "FeatureCollection",
       features,
     };
+    const featuredIds = new Set(
+      selectFeaturedVenueIds(
+        features.map((feature) => ({
+          id: String(feature.properties?.id || ""),
+          score: Number(feature.properties?.score || 0),
+        })),
+        selectedVenueId,
+      ),
+    );
+    const featuredCollection: GeoJSON.FeatureCollection<GeoJSON.Point> = {
+      type: "FeatureCollection",
+      features: features.filter((feature) =>
+        featuredIds.has(String(feature.properties?.id || ""))),
+    };
     (mapRef.current?.getSource("buzz-map-venues") as mapboxgl.GeoJSONSource | undefined)?.setData(collection);
-    (mapRef.current?.getSource("buzz-map-clusters") as mapboxgl.GeoJSONSource | undefined)?.setData(collection);
+    (mapRef.current?.getSource("buzz-map-featured") as mapboxgl.GeoJSONSource | undefined)?.setData(featuredCollection);
   }, [logoKeyFor, logoUrlFor, selectedVenueId, venues]);
 
   return { mapElementRef, mapRef, mapReady, mapZoom };

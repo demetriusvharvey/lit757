@@ -72,6 +72,10 @@ import {
   type VenueDetail,
   type VotePayload,
 } from "./buzz-map-model";
+import {
+  ALL_LOGO_MIN_ZOOM,
+  FEATURED_LOGO_MIN_ZOOM,
+} from "./buzz-map-presentation";
 import { useBuzzMapbox } from "./hooks/use-buzz-mapbox";
 import { RemoteVenueImage } from "./components/remote-venue-image";
 import { BuzzVenueList } from "./components/buzz-venue-list";
@@ -525,7 +529,11 @@ export default function BuzzMapApp() {
             <button type="button" onClick={() => void searchThisMap()}><Search /> Search this map</button>
           </div>
           <div className="buzz-map-mode">
-            {mapZoom < 9.8 ? <><Sparkles /><span>City pulse</span><small>Tap a hot zone or zoom in for places</small></> : mapZoom < 12.6 ? <><Sparkles /><span>Buzzing zones</span><small>Tap a glow to reveal nearby places</small></> : <><MapPin /><span>Live places</span><small>Tap a place to see what’s happening</small></>}
+            {mapZoom < FEATURED_LOGO_MIN_ZOOM
+              ? <><Sparkles /><span>City pulse</span><small>Tap a hot zone or zoom in for places</small></>
+              : mapZoom < ALL_LOGO_MIN_ZOOM
+                ? <><Sparkles /><span>Top places</span><small>Hottest venue logos first</small></>
+                : <><MapPin /><span>Venue logos</span><small>Tap a logo to see what’s happening</small></>}
           </div>
           {loading && <div className="buzz-map-loading"><i /> Updating Buzz</div>}
           {error && <button type="button" className="buzz-map-error" onClick={() => void loadNearby()}>{error} · Retry</button>}
