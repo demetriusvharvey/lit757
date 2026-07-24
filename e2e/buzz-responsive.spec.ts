@@ -55,7 +55,27 @@ async function mockBuzzData(page: Page) {
   await page.route("**/api/discover**", (route) =>
     route.fulfill({
       contentType: "application/json",
-      body: JSON.stringify({ success: true, venues, picks: venues }),
+      body: JSON.stringify({
+        success: true,
+        generatedAt: "2026-07-24T12:00:00.000Z",
+        context: {
+          key: "afternoon",
+          eyebrow: "Your afternoon in the 757",
+          headline: "Make the most of right now",
+          timing: "This afternoon",
+          description: "Deterministic discovery results for the browser suite.",
+          city: "All 757",
+          mode: "all",
+          resultCount: venues.length,
+        },
+        freshness: {
+          label: "Updated now",
+          timestamp: "2026-07-24T12:00:00.000Z",
+          automatic: true,
+        },
+        venues,
+        picks: venues,
+      }),
     }),
   );
   await page.route("**/api/venue-detail**", (route) =>
@@ -68,6 +88,12 @@ async function mockBuzzData(page: Page) {
           hours: "Open until 11 PM",
         },
       }),
+    }),
+  );
+  await page.route("**/api/venue-logo**", (route) =>
+    route.fulfill({
+      contentType: "image/svg+xml",
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><rect width="96" height="96" fill="#171c24"/></svg>',
     }),
   );
 }

@@ -9,6 +9,7 @@ import {
   venueCoordinates,
   venueScore,
 } from "../buzz-map-model";
+import { canInitializeMapbox } from "../mapbox-config";
 
 type UseBuzzMapboxOptions = {
   venues: BuzzVenue[];
@@ -44,7 +45,7 @@ export function useBuzzMapbox({
 
   useEffect(() => {
     const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
-    if (!mapElementRef.current || !token || mapRef.current) return;
+    if (!mapElementRef.current || !canInitializeMapbox(token) || mapRef.current) return;
 
     mapboxgl.accessToken = token;
     const map = new mapboxgl.Map({

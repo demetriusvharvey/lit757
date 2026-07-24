@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { PLAYWRIGHT_MAPBOX_TOKEN } from "./app/mapbox-config";
 
 const port = 3100;
 const baseURL = `http://127.0.0.1:${port}`;
@@ -27,6 +28,9 @@ export default defineConfig({
       name: "mobile-chromium",
       use: {
         ...devices["iPhone 13"],
+        // Device presets include a default browser; override it because CI
+        // intentionally installs one browser for both responsive projects.
+        browserName: "chromium",
       },
     },
   ],
@@ -44,7 +48,7 @@ export default defineConfig({
       SUPABASE_SERVICE_ROLE_KEY:
         process.env.SUPABASE_SERVICE_ROLE_KEY || "e2e-service-placeholder",
       NEXT_PUBLIC_MAPBOX_TOKEN:
-        process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "e2e-mapbox-placeholder",
+        process.env.NEXT_PUBLIC_MAPBOX_TOKEN || PLAYWRIGHT_MAPBOX_TOKEN,
     },
   },
 });
