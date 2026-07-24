@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { callMlWorker, classifyVibes } from "../../../src/lib/ml/huggingface";
 import { scoreCandidatesSemantically } from "../../../src/lib/ml/semantic-scoring";
+import { clientAddress, exceedsRateLimit } from "../../../src/lib/ml/api-security";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -183,11 +184,13 @@ export async function GET(request: Request) {
   const legacyResponse = await fetch(legacyUrl, {
     cache: "no-store",
     headers: authorization ? { Authorization: authorization } : undefined,
+    signal: AbortSignal.timeout(20_000),
   });
   const payload = await legacyResponse.json() as DiscoveryPayload;
   const query = cleanQuery(incoming.searchParams.get("q"));
 
-  if (!legacyResponse.ok || !payload.success || !query || !process.env.HUGGINGFACE_API_TOKEN) {
+  const rateLimited = exceedsRateLimit(`discover-ml:${clientAddress(request)}`, 12, 60_000);
+  if (!legacyResponse.ok || !payload.success || !query || rateLimited || !process.env.HUGGINGFACE_API_TOKEN) {
     return NextResponse.json(payload, {
       status: legacyResponse.status,
       headers: { "Cache-Control": "private, no-store" },

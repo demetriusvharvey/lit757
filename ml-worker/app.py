@@ -1,19 +1,28 @@
 from __future__ import annotations
 
 import base64
+import binascii
+import hmac
 import importlib.util
+import ipaddress
 import io
 import os
+import socket
 import sys
+import threading
+import time
+from collections import defaultdict, deque
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 import numpy as np
 import pandas as pd
 import torch
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
 from huggingface_hub import snapshot_download
 from PIL import Image
 from pydantic import BaseModel, Field
@@ -35,6 +44,14 @@ MODEL_IDS = {
 }
 
 app = FastAPI(title="Buzz ML Worker", version="1.0.0")
+MAX_REQUEST_BYTES = 1_048_576
+MAX_IMAGE_BYTES = 10_485_760
+RATE_LIMIT_PER_MINUTE = int(os.environ.get("ML_WORKER_RATE_LIMIT_PER_MINUTE", "30"))
+MAX_CONCURRENCY = int(os.environ.get("ML_WORKER_MAX_CONCURRENCY", "1"))
+request_slots = threading.BoundedSemaphore(max(1, MAX_CONCURRENCY))
+rate_lock = threading.Lock()
+rate_buckets: dict[str, deque[float]] = defaultdict(deque)
+Image.MAX_IMAGE_PIXELS = 40_000_000
 
 
 class RunRequest(BaseModel):
@@ -44,8 +61,42 @@ class RunRequest(BaseModel):
 
 def require_secret(authorization: str | None = Header(default=None)) -> None:
     expected = os.environ.get("ML_WORKER_SECRET")
-    if expected and authorization != f"Bearer {expected}":
+    supplied = authorization or ""
+    if not expected or len(expected) < 32 or not hmac.compare_digest(supplied, f"Bearer {expected}"):
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def rate_limited(client: str) -> bool:
+    now = time.monotonic()
+    with rate_lock:
+        bucket = rate_buckets[client]
+        while bucket and bucket[0] <= now - 60:
+            bucket.popleft()
+        if len(bucket) >= RATE_LIMIT_PER_MINUTE:
+            return True
+        bucket.append(now)
+        return False
+
+
+@app.middleware("http")
+async def protect_inference(request: Request, call_next):
+    if request.url.path != "/v1/run":
+        return await call_next(request)
+    client = request.client.host if request.client else "unknown"
+    if rate_limited(client):
+        return JSONResponse({"detail": "Too many requests"}, status_code=429)
+    content_length = int(request.headers.get("content-length") or "0")
+    if content_length > MAX_REQUEST_BYTES:
+        return JSONResponse({"detail": "Request too large"}, status_code=413)
+    body = await request.body()
+    if not body or len(body) > MAX_REQUEST_BYTES:
+        return JSONResponse({"detail": "Invalid request body"}, status_code=400)
+    if not request_slots.acquire(blocking=False):
+        return JSONResponse({"detail": "Worker is busy"}, status_code=429)
+    try:
+        return await call_next(request)
+    finally:
+        request_slots.release()
 
 
 def hf_token() -> str | None:
@@ -60,17 +111,64 @@ def model_device() -> str:
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
+def validate_public_https_url(value: str) -> str:
+    if len(value) > 2_048:
+        raise HTTPException(status_code=400, detail="Image URL is too long")
+    parsed = urlparse(value)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        raise HTTPException(status_code=400, detail="A public HTTPS image URL is required")
+    try:
+        addresses = {
+            item[4][0]
+            for item in socket.getaddrinfo(parsed.hostname, parsed.port or 443, type=socket.SOCK_STREAM)
+        }
+    except socket.gaierror as error:
+        raise HTTPException(status_code=400, detail="Image host could not be resolved") from error
+    if not addresses:
+        raise HTTPException(status_code=400, detail="Image host could not be resolved")
+    for address in addresses:
+        ip = ipaddress.ip_address(address)
+        if not ip.is_global:
+            raise HTTPException(status_code=400, detail="Private image hosts are not allowed")
+    return value
+
+
+def decoded_image(raw: bytes) -> Image.Image:
+    if len(raw) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image is too large")
+    try:
+        image = Image.open(io.BytesIO(raw))
+        image.load()
+        return image.convert("RGB")
+    except (OSError, ValueError) as error:
+        raise HTTPException(status_code=400, detail="Invalid image") from error
+
+
 def image_from_input(data: dict[str, Any]) -> Image.Image:
     image_url = data.get("image_url")
     image_base64 = data.get("image_base64")
     if isinstance(image_url, str) and image_url:
-        with httpx.Client(timeout=30, follow_redirects=True) as client:
-            response = client.get(image_url)
-            response.raise_for_status()
-            return Image.open(io.BytesIO(response.content)).convert("RGB")
+        safe_url = validate_public_https_url(image_url)
+        timeout = httpx.Timeout(30, connect=5)
+        with httpx.Client(timeout=timeout, follow_redirects=False) as client:
+            with client.stream("GET", safe_url) as response:
+                response.raise_for_status()
+                if not (response.headers.get("content-type") or "").lower().startswith("image/"):
+                    raise HTTPException(status_code=400, detail="URL did not return an image")
+                raw = bytearray()
+                for chunk in response.iter_bytes():
+                    raw.extend(chunk)
+                    if len(raw) > MAX_IMAGE_BYTES:
+                        raise HTTPException(status_code=413, detail="Image is too large")
+                return decoded_image(bytes(raw))
     if isinstance(image_base64, str) and image_base64:
+        if len(image_base64) > (MAX_IMAGE_BYTES * 4 // 3) + 1_024:
+            raise HTTPException(status_code=413, detail="Image is too large")
         raw = image_base64.split(",", 1)[-1]
-        return Image.open(io.BytesIO(base64.b64decode(raw))).convert("RGB")
+        try:
+            return decoded_image(base64.b64decode(raw, validate=True))
+        except (binascii.Error, ValueError) as error:
+            raise HTTPException(status_code=400, detail="Invalid base64 image") from error
     raise HTTPException(status_code=400, detail="image_url or image_base64 is required")
 
 
@@ -316,4 +414,5 @@ def run(request: RunRequest) -> dict[str, Any]:
     except HTTPException:
         raise
     except Exception as error:
-        raise HTTPException(status_code=500, detail=f"{request.model} failed: {error}") from error
+        print(f"{request.model} inference failed: {type(error).__name__}", file=sys.stderr)
+        raise HTTPException(status_code=500, detail="Inference failed") from error

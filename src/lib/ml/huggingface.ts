@@ -27,6 +27,9 @@ function workerConfiguration() {
   const url = process.env.ML_WORKER_URL?.replace(/\/$/, "");
   const secret = process.env.ML_WORKER_SECRET;
   if (!url) throw new MlConfigurationError("ML_WORKER_URL is not configured.");
+  if (!secret || secret.length < 32) {
+    throw new MlConfigurationError("ML_WORKER_SECRET must contain at least 32 characters.");
+  }
   return { url, secret };
 }
 
@@ -81,7 +84,7 @@ export async function callMlWorker<T>(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(worker.secret ? { Authorization: `Bearer ${worker.secret}` } : {}),
+      Authorization: `Bearer ${worker.secret}`,
     },
     body: JSON.stringify({ model: modelKey, input }),
     cache: "no-store",

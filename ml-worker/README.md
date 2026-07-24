@@ -11,7 +11,9 @@ Model weights are intentionally not committed to GitHub. They are downloaded laz
 
 ```env
 HUGGINGFACE_API_TOKEN=hf_your_fine_grained_token
-ML_WORKER_SECRET=use_a_long_random_value
+ML_WORKER_SECRET=use_a_unique_random_value_of_at_least_32_characters
+ML_WORKER_MAX_CONCURRENCY=1
+ML_WORKER_RATE_LIMIT_PER_MINUTE=30
 HF_HOME=/models/huggingface
 ```
 
@@ -62,7 +64,11 @@ After deployment, add these to the Vercel project:
 ```env
 ML_WORKER_URL=https://your-worker.example.com
 ML_WORKER_SECRET=the_same_long_random_value
+ML_API_SECRET=a_separate_random_value_for_protected_vercel_ml_routes
 ```
+
+`ML_API_SECRET` and `ML_WORKER_SECRET` must be different. Never reuse `CRON_SECRET`
+for either purpose. The worker fails closed when its secret is absent or too short.
 
 ## Worker API
 

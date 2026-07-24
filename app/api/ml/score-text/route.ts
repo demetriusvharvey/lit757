@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
 import { MlConfigurationError, MlInferenceError } from "../../../../src/lib/ml/huggingface";
 import { scoreCandidatesSemantically } from "../../../../src/lib/ml/semantic-scoring";
+import {
+  clientAddress,
+  exceedsRateLimit,
+  MlRequestError,
+  readJsonBody,
+  requireMlApiSecret,
+} from "../../../../src/lib/ml/api-security";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -10,13 +17,6 @@ type RequestBody = {
   candidates?: unknown;
 };
 
-function isAuthorized(request: Request) {
-  if (process.env.NODE_ENV !== "production") return true;
-  const secret = process.env.ML_WORKER_SECRET || process.env.CRON_SECRET;
-  if (!secret) return false;
-  return request.headers.get("authorization") === `Bearer ${secret}`;
-}
-
 function normalizeCandidates(value: unknown) {
   if (!Array.isArray(value)) return [];
   return value
@@ -24,19 +24,25 @@ function normalizeCandidates(value: unknown) {
       if (!item || typeof item !== "object") return null;
       const candidate = item as { id?: unknown; text?: unknown };
       if (typeof candidate.id !== "string" || typeof candidate.text !== "string") return null;
-      return { id: candidate.id, text: candidate.text };
+      const id = candidate.id.trim().slice(0, 128);
+      const text = candidate.text.trim().slice(0, 2_000);
+      return id && text ? { id, text } : null;
     })
-    .filter((candidate): candidate is { id: string; text: string } => Boolean(candidate));
+    .filter((candidate): candidate is { id: string; text: string } => Boolean(candidate))
+    .slice(0, 25);
 }
 
 export async function POST(request: Request) {
-  if (!isAuthorized(request)) {
+  if (!requireMlApiSecret(request)) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  }
+  if (exceedsRateLimit(`score-text:${clientAddress(request)}`, 10, 60_000)) {
+    return NextResponse.json({ success: false, error: "Too many requests" }, { status: 429 });
   }
 
   try {
-    const body = (await request.json()) as RequestBody;
-    const query = typeof body.query === "string" ? body.query.trim() : "";
+    const body = await readJsonBody(request, 65_536) as RequestBody;
+    const query = typeof body.query === "string" ? body.query.trim().slice(0, 500) : "";
     const candidates = normalizeCandidates(body.candidates);
 
     if (!query || !candidates.length) {
@@ -49,6 +55,9 @@ export async function POST(request: Request) {
     const scores = await scoreCandidatesSemantically(query, candidates);
     return NextResponse.json({ success: true, model: "venue-embedding", scores });
   } catch (error) {
+    if (error instanceof MlRequestError) {
+      return NextResponse.json({ success: false, error: error.message }, { status: error.status });
+    }
     if (error instanceof MlConfigurationError) {
       return NextResponse.json({ success: false, error: error.message }, { status: 503 });
     }
