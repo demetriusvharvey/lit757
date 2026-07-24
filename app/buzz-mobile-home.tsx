@@ -187,6 +187,9 @@ export default function BuzzMobileHome() {
 
   useEffect(() => {
     try {
+      // Persisted preferences are client-only; hydrate them after SSR to keep
+      // the initial markup stable.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setFavoriteIds(new Set(JSON.parse(localStorage.getItem(FAVORITES_KEY) || "[]") as string[]));
       setAlertsEnabled(localStorage.getItem(ALERTS_KEY) === "true");
       setVenueAlerts(JSON.parse(localStorage.getItem(VENUE_ALERTS_KEY) || "[]") as VenueAlert[]);
@@ -208,6 +211,8 @@ export default function BuzzMobileHome() {
 
   useEffect(() => {
     if (!searchOpen || searchQuery.trim().length < 2) {
+      // Results are scoped to an open, valid search query.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSearchVenues([]);
       setSearchLocations([]);
       setSearchLoading(false);
@@ -240,7 +245,10 @@ export default function BuzzMobileHome() {
     [venues, active],
   );
   const mapped = useMemo(() => filtered.filter(validVenue), [filtered]);
-  mappedRef.current = mapped;
+  useEffect(() => {
+    // Mapbox callbacks outlive individual React renders.
+    mappedRef.current = mapped;
+  }, [mapped]);
   const favorites = useMemo(() => venues.filter(venue => favoriteIds.has(venue.id)), [venues, favoriteIds]);
   const hottest = filtered[0];
   const activePlaces = filtered.filter(venue => score(venue) >= 52 && venue.openNow !== false).length;
@@ -259,7 +267,9 @@ export default function BuzzMobileHome() {
     const map = mapRef.current;
     if (map) map.easeTo({ center: coords(venue), zoom: Math.max(map.getZoom(), 13), duration: 480 });
   }, [setSelectedVenueId]);
-  selectVenueRef.current = selectVenueById;
+  useEffect(() => {
+    selectVenueRef.current = selectVenueById;
+  }, [selectVenueById]);
 
   useEffect(() => {
     if (!selectedVenueId || selected?.id === selectedVenueId) return;
@@ -314,7 +324,7 @@ export default function BuzzMobileHome() {
     if (!map || !mapReady || map.getSource("buzz-mobile-venues")) return;
     const empty: GeoJSON.FeatureCollection<GeoJSON.Point> = { type: "FeatureCollection", features: [] };
     map.addSource("buzz-mobile-venues", { type: "geojson", data: empty, cluster: true, clusterMaxZoom: 12.5, clusterRadius: 66 });
-    const heatColor: any = ["interpolate", ["linear"], ["get", "score"], 0, "#667085", 45, "#3DDC97", 60, "#C6E84B", 72, "#FFD54A", 82, "#FF9F43", 90, "#FF5C5C"];
+    const heatColor: mapboxgl.ExpressionSpecification = ["interpolate", ["linear"], ["get", "score"], 0, "#667085", 45, "#3DDC97", 60, "#C6E84B", 72, "#FFD54A", 82, "#FF9F43", 90, "#FF5C5C"];
     map.addLayer({ id: "buzz-mobile-clusters", type: "circle", source: "buzz-mobile-venues", filter: ["has", "point_count"], paint: { "circle-color": ["step", ["get", "point_count"], "#FFD54A", 15, "#FF9F43", 40, "#FF5C5C"], "circle-radius": ["step", ["get", "point_count"], 16, 15, 20, 40, 24], "circle-stroke-width": 2, "circle-stroke-color": "rgba(255,255,255,.9)" } });
     map.addLayer({ id: "buzz-mobile-cluster-count", type: "symbol", source: "buzz-mobile-venues", filter: ["has", "point_count"], layout: { "text-field": ["get", "point_count_abbreviated"], "text-size": 11 }, paint: { "text-color": "#101114" } });
     map.addLayer({ id: "buzz-mobile-pin-halo", type: "circle", source: "buzz-mobile-venues", filter: ["!", ["has", "point_count"]], paint: { "circle-radius": ["case", ["==", ["get", "selected"], true], 20, ["interpolate", ["linear"], ["get", "score"], 40, 8, 100, 16]], "circle-color": heatColor, "circle-opacity": ["case", ["==", ["get", "selected"], true], .32, .16], "circle-blur": .78 } });
@@ -399,7 +409,8 @@ export default function BuzzMobileHome() {
     event.stopPropagation();
     setFavoriteIds(current => {
       const next = new Set(current);
-      next.has(venue.id) ? next.delete(venue.id) : next.add(venue.id);
+      if (next.has(venue.id)) next.delete(venue.id);
+      else next.add(venue.id);
       localStorage.setItem(FAVORITES_KEY, JSON.stringify([...next]));
       return next;
     });

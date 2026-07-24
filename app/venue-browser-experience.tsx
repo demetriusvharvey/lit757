@@ -60,6 +60,8 @@ export default function VenueBrowserExperience(){
 
   useEffect(()=>{
     if(!open||venues.length)return;
+    // Opening the sheet starts its one-time, client-side discovery load.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     fetch("/api/discover?city=All%20757&mode=all",{cache:"no-store"})
       .then(response=>response.json())
@@ -69,6 +71,9 @@ export default function VenueBrowserExperience(){
   },[open,venues.length]);
 
   const results=useMemo(()=>{
+    // The revision is advanced by Mapbox move events. Reading it here makes
+    // this projection react to imperative bounds changes.
+    void mapRevision;
     const clean=query.trim().toLowerCase();
     const bounds=map?.getBounds();
     return [...venues]

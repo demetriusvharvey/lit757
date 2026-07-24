@@ -23,7 +23,14 @@ export default function OpsPage() {
     else { setData(payload); setError(""); }
     setLoading(false);
   }
-  useEffect(() => { void load(); const interval = window.setInterval(() => void load(), 120000); return () => window.clearInterval(interval); }, []);
+  useEffect(() => {
+    // Operations data is a live client-side view and is refreshed on a fixed
+    // cadence while the dashboard is open.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void load();
+    const interval = window.setInterval(() => void load(), 120000);
+    return () => window.clearInterval(interval);
+  }, []);
   const metricCards = data ? [
     { label: "Known coverage", value: `${data.metrics.coveragePct}%`, icon: CheckCircle2 },
     { label: "Fresh live evidence", value: `${data.metrics.livePct}%`, icon: Radio },

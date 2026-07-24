@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  exceedsRequestRate,
+  guardErrorResponse,
+  readBoundedJson,
+  requestClientKey,
+} from "../../../../src/lib/server/request-guards";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +17,7 @@ const db = createClient(
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HISTORY_WINDOW_HOURS = 6;
-const MAX_REQUESTED_VENUES = 400;
+const MAX_REQUESTED_VENUES = 100;
 const MAX_HISTORY_ROWS = 8_000;
 const MAX_SPARKLINE_POINTS = 12;
 
@@ -84,11 +90,15 @@ function describeTrend(rows: HistoryRow[]) {
 }
 
 export async function POST(request: Request) {
-  let body: { venueIds?: unknown };
+  if (exceedsRequestRate(`buzz-trends:${requestClientKey(request)}`, 30, 60_000)) {
+    return NextResponse.json({ success: false, error: "Too many requests" }, { status: 429 });
+  }
+
+  let body: Record<string, unknown>;
   try {
-    body = await request.json() as { venueIds?: unknown };
-  } catch {
-    return NextResponse.json({ success: false, error: "Invalid request body" }, { status: 400 });
+    body = await readBoundedJson(request, 16_384);
+  } catch (error) {
+    return guardErrorResponse(error);
   }
 
   const venueIds = [...new Set(

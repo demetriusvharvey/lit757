@@ -119,10 +119,7 @@ export default function AccountPanel({
   const [reportMessage, setReportMessage] = useState("");
 
   useEffect(() => {
-    if (!session) {
-      setPoints(null);
-      return;
-    }
+    if (!session) return;
     void fetch("/api/me/points", {
       cache: "no-store",
       headers: { Authorization: `Bearer ${session.access_token}` },
@@ -175,6 +172,9 @@ export default function AccountPanel({
   }
 
   const metadata = session?.user.user_metadata || {};
+  // A previous member's points can remain in memory briefly after sign-out.
+  // Never render that stale account data once the session is gone.
+  const visiblePoints = session ? points : null;
   const displayName = metadata.full_name || metadata.name || session?.user.email?.split("@")[0] || "Your account";
   const initial = String(displayName).trim().slice(0, 1).toUpperCase() || "Y";
 
@@ -232,11 +232,11 @@ export default function AccountPanel({
             <div className="mt-6 rounded-[1.6rem] bg-[#171716] p-5 text-white shadow-[0_20px_55px_rgba(0,0,0,0.16)]">
               <div className="flex items-center justify-between">
                 <span className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10"><Award size={18} /></span>
-                <span className="rounded-full bg-white/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-white/68">{points?.level || "New Member"}</span>
+                <span className="rounded-full bg-white/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-white/68">{visiblePoints?.level || "New Member"}</span>
               </div>
               <p className="mt-5 text-[10px] font-bold uppercase tracking-[0.17em] text-[#ff8c70]">Your Points</p>
-              <p className="mt-1 text-[38px] font-semibold leading-none tracking-[-0.055em]">{points?.points ?? 25}</p>
-              <p className="mt-3 text-[11px] leading-5 text-white/52">{points?.rewardsMessage || "Earn Points now. Member rewards are coming."}</p>
+              <p className="mt-1 text-[38px] font-semibold leading-none tracking-[-0.055em]">{visiblePoints?.points ?? 25}</p>
+              <p className="mt-3 text-[11px] leading-5 text-white/52">{visiblePoints?.rewardsMessage || "Earn Points now. Member rewards are coming."}</p>
             </div>
 
             <div className="mt-7">

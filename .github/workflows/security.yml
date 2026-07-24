@@ -26,6 +26,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - run: npm test
       - name: Lint changed files
         if: github.event_name == 'pull_request' || github.event_name == 'push'
         shell: bash

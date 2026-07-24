@@ -1,6 +1,12 @@
 import { createHmac } from "node:crypto";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  exceedsRequestRate,
+  guardErrorResponse,
+  readBoundedJson,
+  requestClientKey,
+} from "../../../../src/lib/server/request-guards";
 
 export const dynamic = "force-dynamic";
 
@@ -21,23 +27,26 @@ function meters(lat1: number, lng1: number, lat2: number, lng2: number) {
 }
 
 function deviceHash(sessionId: string) {
-  const secret = process.env.CRON_SECRET || process.env.BUZZ_PARTNER_INGEST_SECRET;
-  if (!secret) return null;
+  const secret = process.env.BUZZ_PARTNER_INGEST_SECRET;
+  if (!secret || secret.length < 32) return null;
   return `anon_${createHmac("sha256", secret).update(sessionId).digest("hex").slice(0, 32)}`;
 }
 
 export async function POST(request: Request) {
-  const body = await request.json().catch(() => null) as {
-    sessionId?: string;
-    latitude?: number;
-    longitude?: number;
-    accuracy?: number;
-  } | null;
+  if (exceedsRequestRate(`passive-presence:${requestClientKey(request)}`, 12, 60_000)) {
+    return NextResponse.json({ success: false, error: "Too many requests" }, { status: 429 });
+  }
+  let body: Record<string, unknown>;
+  try {
+    body = await readBoundedJson(request, 4_096);
+  } catch (error) {
+    return guardErrorResponse(error);
+  }
 
-  const sessionId = String(body?.sessionId || "");
-  const latitude = Number(body?.latitude);
-  const longitude = Number(body?.longitude);
-  const accuracy = Number(body?.accuracy);
+  const sessionId = String(body.sessionId || "");
+  const latitude = Number(body.latitude);
+  const longitude = Number(body.longitude);
+  const accuracy = Number(body.accuracy);
 
   if (!/^[A-Za-z0-9_-]{20,160}$/.test(sessionId)) {
     return NextResponse.json({ success: false, error: "Invalid session" }, { status: 400 });

@@ -21,14 +21,13 @@ const VENUE_ALERTS_KEY="lit757-venue-alerts";
 const LOCATION_KEY="lit757-location";
 const LOCATION_STORAGE_KEY="lit757-user-location";
 const score=(v:Venue)=>v.activity?.score??70;
-const liveScore=(v:Venue)=>v.activity?.score??0;
 const coords=(v:Venue):[number,number]=>[Number(v.lng),Number(v.lat)];
 const validVenue=(v:Venue)=>{const [lng,lat]=coords(v);return Number.isFinite(lat)&&Number.isFinite(lng)&&lat!==0&&lng!==0;};
 const categoryFor=(v:Venue)=>{const explicit=`${v.kind||""} ${v.type||""}`.toLowerCase();const text=`${v.name} ${v.reason||""} ${v.event?.name||""} ${explicit}`.toLowerCase();if(v.event?.name)return"Events";if(/restaurant|diner|cafe|pizza|grill|kitchen|food|taco|burger|bakery|seafood/.test(text))return"Food";if(/bar|brew|cocktail|wine|drink|pub/.test(text))return"Drinks";if(/club|dj|music|nightlife|lounge/.test(text))return"Nightlife";if(/park|trail|beach|garden|outdoor|museum/.test(text))return"Outdoors";if(/shop|mall|market|store/.test(text))return"Shopping";return"All";};
 const trendPercent=(v:Venue)=>Math.max(3,Math.min(31,Math.round((score(v)-48)/2)));
 const peakMinutes=(v:Venue)=>Math.max(18,95-Math.round(score(v)*.7));
 const statusFor=(v:Venue)=>score(v)>=88?"Very lit":score(v)>=76?"Heating up":score(v)>=60?"Active":"Chill";
-const basePinRadius:any=["interpolate",["linear"],["zoom"],7.5,3.2,11.3,4.5,14,6.5,16,8];
+const basePinRadius:mapboxgl.ExpressionSpecification=["interpolate",["linear"],["zoom"],7.5,3.2,11.3,4.5,14,6.5,16,8];
 
 export default function MobileHome(){
   const {setMap,selectedVenueId,setSelectedVenueId}=useMapController();
@@ -59,10 +58,20 @@ export default function MobileHome(){
   const mapRef=useRef<mapboxgl.Map|null>(null);
   const mappedRef=useRef<Venue[]>([]);
 
-  useEffect(()=>{try{setFavoriteIds(new Set(JSON.parse(localStorage.getItem(FAVORITES_KEY)||"[]") as string[]));setAlertsEnabled(localStorage.getItem(ALERTS_KEY)==="true");setVenueAlerts(JSON.parse(localStorage.getItem(VENUE_ALERTS_KEY)||"[]") as VenueAlert[]);setLocation(localStorage.getItem(LOCATION_KEY)||"Hampton Roads");}catch{}fetch("/api/discover?city=All%20757&mode=all",{cache:"no-store"}).then(r=>r.json()).then((p:Payload)=>setVenues(p.venues||p.picks||[])).catch(()=>undefined);},[]);
+  useEffect(()=>{
+    try{
+      // Browser preferences cannot be read during SSR.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setFavoriteIds(new Set(JSON.parse(localStorage.getItem(FAVORITES_KEY)||"[]") as string[]));
+      setAlertsEnabled(localStorage.getItem(ALERTS_KEY)==="true");
+      setVenueAlerts(JSON.parse(localStorage.getItem(VENUE_ALERTS_KEY)||"[]") as VenueAlert[]);
+      setLocation(localStorage.getItem(LOCATION_KEY)||"Hampton Roads");
+    }catch{}
+    fetch("/api/discover?city=All%20757&mode=all",{cache:"no-store"}).then(r=>r.json()).then((p:Payload)=>setVenues(p.venues||p.picks||[])).catch(()=>undefined);
+  },[]);
   const filtered=useMemo(()=>[...venues].filter(v=>active==="All"||categoryFor(v)===active).sort((a,b)=>score(b)-score(a)),[venues,active]);
   const mapped=useMemo(()=>filtered.filter(validVenue),[filtered]);
-  mappedRef.current=mapped;
+  useEffect(()=>{mappedRef.current=mapped;},[mapped]);
   const favorites=useMemo(()=>venues.filter(v=>favoriteIds.has(v.id)),[venues,favoriteIds]);
   const hottest=filtered[0];
   const ticker=useMemo(()=>filtered.slice(0,4).map((v,i)=>i===0?`🔥 ${v.name} is ${statusFor(v).toLowerCase()}`:`${i===1?"↗":"•"} ${v.name} ${trendPercent(v)}% busier`),[filtered]);
@@ -80,7 +89,7 @@ export default function MobileHome(){
       liveSource?.setData(liveData);venueSource?.setData(allData);
       if(!liveSource){
         map.addSource("mobile-live-dots",{type:"geojson",data:liveData});
-        const activityColor:any=["interpolate",["linear"],["get","score"],45,"#43d879",58,"#9bd94a",68,"#f3c94b",78,"#ff9a3d",88,"#ff554a"];
+        const activityColor:mapboxgl.ExpressionSpecification=["interpolate",["linear"],["get","score"],45,"#43d879",58,"#9bd94a",68,"#f3c94b",78,"#ff9a3d",88,"#ff554a"];
         map.addLayer({id:"mobile-live-halo",type:"circle",source:"mobile-live-dots",maxzoom:17,paint:{"circle-radius":["interpolate",["linear"],["get","score"],45,5,78,11,100,18],"circle-color":activityColor,"circle-opacity":["interpolate",["linear"],["get","score"],45,.05,78,.16,100,.28],"circle-blur":.82}});
         map.addLayer({id:"mobile-live-dot",type:"circle",source:"mobile-live-dots",maxzoom:17,paint:{"circle-radius":["interpolate",["linear"],["get","score"],45,2.8,78,4.5,100,6.5],"circle-color":activityColor,"circle-opacity":.98,"circle-stroke-width":["interpolate",["linear"],["get","score"],45,.4,84,1.2,100,1.8],"circle-stroke-color":"rgba(255,255,255,.92)"}});
       }
@@ -99,10 +108,11 @@ export default function MobileHome(){
       const locationPreferred=localStorage.getItem(LOCATION_STORAGE_KEY)&&localStorage.getItem("lit757-location-enabled")!=="false";
       if(mapped.length&&!locationPreferred){const bounds=new mapboxgl.LngLatBounds();mapped.forEach(v=>bounds.extend(coords(v)));if(mapped.length===1)map.easeTo({center:coords(mapped[0]),zoom:13,duration:500});else map.fitBounds(bounds,{padding:{top:38,right:28,bottom:38,left:28},maxZoom:10.2,duration:650});}
     };
-    setSelected(null);setSelectedVenueId(null);map.isStyleLoaded()?render():map.once("load",render);
+    setSelected(null);setSelectedVenueId(null);
+    if(map.isStyleLoaded())render();else map.once("load",render);
   },[mapped,setSelectedVenueId]);
 
-  useEffect(()=>{const map=mapRef.current;if(!map)return;const apply=()=>{if(!map.getLayer("mobile-venue-pins"))return;const selectedId=selectedVenueId||"";map.setPaintProperty("mobile-venue-pins","circle-radius",["case",["==",["get","id"],selectedId],11,basePinRadius] as any);map.setPaintProperty("mobile-venue-pins","circle-stroke-width",["case",["==",["get","id"],selectedId],3,["interpolate",["linear"],["get","score"],0,.3,75,.8,90,1.5]] as any);};map.isStyleLoaded()?apply():map.once("load",apply);},[selectedVenueId]);
+  useEffect(()=>{const map=mapRef.current;if(!map)return;const apply=()=>{if(!map.getLayer("mobile-venue-pins"))return;const selectedId=selectedVenueId||"";map.setPaintProperty("mobile-venue-pins","circle-radius",["case",["==",["get","id"],selectedId],11,basePinRadius] as mapboxgl.ExpressionSpecification);map.setPaintProperty("mobile-venue-pins","circle-stroke-width",["case",["==",["get","id"],selectedId],3,["interpolate",["linear"],["get","score"],0,.3,75,.8,90,1.5]] as mapboxgl.ExpressionSpecification);};if(map.isStyleLoaded())apply();else map.once("load",apply);},[selectedVenueId]);
 
   useEffect(()=>{if(!selectedVenueId)return;const venue=mappedRef.current.find(item=>String(item.id)===String(selectedVenueId));if(venue)setSelected(venue);},[selectedVenueId]);
 
@@ -117,7 +127,7 @@ export default function MobileHome(){
   function openPlanner(){setActiveTab("ai");setPlannerOpen(true);}
   function closeOverlay(){setFavoritesOpen(false);setAlertsOpen(false);setProfileOpen(false);setProfileView("main");setActiveTab("explore");setProfileMessage("");}
   function openVenue(v:Venue){setSelected(v);setSelectedVenueId(v.id);setDetailsOpen(true);if(validVenue(v))mapRef.current?.easeTo({center:coords(v),zoom:13,duration:550});}
-  function toggleFavorite(event:MouseEvent,venue:Venue){event.stopPropagation();setFavoriteIds(current=>{const next=new Set(current);next.has(venue.id)?next.delete(venue.id):next.add(venue.id);try{localStorage.setItem(FAVORITES_KEY,JSON.stringify([...next]));}catch{}return next;});}
+  function toggleFavorite(event:MouseEvent,venue:Venue){event.stopPropagation();setFavoriteIds(current=>{const next=new Set(current);if(next.has(venue.id))next.delete(venue.id);else next.add(venue.id);try{localStorage.setItem(FAVORITES_KEY,JSON.stringify([...next]));}catch{}return next;});}
   async function enableAlerts(){setAlertMessage("");if(typeof Notification==="undefined"){setAlertMessage("Notifications are not supported in this browser yet.");return;}const permission=await Notification.requestPermission();if(permission!=="granted"){setAlertMessage("Notifications were not allowed. You can enable them later in browser settings.");return;}setAlertsEnabled(true);try{localStorage.setItem(ALERTS_KEY,"true");}catch{}setAlertMessage("Alerts are on. We’ll only notify you about saved places and meaningful activity.");}
   function toggleVenueAlert(v:Venue){setVenueAlerts(current=>{const exists=current.some(a=>a.venueId===v.id);const next=exists?current.filter(a=>a.venueId!==v.id):[...current,{venueId:v.id,threshold:80}];try{localStorage.setItem(VENUE_ALERTS_KEY,JSON.stringify(next));}catch{}return next;});}
   async function signOut(){setProfileMessage("Signing out…");try{const url=process.env.NEXT_PUBLIC_SUPABASE_URL;const key=process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;if(url&&key){const {createClient}=await import("@supabase/supabase-js");await createClient(url,key).auth.signOut();}localStorage.removeItem(FAVORITES_KEY);localStorage.removeItem(ALERTS_KEY);localStorage.removeItem(VENUE_ALERTS_KEY);setFavoriteIds(new Set());setAlertsEnabled(false);setVenueAlerts([]);window.location.href="/";}catch{setProfileMessage("Could not sign out. Please try again.");}}

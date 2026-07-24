@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { hasBearerSecret } from "../../../../src/lib/server/request-guards";
 
 export const dynamic = "force-dynamic";
 
@@ -28,9 +29,10 @@ type ScoreRow = {
 };
 
 function authorized(request: Request) {
-  const secret = process.env.BUZZ_GROUND_TRUTH_SECRET || process.env.CRON_SECRET;
-  if (!secret) return process.env.NODE_ENV !== "production";
-  return request.headers.get("authorization") === `Bearer ${secret}` || request.headers.get("x-buzz-ground-truth-secret") === secret;
+  // Calibration can expose raw prediction quality. Keep it on the same
+  // dedicated trust boundary as ground-truth ingestion; CRON_SECRET is not a
+  // substitute and must not broaden access.
+  return hasBearerSecret(request, process.env.BUZZ_GROUND_TRUTH_SECRET);
 }
 
 function truthValue(row: TruthRow) {

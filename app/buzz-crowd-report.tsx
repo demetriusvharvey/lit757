@@ -72,6 +72,9 @@ export default function BuzzCrowdReport() {
   }, []);
 
   useEffect(() => {
+    // Feedback belongs to the selected venue, so clear it at that boundary.
+    // This is an intentional prop-to-transient-UI synchronization.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMessage("");
     setTone("");
   }, [selectedVenueId]);
