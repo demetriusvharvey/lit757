@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { callMlWorker } from "../../../../src/lib/ml/huggingface";
 import {
-  clientAddress,
-  exceedsRateLimit,
-  MlRequestError,
-  readJsonBody,
-  requireMlApiSecret,
-} from "../../../../src/lib/ml/api-security";
+  exceedsRequestRate,
+  hasBearerSecret,
+  readBoundedJson,
+  requestClientKey,
+  RequestGuardError,
+} from "../../../../src/lib/server/request-guards";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -29,10 +29,10 @@ const GOOD_LABELS = new Set([
 const BAD_LABELS = new Set(["logo", "map screenshot", "unrelated stock photo"]);
 
 export async function POST(request: Request) {
-  if (!requireMlApiSecret(request)) {
+  if (!hasBearerSecret(request, process.env.ML_API_SECRET)) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
-  if (exceedsRateLimit(`rank-images:${clientAddress(request)}`, 5, 60_000)) {
+  if (exceedsRequestRate(`rank-images:${requestClientKey(request)}`, 5, 60_000)) {
     return NextResponse.json({ success: false, error: "Too many requests" }, { status: 429 });
   }
   if (!process.env.ML_WORKER_URL) {
@@ -43,10 +43,8 @@ export async function POST(request: Request) {
   }
 
   try {
-    const rawBody = await readJsonBody(request, 32_768);
-    const body = rawBody && typeof rawBody === "object"
-      ? rawBody as { venueName?: unknown; candidates?: unknown }
-      : {};
+    // readBoundedJson already rejects arrays and primitives, so this is an object.
+    const body = await readBoundedJson(request, 32_768) as { venueName?: unknown; candidates?: unknown };
     const candidates = (Array.isArray(body.candidates) ? body.candidates : [])
       .filter((candidate): candidate is ImageCandidate => {
         if (!candidate || typeof candidate !== "object") return false;
@@ -102,8 +100,8 @@ export async function POST(request: Request) {
       candidates: ranked,
     });
   } catch (error) {
-    const status = error instanceof MlRequestError ? error.status : 500;
-    const message = error instanceof MlRequestError ? error.message : "Unable to rank images";
+    const status = error instanceof RequestGuardError ? error.status : 500;
+    const message = error instanceof RequestGuardError ? error.message : "Unable to rank images";
     return NextResponse.json({ success: false, error: message }, { status });
   }
 }

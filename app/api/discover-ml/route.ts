@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { callMlWorker, classifyVibes } from "../../../src/lib/ml/huggingface";
 import { scoreCandidatesSemantically } from "../../../src/lib/ml/semantic-scoring";
-import { clientAddress, exceedsRateLimit } from "../../../src/lib/ml/api-security";
+import { exceedsRequestRate, requestClientKey } from "../../../src/lib/server/request-guards";
+import { INTERNAL_DISCOVERY_HEADER } from "../../../src/lib/ml/discovery-routing";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -80,6 +81,10 @@ function normalizeCrossEncoderScore(score: number) {
   return 1 / (1 + Math.exp(-score));
 }
 
+// Below this the match is too weak to justify overwriting the venue's own
+// ranking label with a relevance claim.
+const STRONG_MATCH_PERCENT = 60;
+
 function matchLabel(percent: number, vibe?: string) {
   if (percent >= 90) return vibe ? `${percent}% ${vibe}` : `${percent}% match`;
   if (percent >= 78) return vibe ? `Strong ${vibe}` : "Strong match";
@@ -135,14 +140,17 @@ async function enhanceSearch(payload: DiscoveryPayload, query: string) {
       const combined = rerank === undefined
         ? semantic * 0.72 + liveQuality * 0.28
         : semantic * 0.42 + rerank * 0.38 + liveQuality * 0.2;
-      const percent = Math.round(Math.max(55, Math.min(99, combined * 100)));
+      // No floor. A weak match must be allowed to read as weak.
+      const percent = Math.round(Math.max(0, Math.min(99, combined * 100)));
+      const strong = percent >= STRONG_MATCH_PERCENT;
 
+      // `score`, `confidence` and `heat` are canonical activity truth and are
+      // deliberately passed through untouched. Search relevance decides the
+      // order results appear in, never how busy a venue is reported to be.
       return {
         ...venue,
-        score: Math.round(Math.max(Number(venue.score || 0), combined * 100)),
-        label: matchLabel(percent, topVibe),
-        confidence: `AI match ${percent}%`,
-        reason: matchReason(venue, percent, topVibe),
+        label: strong ? matchLabel(percent, topVibe) : venue.label,
+        reason: strong ? matchReason(venue, percent, topVibe) : venue.reason,
         interestTags: Array.from(new Set([...(venue.interestTags || []), ...(topVibe ? [topVibe] : [])])),
         mlMatch: {
           percent,
@@ -176,21 +184,31 @@ async function enhanceSearch(payload: DiscoveryPayload, query: string) {
 
 export async function GET(request: Request) {
   const incoming = new URL(request.url);
+  const query = cleanQuery(incoming.searchParams.get("q"));
+
+  // Only requests that would actually spend ML budget consume the limiter, so a
+  // flood of unqueried discovery traffic cannot starve real searches.
+  const couldEnhance = Boolean(query) && Boolean(process.env.HUGGINGFACE_API_TOKEN);
+  const rateLimited = couldEnhance
+    && exceedsRequestRate(`discover-ml:${requestClientKey(request)}`, 12, 60_000);
+
   const legacyUrl = new URL("/api/discover", incoming.origin);
   incoming.searchParams.forEach((value, key) => legacyUrl.searchParams.set(key, value));
-  legacyUrl.searchParams.set("__ml_bypass", "1");
 
   const authorization = request.headers.get("authorization");
   const legacyResponse = await fetch(legacyUrl, {
     cache: "no-store",
-    headers: authorization ? { Authorization: authorization } : undefined,
+    // An internal header rather than a query parameter: it stays out of URLs,
+    // logs, referrers and cache keys.
+    headers: {
+      [INTERNAL_DISCOVERY_HEADER]: "1",
+      ...(authorization ? { Authorization: authorization } : {}),
+    },
     signal: AbortSignal.timeout(20_000),
   });
   const payload = await legacyResponse.json() as DiscoveryPayload;
-  const query = cleanQuery(incoming.searchParams.get("q"));
 
-  const rateLimited = exceedsRateLimit(`discover-ml:${clientAddress(request)}`, 12, 60_000);
-  if (!legacyResponse.ok || !payload.success || !query || rateLimited || !process.env.HUGGINGFACE_API_TOKEN) {
+  if (!legacyResponse.ok || !payload.success || !couldEnhance || rateLimited) {
     return NextResponse.json(payload, {
       status: legacyResponse.status,
       headers: { "Cache-Control": "private, no-store" },

@@ -2,12 +2,12 @@ import { NextResponse } from "next/server";
 import { MlConfigurationError, MlInferenceError } from "../../../../src/lib/ml/huggingface";
 import { scoreCandidatesSemantically } from "../../../../src/lib/ml/semantic-scoring";
 import {
-  clientAddress,
-  exceedsRateLimit,
-  MlRequestError,
-  readJsonBody,
-  requireMlApiSecret,
-} from "../../../../src/lib/ml/api-security";
+  exceedsRequestRate,
+  hasBearerSecret,
+  readBoundedJson,
+  requestClientKey,
+  RequestGuardError,
+} from "../../../../src/lib/server/request-guards";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -33,15 +33,15 @@ function normalizeCandidates(value: unknown) {
 }
 
 export async function POST(request: Request) {
-  if (!requireMlApiSecret(request)) {
+  if (!hasBearerSecret(request, process.env.ML_API_SECRET)) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
-  if (exceedsRateLimit(`score-text:${clientAddress(request)}`, 10, 60_000)) {
+  if (exceedsRequestRate(`score-text:${requestClientKey(request)}`, 10, 60_000)) {
     return NextResponse.json({ success: false, error: "Too many requests" }, { status: 429 });
   }
 
   try {
-    const body = await readJsonBody(request, 65_536) as RequestBody;
+    const body = await readBoundedJson(request, 65_536) as RequestBody;
     const query = typeof body.query === "string" ? body.query.trim().slice(0, 500) : "";
     const candidates = normalizeCandidates(body.candidates);
 
@@ -55,7 +55,7 @@ export async function POST(request: Request) {
     const scores = await scoreCandidatesSemantically(query, candidates);
     return NextResponse.json({ success: true, model: "venue-embedding", scores });
   } catch (error) {
-    if (error instanceof MlRequestError) {
+    if (error instanceof RequestGuardError) {
       return NextResponse.json({ success: false, error: error.message }, { status: error.status });
     }
     if (error instanceof MlConfigurationError) {
