@@ -3,6 +3,12 @@ import { callMlWorker, classifyVibes } from "../../../src/lib/ml/huggingface";
 import { scoreCandidatesSemantically } from "../../../src/lib/ml/semantic-scoring";
 import { exceedsRequestRate, requestClientKey } from "../../../src/lib/server/request-guards";
 import { INTERNAL_DISCOVERY_HEADER } from "../../../src/lib/ml/discovery-routing";
+import {
+  buildMlMatch,
+  byRelevanceThenActivity,
+  liveQualityOf,
+  STRONG_MATCH_PERCENT,
+} from "../../../src/lib/ml/discovery-relevance";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -81,10 +87,6 @@ function normalizeCrossEncoderScore(score: number) {
   return 1 / (1 + Math.exp(-score));
 }
 
-// Below this the match is too weak to justify overwriting the venue's own
-// ranking label with a relevance claim.
-const STRONG_MATCH_PERCENT = 60;
-
 function matchLabel(percent: number, vibe?: string) {
   if (percent >= 90) return vibe ? `${percent}% ${vibe}` : `${percent}% match`;
   if (percent >= 78) return vibe ? `Strong ${vibe}` : "Strong match";
@@ -134,37 +136,25 @@ async function enhanceSearch(payload: DiscoveryPayload, query: string) {
 
   const enhanced = venues
     .map((venue) => {
-      const semantic = semanticMap.get(venue.id) || 0;
-      const rerank = rerankerMap.get(venue.id);
-      const liveQuality = Math.max(0, Math.min(1, Number(venue.score || 0) / 100));
-      const combined = rerank === undefined
-        ? semantic * 0.72 + liveQuality * 0.28
-        : semantic * 0.42 + rerank * 0.38 + liveQuality * 0.2;
-      // No floor. A weak match must be allowed to read as weak.
-      const percent = Math.round(Math.max(0, Math.min(99, combined * 100)));
-      const strong = percent >= STRONG_MATCH_PERCENT;
+      const mlMatch = buildMlMatch({
+        semantic: semanticMap.get(venue.id) || 0,
+        rerank: rerankerMap.get(venue.id),
+        liveQuality: liveQualityOf(venue.score),
+      }, topVibe);
+      const strong = mlMatch.percent >= STRONG_MATCH_PERCENT;
 
       // `score`, `confidence` and `heat` are canonical activity truth and are
       // deliberately passed through untouched. Search relevance decides the
       // order results appear in, never how busy a venue is reported to be.
       return {
         ...venue,
-        label: strong ? matchLabel(percent, topVibe) : venue.label,
-        reason: strong ? matchReason(venue, percent, topVibe) : venue.reason,
+        label: strong ? matchLabel(mlMatch.percent, topVibe) : venue.label,
+        reason: strong ? matchReason(venue, mlMatch.percent, topVibe) : venue.reason,
         interestTags: Array.from(new Set([...(venue.interestTags || []), ...(topVibe ? [topVibe] : [])])),
-        mlMatch: {
-          percent,
-          semantic: Number(semantic.toFixed(3)),
-          reranked: rerank === undefined ? null : Number(rerank.toFixed(3)),
-          vibe: topVibe || null,
-        },
+        mlMatch,
       };
     })
-    .sort((left, right) => {
-      const leftMatch = Number((left.mlMatch as { percent: number }).percent);
-      const rightMatch = Number((right.mlMatch as { percent: number }).percent);
-      return rightMatch - leftMatch || Number(right.score) - Number(left.score);
-    });
+    .sort(byRelevanceThenActivity);
 
   return {
     ...payload,
