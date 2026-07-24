@@ -1,0 +1,50 @@
+name: Buzz calibration
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: buzz-calibration
+  cancel-in-progress: false
+
+jobs:
+  calibrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Train and store the candidate Buzz calibration model
+        env:
+          BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
+          # Training sits on the ground-truth trust boundary, not the cron one.
+          BUZZ_GROUND_TRUTH_SECRET: ${{ secrets.BUZZ_GROUND_TRUTH_SECRET }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${BASE_URL:?Add BUZZ_PRODUCTION_URL as a GitHub Actions secret}"
+          : "${BUZZ_GROUND_TRUTH_SECRET:?Add BUZZ_GROUND_TRUTH_SECRET as a GitHub Actions secret}"
+          BASE_URL="${BASE_URL%/}"
+          curl --silent --show-error --fail-with-body --retry 2 --max-time 55 \
+            -H "Authorization: Bearer ${BUZZ_GROUND_TRUTH_SECRET}" \
+            "${BASE_URL}/api/buzz/calibrate" \
+            | tee buzz-calibration.json
+
+          node -e '
+            const fs = require("node:fs");
+            const payload = JSON.parse(fs.readFileSync("buzz-calibration.json", "utf8"));
+            const fail = (message) => { console.error(message, payload); process.exit(1); };
+            if (payload.success !== true) fail("training did not succeed");
+            if (payload.version !== "buzz-ml-v1") fail("unexpected model version");
+            if (typeof payload.trainingRows !== "number") fail("missing trainingRows");
+            if (!payload.truthNote) fail("missing truthNote");
+            console.log(JSON.stringify({
+              trainingRows: payload.trainingRows,
+              skippedWithoutFrozenPrediction: payload.skippedWithoutFrozenPrediction,
+              meanAbsoluteError: payload.meanAbsoluteError,
+              ready: payload.ready,
+            }, null, 2));
+          '
