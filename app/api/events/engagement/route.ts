@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getRequestUser } from "../../../../src/lib/server-auth";
+import {
+  guardErrorResponse,
+  readBoundedJson,
+  RequestGuardError,
+} from "../../../../src/lib/server/request-guards";
 
 export const dynamic = "force-dynamic";
 
@@ -61,8 +66,8 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ error: "Sign in to update your event plans." }, { status: 401 });
 
   try {
-    const body = (await request.json()) as { eventId?: string; status?: string | null };
-    const eventId = body.eventId?.trim();
+    const body = await readBoundedJson(request, 4_096);
+    const eventId = typeof body.eventId === "string" ? body.eventId.trim().slice(0, 128) : "";
     if (!eventId) return NextResponse.json({ error: "eventId is required" }, { status: 400 });
     if (body.status !== null && body.status !== "interested" && body.status !== "going") {
       return NextResponse.json({ error: "Invalid event status" }, { status: 400 });
@@ -90,6 +95,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json(await getSummary(eventId, user.id));
   } catch (error) {
+    if (error instanceof RequestGuardError) return guardErrorResponse(error);
     console.error("event engagement POST failed", error);
     return NextResponse.json({ error: "Could not save your event plans." }, { status: 500 });
   }

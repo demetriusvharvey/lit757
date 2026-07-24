@@ -8,6 +8,6 @@ declare module "mapbox-gl" {
   }
 
   export interface Map {
-    loadImage(url: string): Promise<{ data: any }>;
+    loadImage(url: string): Promise<{ data: ImageBitmap | ImageData }>;
   }
 }

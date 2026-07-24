@@ -155,7 +155,11 @@ export default function LiveClient() {
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [groupOpen, setGroupOpen] = useState(false);
 
-  useEffect(() => { try { setWatches(JSON.parse(localStorage.getItem(WATCH_KEY) || "[]")); } catch { setWatches([]); } }, []);
+  useEffect(() => {
+    // Watches live in browser storage until account sync is enabled.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    try { setWatches(JSON.parse(localStorage.getItem(WATCH_KEY) || "[]")); } catch { setWatches([]); }
+  }, []);
   const persistWatches = useCallback((next: Watch[]) => { setWatches(next); try { localStorage.setItem(WATCH_KEY, JSON.stringify(next)); } catch {} }, []);
   const load = useCallback(async () => {
     setLoading(true);

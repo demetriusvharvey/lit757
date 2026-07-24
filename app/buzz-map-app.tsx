@@ -50,7 +50,6 @@ import {
   createReferralId,
   referralContext,
   trackConversion,
-  type ConversionEventName,
 } from "../src/lib/conversion-analytics";
 import {
   contextualVibe,
@@ -250,6 +249,9 @@ export default function BuzzMapApp() {
   useEffect(() => {
     document.body.classList.add("buzz-map-active");
     try {
+      // Browser storage is hydrated after SSR so the server and first client
+      // render remain deterministic.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setFavoriteIds(new Set(JSON.parse(localStorage.getItem(FAVORITES_KEY) || "[]") as string[]));
       const alerts = JSON.parse(localStorage.getItem(VENUE_ALERTS_KEY) || "[]") as Array<{ venueId: string }>;
       setWatchedIds(new Set(alerts.map(item => item.venueId)));
@@ -334,7 +336,11 @@ export default function BuzzMapApp() {
     }, session?.access_token);
     if (validVenue(venue)) mapRef.current?.easeTo({ center: coordinates(venue), zoom: Math.max(13.2, mapRef.current.getZoom()), duration: 500 });
   }, [venues, active, session?.access_token]);
-  selectedRef.current = selectVenue;
+  useEffect(() => {
+    // Mapbox owns the long-lived event listener; update only its callback
+    // pointer when React state changes.
+    selectedRef.current = selectVenue;
+  }, [selectVenue]);
 
   useEffect(() => {
     if (deepLinkHandledRef.current || !venues.length) return;
@@ -353,6 +359,9 @@ export default function BuzzMapApp() {
         metadata: { entry: "shared-link" },
       }, session?.access_token);
     }
+    // URL state intentionally initializes the selected venue after discovery
+    // data arrives.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     selectVenue(venueId);
     if (params.get("invite") === "1") {
       setShareMessage("This place is ready to share. Tap Invite the Crew to open your phone’s share sheet.");
@@ -361,6 +370,9 @@ export default function BuzzMapApp() {
 
   useEffect(() => {
     if (!selected) {
+      // Details are scoped to the selected venue and must not leak to the
+      // next panel while its request is in flight.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDetail(null);
       return;
     }
@@ -370,7 +382,7 @@ export default function BuzzMapApp() {
       .then(payload => { if (!cancelled && payload?.venue) setDetail(payload.venue as VenueDetail); })
       .catch(() => undefined);
     return () => { cancelled = true; };
-  }, [selected?.id]);
+  }, [selected]);
 
   useEffect(() => {
     const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
@@ -412,7 +424,7 @@ export default function BuzzMapApp() {
       },
     } as mapboxgl.GeoJSONSourceSpecification);
 
-    const buzzColor: any = [
+    const buzzColor: mapboxgl.ExpressionSpecification = [
       "interpolate", ["linear"], ["get", "score"],
       0, "#64748b",
       45, "#34d399",
@@ -588,7 +600,7 @@ export default function BuzzMapApp() {
     (mapRef.current?.getSource("buzz-map-clusters") as mapboxgl.GeoJSONSource | undefined)?.setData(collection);
   }, [filtered, selected?.id]);
 
-  async function useMyLocation() {
+  async function requestMyLocation() {
     try {
       const position = await getPosition();
       const latitude = position.coords.latitude;
@@ -780,7 +792,7 @@ export default function BuzzMapApp() {
         </button>
         <label className="buzz-map-search"><Search /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search places, events, or neighborhoods" />{query && <button type="button" onClick={() => setQuery("")} aria-label="Clear search"><X /></button>}</label>
         <div className="buzz-map-header-actions">
-          <button type="button" onClick={() => void useMyLocation()}><LocateFixed /><span>Near me</span></button>
+          <button type="button" onClick={() => void requestMyLocation()}><LocateFixed /><span>Near me</span></button>
           <button type="button" aria-label="Enable Buzz alerts" onClick={() => void enableNotifications()}><Bell /></button>
           <button type="button" aria-label="Profile"><UserRound /></button>
         </div>
@@ -817,7 +829,7 @@ export default function BuzzMapApp() {
         <section className="buzz-map-stage" aria-label="Buzz activity map">
           <div ref={mapEl} className="buzz-map-canvas" />
           <div className="buzz-map-toolbar">
-            <button type="button" onClick={() => void useMyLocation()}><LocateFixed /> Near me</button>
+            <button type="button" onClick={() => void requestMyLocation()}><LocateFixed /> Near me</button>
             <button type="button" onClick={() => void searchThisMap()}><Search /> Search this map</button>
           </div>
           <div className="buzz-map-mode">

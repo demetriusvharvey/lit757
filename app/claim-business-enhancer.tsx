@@ -23,7 +23,6 @@ function getVenueName(sheet: Element) {
 }
 
 export default function ClaimBusinessEnhancer() {
-  const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(false);
   const [venueName, setVenueName] = useState("");
   const [step, setStep] = useState(1);
@@ -36,7 +35,6 @@ export default function ClaimBusinessEnhancer() {
   const [submitted, setSubmitted] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
     const install = () => {
       document.querySelectorAll(".utility-sheet").forEach((sheet) => {
         const title = getVenueName(sheet);
@@ -100,7 +98,7 @@ export default function ClaimBusinessEnhancer() {
     setStep(3);
   }
 
-  if (!mounted || !open) return null;
+  if (!open) return null;
 
   return createPortal(
     <div className="claim-business-backdrop" onClick={close}>

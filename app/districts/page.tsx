@@ -9,7 +9,6 @@ import {
   ArrowLeft,
   CalendarDays,
   CarFront,
-  Clock3,
   Flame,
   MapPin,
   Navigation,
@@ -113,7 +112,8 @@ export default function DistrictsPage() {
   const districtsRef = useRef<District[]>([]);
 
   async function load(quiet = false) {
-    quiet ? setRefreshing(true) : setLoading(true);
+    if (quiet) setRefreshing(true);
+    else setLoading(true);
     try {
       const response = await fetch("/api/districts", { cache: "no-store" });
       const result = await response.json() as DistrictPayload;
@@ -130,6 +130,9 @@ export default function DistrictsPage() {
   }
 
   useEffect(() => {
+    // Initial data loading is an intentional client-side synchronization with
+    // the live district API.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
     const interval = window.setInterval(() => void load(true), 5 * 60 * 1000);
     return () => window.clearInterval(interval);
@@ -258,10 +261,14 @@ export default function DistrictsPage() {
 
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get("district");
-    if (id) setSelectedId(id);
+    if (id) {
+      // The query string is the external source of truth for deep links.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelectedId(id);
+    }
   }, []);
 
-  const districts = payload?.districts || [];
+  const districts = useMemo(() => payload?.districts || [], [payload?.districts]);
   const selected = useMemo(() => districts.find((district) => district.id === selectedId) || districts[0] || null, [districts, selectedId]);
 
   return (

@@ -1,4 +1,4 @@
-import { buildUnifiedActivity, predictArrivalActivity, type ActivityState, type ActivityTrend, type ConfidenceLevel, type IntentId, type UnifiedActivity } from "./product-intelligence";
+import { buildUnifiedActivity, predictArrivalActivity, type ActivityTrend, type ConfidenceLevel, type IntentId, type UnifiedActivity } from "./product-intelligence";
 
 export type RawVenue = {
   id: string;
@@ -68,7 +68,6 @@ export type CityPulse = {
 
 export type DynamicCollection = { id: string; label: string; description: string; venueIds: string[] };
 
-const clamp = (value: number, min = 0, max = 100) => Math.min(max, Math.max(min, value));
 const minutesBetween = (a: Date, b: Date) => Math.round((a.getTime() - b.getTime()) / 60_000);
 
 export function defaultTtlMinutes(family: SignalProvenance["family"]) {

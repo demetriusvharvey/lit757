@@ -45,7 +45,8 @@ do $$ begin
   create policy "members read own profile" on public.member_profiles for select using (auth.uid() = user_id);
 exception when duplicate_object then null; end $$;
 do $$ begin
-  create policy "members update own profile" on public.member_profiles for update using (auth.uid() = user_id);
+  create policy "members update own profile" on public.member_profiles
+    for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
 exception when duplicate_object then null; end $$;
 do $$ begin
   create policy "public reads event momentum" on public.event_momentum for select using (true);

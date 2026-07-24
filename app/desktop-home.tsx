@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import "./desktop-home.css";
 import { Bell, CalendarDays, ChevronRight, Compass, Heart, MapPin, Music2, Search, ShoppingBag, TreePine, Utensils, Wine, X } from "lucide-react";
@@ -20,9 +21,8 @@ export default function DesktopHome(){
   const [searchOpen,setSearchOpen]=useState(false);
   const [selected,setSelected]=useState<Venue|null>(null);
   const mapEl=useRef<HTMLDivElement|null>(null);
-  const mapRef=useRef<any>(null);
-  const mapboxRef=useRef<any>(null);
-  const markersRef=useRef<any[]>([]);
+  const mapRef=useRef<mapboxgl.Map|null>(null);
+  const markersRef=useRef<mapboxgl.Marker[]>([]);
 
   useEffect(()=>{fetch("/api/discover?city=All%20757&mode=all",{cache:"no-store"}).then(r=>r.json()).then((p:Payload)=>setVenues(p.venues||p.picks||[])).catch(()=>undefined);},[]);
   const filtered=useMemo(()=>venues.filter(v=>(active==="All"||category(v)===active)&&(!query.trim()||`${v.name} ${v.city||""} ${v.kind||""} ${v.type||""} ${v.event?.name||""}`.toLowerCase().includes(query.toLowerCase()))).sort((a,b)=>score(b)-score(a)),[venues,active,query]);
@@ -30,26 +30,22 @@ export default function DesktopHome(){
 
   useEffect(()=>{
     let cancelled=false;
-    let map:any=null;
+    let map:mapboxgl.Map|null=null;
     (async()=>{
       const token=process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
       if(!mapEl.current||!token||mapRef.current)return;
-      const imported=await import("mapbox-gl");
       if(cancelled||!mapEl.current)return;
-      const mapboxgl=(imported as any).default||imported;
-      mapboxRef.current=mapboxgl;
       mapboxgl.accessToken=token;
       map=new mapboxgl.Map({container:mapEl.current,style:"mapbox://styles/mapbox/dark-v11",center:[-76.17,36.88],zoom:9,minZoom:4,maxZoom:17});
       map.addControl(new mapboxgl.NavigationControl({showCompass:false}),"top-right");
       mapRef.current=map;
     })().catch(()=>undefined);
-    return()=>{cancelled=true;markersRef.current.forEach(marker=>marker.remove());markersRef.current=[];map?.remove();mapRef.current=null;mapboxRef.current=null;};
+    return()=>{cancelled=true;markersRef.current.forEach(marker=>marker.remove());markersRef.current=[];map?.remove();mapRef.current=null;};
   },[]);
 
   useEffect(()=>{
     const map=mapRef.current;
-    const mapboxgl=mapboxRef.current;
-    if(!map||!mapboxgl)return;
+    if(!map)return;
     markersRef.current.forEach(marker=>marker.remove());
     markersRef.current=[];
     filtered.filter(valid).forEach(v=>{

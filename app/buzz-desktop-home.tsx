@@ -156,6 +156,9 @@ export default function BuzzDesktopHome() {
 
   useEffect(() => {
     try {
+      // Browser storage is deliberately hydrated after SSR to avoid a
+      // server/client markup mismatch.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setFavoriteIds(new Set(JSON.parse(localStorage.getItem(FAVORITES_KEY) || "[]") as string[]));
     } catch {
       setFavoriteIds(new Set());
@@ -184,6 +187,8 @@ export default function BuzzDesktopHome() {
 
   useEffect(() => {
     if (!searchOpen || query.trim().length < 2) {
+      // Search results are transient state scoped to an open, valid query.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLocationResults([]);
       setSearchingLocations(false);
       return;
@@ -218,7 +223,11 @@ export default function BuzzDesktopHome() {
     setSelected(venue);
     if (valid(venue)) mapRef.current?.easeTo({ center: coords(venue), zoom: Math.max(mapRef.current.getZoom(), 13.5), duration: 520 });
   }, [venues]);
-  selectedRef.current = selectVenue;
+  useEffect(() => {
+    // Mapbox installs its click handler once; the ref keeps that imperative
+    // handler pointed at the latest React selection callback.
+    selectedRef.current = selectVenue;
+  }, [selectVenue]);
 
   useEffect(() => {
     const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
@@ -247,7 +256,7 @@ export default function BuzzDesktopHome() {
     if (!map || !mapReady || map.getSource("buzz-desktop-venues")) return;
     const empty: GeoJSON.FeatureCollection<GeoJSON.Point> = { type: "FeatureCollection", features: [] };
     map.addSource("buzz-desktop-venues", { type: "geojson", data: empty, cluster: true, clusterMaxZoom: 12.5, clusterRadius: 68 });
-    const heatColor: any = ["interpolate", ["linear"], ["get", "score"], 0, "#667085", 45, "#3DDC97", 60, "#C6E84B", 72, "#FFD54A", 82, "#FF9F43", 90, "#FF5C5C"];
+    const heatColor: mapboxgl.ExpressionSpecification = ["interpolate", ["linear"], ["get", "score"], 0, "#667085", 45, "#3DDC97", 60, "#C6E84B", 72, "#FFD54A", 82, "#FF9F43", 90, "#FF5C5C"];
     map.addLayer({ id: "buzz-desktop-clusters", type: "circle", source: "buzz-desktop-venues", filter: ["has", "point_count"], paint: { "circle-color": ["step", ["get", "point_count"], "#FFD54A", 18, "#FF9F43", 45, "#FF5C5C"], "circle-radius": ["step", ["get", "point_count"], 18, 18, 22, 45, 27], "circle-stroke-width": 2, "circle-stroke-color": "#fff" } });
     map.addLayer({ id: "buzz-desktop-cluster-count", type: "symbol", source: "buzz-desktop-venues", filter: ["has", "point_count"], layout: { "text-field": ["get", "point_count_abbreviated"], "text-size": 11 }, paint: { "text-color": "#101114" } });
     map.addLayer({ id: "buzz-desktop-halo", type: "circle", source: "buzz-desktop-venues", filter: ["!", ["has", "point_count"]], paint: { "circle-radius": ["case", ["==", ["get", "selected"], true], 22, ["interpolate", ["linear"], ["get", "score"], 40, 9, 100, 17]], "circle-color": heatColor, "circle-opacity": ["case", ["==", ["get", "selected"], true], .34, .16], "circle-blur": .8 } });
@@ -298,7 +307,8 @@ export default function BuzzDesktopHome() {
     event.stopPropagation();
     setFavoriteIds(current => {
       const next = new Set(current);
-      next.has(venue.id) ? next.delete(venue.id) : next.add(venue.id);
+      if (next.has(venue.id)) next.delete(venue.id);
+      else next.add(venue.id);
       localStorage.setItem(FAVORITES_KEY, JSON.stringify([...next]));
       return next;
     });

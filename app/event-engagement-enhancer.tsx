@@ -86,10 +86,7 @@ export default function EventEngagementEnhancer() {
   }, []);
 
   const load = useCallback(async () => {
-    if (!selectedEvent) {
-      setEngagement(null);
-      return;
-    }
+    if (!selectedEvent) return;
     const { data } = await supabase.auth.getSession();
     const headers: HeadersInit = {};
     if (data.session?.access_token) headers.Authorization = `Bearer ${data.session.access_token}`;
@@ -101,8 +98,14 @@ export default function EventEngagementEnhancer() {
   }, [selectedEvent]);
 
   useEffect(() => {
+    // Selection drives a fresh remote engagement snapshot.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
+
+  // Engagement is cached between selections, but it is only valid while the
+  // event that produced it remains selected.
+  const visibleEngagement = selectedEvent ? engagement : null;
 
   async function update(status: "interested" | "going") {
     if (!selectedEvent) return;
@@ -114,7 +117,7 @@ export default function EventEngagementEnhancer() {
 
     setBusy(true);
     setMessage("");
-    const nextStatus = engagement?.mine === status ? null : status;
+    const nextStatus = visibleEngagement?.mine === status ? null : status;
     try {
       const response = await fetch("/api/events/engagement", {
         method: "POST",
@@ -137,8 +140,8 @@ export default function EventEngagementEnhancer() {
 
   if (!mount || !selectedEvent) return null;
 
-  const salesLabel = ticketLabel(engagement?.ticketing || null) || selectedEvent.ticketStatus || null;
-  const ticketing = engagement?.ticketing;
+  const salesLabel = ticketLabel(visibleEngagement?.ticketing || null) || selectedEvent.ticketStatus || null;
+  const ticketing = visibleEngagement?.ticketing;
   const percentage = ticketing?.verified && ticketing.capacity != null && ticketing.capacity > 0 && ticketing.ticketsSold != null
     ? Math.min(100, Math.round((ticketing.ticketsSold / ticketing.capacity) * 100))
     : null;
@@ -161,13 +164,13 @@ export default function EventEngagementEnhancer() {
         </div>
       )}
       <div className="mt-3 grid grid-cols-2 gap-2">
-        <button type="button" disabled={busy} onClick={() => void update("interested")} className={`flex h-11 items-center justify-center gap-2 rounded-full text-[11px] font-semibold transition disabled:opacity-50 ${engagement?.mine === "interested" ? "bg-[#171716] text-white" : "border border-black/[0.09] bg-white text-black/68"}`}>
-          {engagement?.mine === "interested" ? <Check size={14} /> : <Users size={14} />}
-          Interested · {engagement?.interested || 0}
+        <button type="button" disabled={busy} onClick={() => void update("interested")} className={`flex h-11 items-center justify-center gap-2 rounded-full text-[11px] font-semibold transition disabled:opacity-50 ${visibleEngagement?.mine === "interested" ? "bg-[#171716] text-white" : "border border-black/[0.09] bg-white text-black/68"}`}>
+          {visibleEngagement?.mine === "interested" ? <Check size={14} /> : <Users size={14} />}
+          Interested · {visibleEngagement?.interested || 0}
         </button>
-        <button type="button" disabled={busy} onClick={() => void update("going")} className={`flex h-11 items-center justify-center gap-2 rounded-full text-[11px] font-semibold transition disabled:opacity-50 ${engagement?.mine === "going" ? "bg-[#ff5c35] text-white" : "border border-[#ffb49f] bg-[#fff0e8] text-[#ba3e24]"}`}>
-          {engagement?.mine === "going" && <Check size={14} />}
-          Going · {engagement?.going || 0}
+        <button type="button" disabled={busy} onClick={() => void update("going")} className={`flex h-11 items-center justify-center gap-2 rounded-full text-[11px] font-semibold transition disabled:opacity-50 ${visibleEngagement?.mine === "going" ? "bg-[#ff5c35] text-white" : "border border-[#ffb49f] bg-[#fff0e8] text-[#ba3e24]"}`}>
+          {visibleEngagement?.mine === "going" && <Check size={14} />}
+          Going · {visibleEngagement?.going || 0}
         </button>
       </div>
       {message && <p className="mt-2 text-center text-[10px] text-black/44">{message}</p>}

@@ -27,6 +27,8 @@ export default function PartnerPulsePage() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    // The partner handoff URL pre-fills the venue after client hydration.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setVenueId(params.get("venueId") || "");
     setVenueName(params.get("venue") || "Your venue");
   }, []);
