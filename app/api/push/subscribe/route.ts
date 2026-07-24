@@ -1,4 +1,5 @@
 import { getSupabaseAdmin, jsonError, requireAuthenticatedUser } from "@/lib/supabase-admin";
+import { isResourceOwner } from "@/src/lib/server/ownership";
 import { guardErrorResponse, readBoundedJson } from "@/src/lib/server/request-guards";
 
 type PushBody = {
@@ -27,7 +28,7 @@ export async function POST(request: Request) {
       .eq("endpoint", body.endpoint)
       .maybeSingle();
     if (existingError) throw existingError;
-    if (existing && existing.user_id !== user.id) {
+    if (existing && !isResourceOwner(existing.user_id, user.id)) {
       return Response.json({ error: "Push endpoint already belongs to another account" }, { status: 409 });
     }
 

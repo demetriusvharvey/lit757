@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabaseAdminIfConfigured } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
 
@@ -96,14 +96,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false, error: "Invalid truth mode" }, { status: 400 });
   }
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) {
+  const db = getSupabaseAdminIfConfigured();
+  if (!db) {
     console.info("Buzz analytics event", { eventName, venueId, anonymousId, referralId, persisted: false });
     return NextResponse.json({ success: true, persisted: false }, { status: 202 });
   }
 
-  const db = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
   let userId: string | null = null;
   const authorization = request.headers.get("authorization");
   if (authorization?.startsWith("Bearer ")) {

@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "test": "node scripts/run-tests.mjs",
+    "test:e2e": "playwright test",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "security:audit": "npm audit --audit-level=high",
@@ -25,6 +26,8 @@
     "web-push": "^3.6.7"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "^4",
     "@types/mapbox-gl": "^3.4.1",
     "@types/node": "^20",

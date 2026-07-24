@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import {
   exceedsRequestRate,
   requestClientKey,
@@ -8,11 +8,7 @@ import { generateShortOpenAiText } from "../../../src/lib/server/openai-chat";
 
 export const dynamic = "force-dynamic";
 
-const db = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  { auth: { persistSession: false, autoRefreshToken: false } },
-);
+const db = getSupabaseAdmin();
 
 type Vibe = "lit" | "decent" | "dead" | "line_crazy";
 
