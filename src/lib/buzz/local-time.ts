@@ -42,3 +42,26 @@ export function localCalendarIndices(date: Date) {
     month: Math.min(11, Math.max(0, month - 1)),
   };
 }
+
+/**
+ * A nightlife night runs past midnight, so 2am Saturday belongs to Friday
+ * night. Anything before this local hour is attributed to the previous day.
+ */
+export const NIGHT_ROLLOVER_HOUR = 6;
+
+const dayFormatter = new Intl.DateTimeFormat("en-CA", {
+  timeZone: BUZZ_TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+/**
+ * Stable identifier for the local night an instant belongs to, as YYYY-MM-DD.
+ * Used to group observations so a held-out split never puts two observations
+ * from the same night on opposite sides of the divide.
+ */
+export function localNightKey(date: Date) {
+  const shifted = new Date(date.getTime() - NIGHT_ROLLOVER_HOUR * 3_600_000);
+  return dayFormatter.format(shifted);
+}
