@@ -122,7 +122,9 @@ test("responsive Buzz discovery supports filtering and venue details", async (
   await buzzingFilter.click();
   await expect(buzzingFilter).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".buzz-map-list-scroll article")).toHaveCount(1);
-  await expect(page.getByText("Neon Sound", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", {
+    name: /Open Neon Sound details/,
+  })).toBeVisible();
   await buzzingFilter.click();
   await expect(page.locator(".buzz-map-list-scroll article")).toHaveCount(2);
 
