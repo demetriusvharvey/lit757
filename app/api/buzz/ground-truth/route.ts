@@ -153,7 +153,7 @@ export async function POST(request: Request) {
 
   const [{ data: snapshot }, { data: venue, error: venueError }] = await Promise.all([
     db.from("buzz_score_snapshots")
-      .select("score,label,score_mode,confidence,version,computed_at")
+      .select("score,label,score_mode,confidence,version,computed_at,evidence_age_minutes,source_families,factors")
       .eq("venue_id", venueId)
       .maybeSingle(),
     db.from("venues")
@@ -174,6 +174,13 @@ export async function POST(request: Request) {
     predictedConfidence: snapshot?.confidence || null,
     predictedVersion: snapshot?.version || null,
     predictedAt: snapshot?.computed_at || null,
+    // Frozen feature values. Offline ablation subtracts a family's points from
+    // this record to ask what the score would have been without that signal.
+    // Without freezing them here the question could only be answered by
+    // recomputing, which would leak the observation into its own input.
+    predictedEvidenceAgeMinutes: snapshot?.evidence_age_minutes ?? null,
+    predictedSourceFamilies: Array.isArray(snapshot?.source_families) ? snapshot.source_families : [],
+    predictedFactors: Array.isArray(snapshot?.factors) ? snapshot.factors : [],
   };
 
   const { data, error } = await db.from("buzz_ground_truth").insert({

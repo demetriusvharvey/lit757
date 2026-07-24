@@ -47,6 +47,20 @@ export type FrozenPrediction = {
   forecastHorizonMinutes?: number;
   /** Distinct signal families that backed the prediction. */
   sourceFamilies?: string[];
+  /**
+   * Per-family point contributions as published. Frozen so ablation can ask
+   * what the score would have been without a given signal, using arithmetic on
+   * this record rather than a recomputation that would see the outcome.
+   */
+  factors?: FrozenFactor[];
+};
+
+/** One signal family's contribution to a published score. */
+export type FrozenFactor = {
+  family: string;
+  label?: string;
+  points: number;
+  source?: string;
 };
 
 export type Observation = {
@@ -81,6 +95,8 @@ export type EvaluatedSample = {
   calibrationVersion: string;
   forecastHorizonMinutes: number | null;
   sourceFamilyCount: number;
+  /** Families that contributed points to this prediction. */
+  contributingFamilies: string[];
 };
 
 export function scoreToBand(score: number): ActivityBand {
@@ -164,6 +180,11 @@ export function evaluateSample(
       ? Number(prediction.forecastHorizonMinutes)
       : null,
     sourceFamilyCount: new Set(prediction.sourceFamilies || []).size,
+    contributingFamilies: [...new Set(
+      (prediction.factors || [])
+        .filter(factor => Number.isFinite(Number(factor.points)) && Number(factor.points) !== 0)
+        .map(factor => factor.family),
+    )],
   };
 }
 
