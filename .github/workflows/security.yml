@@ -26,7 +26,22 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npm run lint
+      - name: Lint changed files
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          mapfile -d '' files < <(
+            git diff --name-only --diff-filter=ACMR -z "${BASE_SHA}" "${GITHUB_SHA}" -- \
+              '*.js' '*.jsx' '*.mjs' '*.cjs' '*.ts' '*.tsx'
+          )
+          if ((${#files[@]})); then
+            npx eslint "${files[@]}"
+          else
+            echo "No changed JavaScript or TypeScript files to lint."
+          fi
       - run: npm run typecheck
       - run: npm run build
         env:

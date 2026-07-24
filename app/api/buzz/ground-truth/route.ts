@@ -1,4 +1,4 @@
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { recomputeBuzzScore } from "../../../../src/lib/buzz/repository";
@@ -116,9 +116,10 @@ export async function POST(request: Request) {
   }
 
   const suppliedIdempotencyKey = request.headers.get("idempotency-key")?.trim();
-  const idempotencyKey = suppliedIdempotencyKey && /^[A-Za-z0-9._:-]{16,128}$/.test(suppliedIdempotencyKey)
-    ? suppliedIdempotencyKey
-    : createHash("sha256").update(rawBody).digest("hex");
+  if (!suppliedIdempotencyKey || !/^[A-Za-z0-9._:-]{16,128}$/.test(suppliedIdempotencyKey)) {
+    return response({ success: false, error: "A valid Idempotency-Key is required" }, 400, requestId);
+  }
+  const idempotencyKey = suppliedIdempotencyKey;
   if (isReplay(idempotencyKey, now)) return response({ success: false, error: "Duplicate observation" }, 409, requestId);
 
   let body: Record<string, unknown>;
