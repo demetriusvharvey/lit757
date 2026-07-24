@@ -102,6 +102,8 @@ Important directories:
 | `src/lib/integrations/` | Weather, transit, coastal, and public-context adapters |
 | `src/lib/server/` | Shared request size, secret, client-key, and rate-limit guards |
 | `app/hooks/use-buzz-mapbox.ts` | Mapbox lifecycle, layers, logo pins, and responsive map synchronization |
+| `app/buzz-map-presentation.ts` | Shared logo zoom thresholds and hottest-venue selection |
+| `app/buzz-map-logo-sprite.ts` | Activity-ring logo sprites with deterministic initials fallback |
 | `app/components/buzz-venue-list.tsx` | One venue-list implementation shared by desktop and mobile layouts |
 | `lib/supabase-admin.ts` | Singleton service-role client and authenticated-user boundary |
 | `instrumentation.ts` | Core environment validation before a Node server becomes ready |
@@ -128,6 +130,11 @@ All App Router endpoints obtain service-role access through
 At Node server startup, instrumentation verifies that the Supabase URL, anon
 key, service-role key, and Mapbox token exist and that the Supabase URL is
 valid. Optional provider keys remain lazy and non-blocking.
+
+The responsive map uses the same presentation rules on desktop and mobile:
+heat-only at city zoom, collision-aware hottest-venue logos at medium zoom, and
+the wider logo set at close zoom. A provider image failure becomes an initials
+logo with the same Buzz activity ring instead of an anonymous map bubble.
 
 ## Environment variables
 
