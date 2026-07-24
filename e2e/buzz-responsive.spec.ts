@@ -104,15 +104,26 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator(".buzz-map-app")).toBeVisible();
 });
 
-test("responsive Buzz discovery supports filtering and venue details", async ({
-  page,
-}) => {
+test("responsive Buzz discovery supports filtering and venue details", async (
+  { page },
+  testInfo,
+) => {
+  const isMobile = testInfo.project.name === "mobile-chromium";
+
   await expect(page.getByRole("button", { name: /BUZZ/ })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Places buzzing now" })).toBeVisible();
+  if (isMobile) {
+    await expect(page.getByRole("button", { name: "Top Buzz" })).toBeVisible();
+  } else {
+    await expect(page.getByRole("heading", { name: "Places buzzing now" })).toBeVisible();
+  }
   await expect(page.locator(".buzz-map-list-scroll article")).toHaveCount(2);
 
-  await page.getByRole("button", { name: "Food", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Food", exact: true })).toBeVisible();
+  const foodFilter = page.getByRole("button", { name: "Food", exact: true });
+  await foodFilter.click();
+  await expect(foodFilter).toHaveAttribute("aria-pressed", "true");
+  if (!isMobile) {
+    await expect(page.getByRole("heading", { name: "Food", exact: true })).toBeVisible();
+  }
   await expect(page.locator(".buzz-map-list-scroll article")).toHaveCount(1);
 
   await page.locator(".buzz-map-list-scroll article").first().click();
