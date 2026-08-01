@@ -11,9 +11,10 @@ export const VISIT_NEWPORT_NEWS_SOURCE = {
   kind: "tourism" as const,
   city: "Newport News",
   url: "https://www.visitnewportnews.com/event/rss/",
+  apiOrigin: "https://newportnewsva.simpleviewcms.com/",
   format: "simpleview-rss" as const,
   enabled: true,
-  coverageNote: "Official destination calendar via its public RSS feed and structured first-party event detail pages.",
+  coverageNote: "Official destination calendar via its public RSS feed, first-party Simpleview API, and event detail pages.",
 };
 
 const NAMED_ENTITIES: Record<string, string> = {
