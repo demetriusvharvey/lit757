@@ -2,12 +2,17 @@
 
 ## BestTime
 
-Use BestTime as the first broad foot-traffic provider, not as the sole source of truth.
+BestTime is currently unavailable because its free credits are exhausted. Its
+workflow path is manual-only so scheduled refreshes cannot create metered usage
+or repeatedly fail. Do not reactivate it without an explicit cost decision.
+
+If free coverage becomes available again, use BestTime as supporting broad
+foot-traffic evidence, never as the sole source of truth.
 
 - Start with 10 venues and inspect address matching manually.
 - Expand to a diverse 100-venue Hampton Roads cohort only after matching is clean.
 - Track `covered`, `forecast_only`, `no_data`, and `error` separately.
-- Refresh mapped venues during each clock hour.
+- Refresh mapped venues only while verified free coverage is available.
 - Treat live busyness as relative to that venue's own normal peak—not an absolute headcount.
 - Forecast-only data cannot produce `Heating Up` or `On Fire` by itself.
 - Store the external venue ID so future calls do not spend forecast-creation credits unnecessarily.

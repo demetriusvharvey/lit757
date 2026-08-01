@@ -28,7 +28,6 @@ jobs:
           BASE_URL="${BASE_URL%/}"
 
           for endpoint in \
-            "/api/buzz/refresh?provider=besttime&limit=25" \
             "/api/buzz/refresh?provider=ticketmaster&limit=100" \
             "/api/buzz/refresh?provider=predicthq&limit=10"
           do

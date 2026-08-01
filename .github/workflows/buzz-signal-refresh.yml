@@ -3,7 +3,6 @@ name: Buzz signal refresh
 on:
   schedule:
     - cron: "*/15 * * * *"
-    - cron: "7,37 * * * *"
     - cron: "19 * * * *"
   workflow_dispatch:
     inputs:
@@ -52,7 +51,9 @@ jobs:
             "${BASE_URL%/}/api/buzz/refresh?provider=first_party&limit=100"
 
   foot-traffic:
-    if: github.event_name == 'workflow_dispatch' && (inputs.tier == 'all' || inputs.tier == 'foot-traffic') || github.event.schedule == '7,37 * * * *'
+    # BestTime's free credits are exhausted. Keep this paid/metered provider
+    # manual-only so routine Buzz refreshes remain zero-cost.
+    if: github.event_name == 'workflow_dispatch' && (inputs.tier == 'all' || inputs.tier == 'foot-traffic')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
