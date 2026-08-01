@@ -7,5 +7,5 @@ test("institution registry includes official Chrysler and Mariners museum source
   assert.equal(sources.get("chrysler_museum_official")?.kind, "museum");
   assert.equal(sources.get("chrysler_museum_official")?.format, "tribe-api");
   assert.equal(sources.get("mariners_museum_official")?.kind, "museum");
-  assert.equal(sources.get("mariners_museum_official")?.format, "tribe-api");
+  assert.equal(sources.get("mariners_museum_official")?.format, "mariners-wp");
 });

@@ -16,7 +16,7 @@ const DETAIL_CONCURRENCY = 6;
 const DETAIL_LIMIT = 45;
 
 export type InstitutionKind = "university" | "arena" | "arts" | "museum" | "festival" | "attraction" | "tourism";
-export type InstitutionFormat = "localist-api" | "tribe-api" | "venue-html" | "jsonld-html" | "embedded-json" | "portsmouth-html";
+export type InstitutionFormat = "localist-api" | "tribe-api" | "venue-html" | "jsonld-html" | "embedded-json" | "portsmouth-html" | "mariners-wp";
 
 export type InstitutionCalendarSource = {
   id: string;
@@ -140,10 +140,13 @@ export const INSTITUTION_CALENDAR_SOURCES: InstitutionCalendarSource[] = [
     name: "The Mariners' Museum and Park Events",
     kind: "museum",
     city: "Newport News",
-    url: "https://www.marinersmuseum.org/events/",
-    format: "tribe-api",
+    url: "https://www.marinersmuseum.org/events-exhibits/",
+    format: "mariners-wp",
     enabled: true,
     venueName: "The Mariners' Museum and Park",
+    address: "100 Museum Drive, Newport News, VA 23606",
+    detailPathPrefix: "/event/",
+    coverageNote: "Official Mariners' Museum WordPress event collection and first-party detail pages.",
   },
   {
     id: "portsmouth_museums_official",
@@ -289,13 +292,13 @@ function currentEasternYear() {
   return Number(year) || new Date().getUTCFullYear();
 }
 
-function portsmouthClockMinutes(hour: string, minute: string | undefined, meridiem: string) {
+function twelveHourMinutes(hour: string, minute: string | undefined, meridiem: string) {
   let value = Number(hour) % 12;
   if (meridiem.toUpperCase() === "PM") value += 12;
   return value * 60 + Number(minute || 0);
 }
 
-function portsmouthLocalDateTime(year: number, month: number, day: number, minutes: number) {
+function easternLocalDateTime(year: number, month: number, day: number, minutes: number) {
   const parts = new Date(Date.UTC(year, month - 1, day, 0, minutes)).toISOString();
   const date = parts.slice(0, 10);
   const clock = parts.slice(11, 19);
@@ -307,11 +310,11 @@ function parsePortsmouthDateTimes(value: string, year: number) {
   const matches = [...value.matchAll(expression)];
   const primary = matches.find(match => match[6] && match[8]);
   const primaryStartMinutes = primary
-    ? portsmouthClockMinutes(primary[3], primary[4], primary[5])
+    ? twelveHourMinutes(primary[3], primary[4], primary[5])
     : null;
   let primaryDuration: number | null = null;
   if (primary && primaryStartMinutes !== null) {
-    let endMinutes = portsmouthClockMinutes(primary[6], primary[7], primary[8]);
+    let endMinutes = twelveHourMinutes(primary[6], primary[7], primary[8]);
     if (endMinutes <= primaryStartMinutes) endMinutes += 24 * 60;
     primaryDuration = endMinutes - primaryStartMinutes;
   }
@@ -319,17 +322,17 @@ function parsePortsmouthDateTimes(value: string, year: number) {
   const parsed = matches.flatMap(match => {
     const month = Number(MONTH_NUMBERS[match[1].toLowerCase()]);
     const day = Number(match[2]);
-    const startMinutes = portsmouthClockMinutes(match[3], match[4], match[5]);
-    const start = portsmouthLocalDateTime(year, month, day, startMinutes);
+    const startMinutes = twelveHourMinutes(match[3], match[4], match[5]);
+    const start = easternLocalDateTime(year, month, day, startMinutes);
     let duration = primaryDuration;
     if (match[6] && match[8]) {
-      let endMinutes = portsmouthClockMinutes(match[6], match[7], match[8]);
+      let endMinutes = twelveHourMinutes(match[6], match[7], match[8]);
       if (endMinutes <= startMinutes) endMinutes += 24 * 60;
       duration = endMinutes - startMinutes;
     }
     return [{
       start,
-      end: duration === null ? null : portsmouthLocalDateTime(year, month, day, startMinutes + duration),
+      end: duration === null ? null : easternLocalDateTime(year, month, day, startMinutes + duration),
     }];
   });
   return [...new Map(parsed.map(item => [item.start, item])).values()]
@@ -402,6 +405,68 @@ export function parsePortsmouthMuseumDetail(
     image_url: image,
     ticket_status: ticketStatus,
   } satisfies NormalizedCityEvent));
+}
+
+function marinersDateTimes(value: string) {
+  const date = value.match(/\b(?:Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday),\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),\s+(\d{4})\b/i);
+  const time = value.match(/\b(\d{1,2})(?::(\d{2}))?\s*(AM|PM)(?:\s+to\s+(\d{1,2})(?::(\d{2}))?\s*(AM|PM))?/i);
+  if (!date || !time) return { start: null, end: null };
+  const year = Number(date[3]);
+  const month = Number(MONTH_NUMBERS[date[1].toLowerCase()]);
+  const day = Number(date[2]);
+  const startMinutes = twelveHourMinutes(time[1], time[2], time[3]);
+  const start = easternLocalDateTime(year, month, day, startMinutes);
+  if (!time[4] || !time[6]) return { start, end: null };
+  let endMinutes = twelveHourMinutes(time[4], time[5], time[6]);
+  if (endMinutes <= startMinutes) endMinutes += 24 * 60;
+  return {
+    start,
+    end: easternLocalDateTime(year, month, day, endMinutes),
+  };
+}
+
+export function parseMarinersMuseumDetail(
+  source: InstitutionCalendarSource,
+  html: string,
+  url: string,
+): NormalizedCityEvent | null {
+  const article = html.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)?.[1] || html;
+  const rawTitle = cleanHtml(article.match(/<h1\b[^>]*class=["'][^"']*\bentry-title\b[^"']*["'][^>]*>([\s\S]*?)<\/h1>/i)?.[1])
+    || cleanHtml(metaContent(html, "og:title"));
+  const title = rawTitle?.replace(/\s+([,.;:!?])/g, "$1") || null;
+  const dateBlock = cleanHtml(article.match(/<div\b[^>]*class=["'][^"']*\bdate-format\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/i)?.[1]);
+  const { start, end } = marinersDateTimes(dateBlock || "");
+  if (!title || !start) return null;
+  const postId = html.match(/<article\b[^>]*\bid=["']post-(\d+)["']/i)?.[1] || url;
+  return {
+    source_event_id: externalEventId(source, postId, title, start, source.venueName || source.name),
+    name: title,
+    description: cleanHtml(metaContent(html, "og:description")),
+    venue_name: source.venueName || source.name,
+    address: source.address || null,
+    city: source.city,
+    latitude: null,
+    longitude: null,
+    start_time: start,
+    end_time: end,
+    source: source.id,
+    source_name: source.name,
+    source_url: url,
+    image_url: metaContent(html, "og:image"),
+    ticket_status: /Attend this Event|\bRegister\b|\bTickets?\b/i.test(article) ? "available" : null,
+  } satisfies NormalizedCityEvent;
+}
+
+function easternWindowBounds() {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
+    timeZone: EASTERN_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date()).filter(part => part.type !== "literal").map(part => [part.type, part.value]));
+  const date = `${parts.year}-${parts.month}-${parts.day}`;
+  const start = new Date(`${date}T00:00:00${easternOffset(date)}`).getTime();
+  return { start, end: start + (WINDOW_DAYS + 1) * 24 * 60 * 60 * 1000 };
 }
 
 function sourceAdapter(source: InstitutionCalendarSource, fallbackUrl = source.url): CityCalendarSource {
@@ -714,6 +779,44 @@ async function fetchPortsmouthMuseums(source: InstitutionCalendarSource) {
   return events;
 }
 
+async function fetchMarinersMuseum(source: InstitutionCalendarSource) {
+  const endpoint = new URL("/wp-json/wp/v2/event", source.url);
+  endpoint.searchParams.set("per_page", String(DETAIL_LIMIT));
+  endpoint.searchParams.set("orderby", "modified");
+  endpoint.searchParams.set("order", "desc");
+  endpoint.searchParams.set("_fields", "id,link");
+  const payload = await fetchJson(endpoint.toString());
+  const origin = new URL(source.url).origin;
+  const links = (Array.isArray(payload) ? payload : []).flatMap(value => {
+    const link = text(record(value)?.link);
+    if (!link) return [];
+    try {
+      const url = new URL(link);
+      return url.origin === origin && url.pathname.startsWith(source.detailPathPrefix || "/event/")
+        ? [url.toString()]
+        : [];
+    } catch {
+      return [];
+    }
+  });
+  if (!links.length) throw new Error("Official Mariners' Museum API exposed no event detail links");
+  const fetched = await mapLimit([...new Set(links)], DETAIL_CONCURRENCY, async link => {
+    try {
+      return parseMarinersMuseumDetail(source, await fetchHtml(link), link);
+    } catch {
+      return null;
+    }
+  });
+  const window = easternWindowBounds();
+  const events = fetched.filter((event): event is NormalizedCityEvent => {
+    if (!event) return false;
+    const start = new Date(event.start_time).getTime();
+    return Number.isFinite(start) && start >= window.start && start < window.end;
+  }).sort((left, right) => left.start_time.localeCompare(right.start_time));
+  if (!events.length) throw new Error("Official Mariners' Museum event pages contained no current parseable dates");
+  return events;
+}
+
 async function fetchEmbeddedTourism(source: InstitutionCalendarSource) {
   const html = await fetchHtml(source.url);
   const events = parseVisitNorfolkEvents(html, source);
@@ -751,6 +854,8 @@ export async function fetchInstitutionSource(source: InstitutionCalendarSource):
           ? await fetchVenueHtml(source)
           : source.format === "portsmouth-html"
             ? await fetchPortsmouthMuseums(source)
+            : source.format === "mariners-wp"
+              ? await fetchMarinersMuseum(source)
           : source.format === "embedded-json"
             ? await fetchEmbeddedTourism(source)
             : await fetchJsonLdHtml(source);
