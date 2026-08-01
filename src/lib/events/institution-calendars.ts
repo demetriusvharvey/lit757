@@ -27,6 +27,7 @@ export type InstitutionCalendarSource = {
   format: InstitutionFormat;
   enabled: boolean;
   venueName?: string;
+  address?: string;
   detailPathPrefix?: string;
   coverageNote?: string;
 };
@@ -74,9 +75,12 @@ export const INSTITUTION_CALENDAR_SOURCES: InstitutionCalendarSource[] = [
     kind: "museum",
     city: "Norfolk",
     url: "https://nauticus.org/calendar/",
-    format: "tribe-api",
+    format: "venue-html",
     enabled: true,
     venueName: "Nauticus",
+    address: "One Waterside Drive, Norfolk, VA 23510",
+    detailPathPrefix: "/events/",
+    coverageNote: "Official Nauticus calendar and first-party event detail pages.",
   },
   {
     id: "neptune_festival_official",
@@ -228,6 +232,51 @@ function iso(value: unknown) {
   if (!raw) return null;
   const parsed = new Date(raw);
   return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
+}
+
+const MONTH_NUMBERS: Record<string, string> = {
+  january: "01",
+  february: "02",
+  march: "03",
+  april: "04",
+  may: "05",
+  june: "06",
+  july: "07",
+  august: "08",
+  september: "09",
+  october: "10",
+  november: "11",
+  december: "12",
+};
+
+function easternOffset(date: string) {
+  const sample = new Date(`${date}T12:00:00Z`);
+  const zone = new Intl.DateTimeFormat("en-US", {
+    timeZone: EASTERN_TIME_ZONE,
+    timeZoneName: "shortOffset",
+  }).formatToParts(sample).find(part => part.type === "timeZoneName")?.value || "GMT-5";
+  const match = zone.match(/GMT([+-])(\d{1,2})(?::(\d{2}))?/i);
+  if (!match) return "-05:00";
+  return `${match[1]}${match[2].padStart(2, "0")}:${(match[3] || "00").padStart(2, "0")}`;
+}
+
+function localClock(value: string) {
+  const match = value.match(/\|\s*(\d{1,2})(?::(\d{2}))?\s*(AM|PM)\b/i);
+  if (!match) return "12:00:00";
+  let hour = Number(match[1]) % 12;
+  if (match[3].toUpperCase() === "PM") hour += 12;
+  return `${String(hour).padStart(2, "0")}:${match[2] || "00"}:00`;
+}
+
+export function parseInstitutionDateHeading(value: string | null) {
+  if (!value) return { start: null, end: null };
+  const dates = [...value.matchAll(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),\s+(\d{4})\b/gi)]
+    .map(match => `${match[3]}-${MONTH_NUMBERS[match[1].toLowerCase()]}-${match[2].padStart(2, "0")}`);
+  if (!dates.length) return { start: null, end: null };
+  const start = `${dates[0]}T${localClock(value)}${easternOffset(dates[0])}`;
+  const endDate = dates[1];
+  const end = endDate ? `${endDate}T23:59:59${easternOffset(endDate)}` : null;
+  return { start, end };
 }
 
 function sourceAdapter(source: InstitutionCalendarSource, fallbackUrl = source.url): CityCalendarSource {
@@ -444,20 +493,24 @@ function metaContent(html: string, key: string) {
 function fallbackVenueDetail(source: InstitutionCalendarSource, html: string, url: string) {
   const title = cleanHtml(html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1])
     || cleanHtml(metaContent(html, "og:title"));
+  const dateHeading = cleanHtml(html.match(/<h3\b[^>]*class=["'][^"']*\bpost-date\b[^"']*["'][^>]*>([\s\S]*?)<\/h3>/i)?.[1]);
+  const headingDates = parseInstitutionDateHeading(dateHeading);
   const start = iso(
     metaContent(html, "event:start_time")
     || metaContent(html, "startDate")
     || html.match(/<time\b[^>]*datetime=["']([^"']+)["']/i)?.[1],
-  );
+  ) || headingDates.start;
   if (!title || !start) return null;
-  const end = iso(metaContent(html, "event:end_time") || metaContent(html, "endDate"));
-  const venue = source.venueName || source.name;
+  const end = iso(metaContent(html, "event:end_time") || metaContent(html, "endDate")) || headingDates.end;
+  const venue = cleanHtml(html.match(/<strong>\s*LOCATION\s*<\/strong>\s*<p[^>]*>([\s\S]*?)<\/p>/i)?.[1])
+    || source.venueName
+    || source.name;
   return {
     source_event_id: externalEventId(source, url, title, start, venue),
     name: title,
     description: cleanHtml(metaContent(html, "description") || metaContent(html, "og:description")),
     venue_name: venue,
-    address: null,
+    address: source.address || null,
     city: source.city,
     latitude: null,
     longitude: null,
