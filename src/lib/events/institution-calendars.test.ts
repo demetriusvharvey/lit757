@@ -6,6 +6,7 @@ import {
   extractInstitutionDetailLinks,
   fetchInstitutionSource,
   institutionEventSignature,
+  parseInstitutionDateHeading,
   type InstitutionCalendarSource,
 } from "./institution-calendars";
 import type { NormalizedCityEvent } from "./city-calendars";
@@ -159,6 +160,59 @@ test("venue provider discovers same-origin detail pages and parses Event JSON-LD
     assert.equal(result.events.length, 1);
     assert.equal(result.events[0].name, "Summer Show");
     assert.equal(result.events[0].start_time, "2026-08-19T23:30:00.000Z");
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test("parses official institution date headings in Hampton Roads local time", () => {
+  assert.deepEqual(
+    parseInstitutionDateHeading("Wednesday, August 5, 2026 | 6:30PM"),
+    { start: "2026-08-05T18:30:00-04:00", end: null },
+  );
+  assert.deepEqual(
+    parseInstitutionDateHeading("Saturday, August 1, 2026 - Monday, August 31, 2026 | 9AM"),
+    { start: "2026-08-01T09:00:00-04:00", end: "2026-08-31T23:59:59-04:00" },
+  );
+});
+
+test("Nauticus HTML fallback preserves its official venue, address, and date", async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async input => {
+    const url = String(input);
+    if (url.endsWith("/calendar/")) {
+      return response('<a href="/events/sunset-yoga-on-bb-64-3/">Sunset Yoga</a>', "text/html");
+    }
+    return response(`
+      <meta property="og:description" content="Yoga on the Battleship Wisconsin." />
+      <meta property="og:image" content="https://nauticus.example/yoga.jpg" />
+      <h1 class="event-page-title">Sunset Yoga on BB-64</h1>
+      <h3 class="post-date">Wednesday, August 5, 2026 <span>|</span> 6:30PM</h3>
+      <div><strong>LOCATION</strong><p> Battleship Wisconsin</p></div>
+      <a href="https://tickets.example">Buy Tickets</a>
+    `, "text/html");
+  };
+  try {
+    const source: InstitutionCalendarSource = {
+      id: "nauticus_official",
+      name: "Nauticus & Battleship Wisconsin Events",
+      kind: "museum",
+      city: "Norfolk",
+      url: "https://nauticus.example/calendar/",
+      format: "venue-html",
+      enabled: true,
+      venueName: "Nauticus",
+      address: "One Waterside Drive, Norfolk, VA 23510",
+      detailPathPrefix: "/events/",
+    };
+    const result = await fetchInstitutionSource(source);
+    assert.equal(result.status, "ok");
+    assert.equal(result.events.length, 1);
+    assert.equal(result.events[0].name, "Sunset Yoga on BB-64");
+    assert.equal(result.events[0].start_time, "2026-08-05T18:30:00-04:00");
+    assert.equal(result.events[0].venue_name, "Battleship Wisconsin");
+    assert.equal(result.events[0].address, "One Waterside Drive, Norfolk, VA 23510");
+    assert.equal(result.events[0].ticket_status, "available");
   } finally {
     global.fetch = originalFetch;
   }
