@@ -12,6 +12,7 @@ const source = {
   name: "Visit Newport News Events",
   city: "Newport News",
   url: "https://www.visitnewportnews.com/event/rss/",
+  apiOrigin: "https://newportnewsva.simpleviewcms.com/",
 };
 
 const SIMPLEVIEW_EVENTS_PATH_FOR_TEST = "/includes/rest_v2/plugins_events_events_by_date/find/";
@@ -154,9 +155,12 @@ test("falls back to the official Simpleview REST calendar when RSS is blocked", 
       new Date("2026-07-22T20:00:00.000Z"),
     );
     assert.equal(events.length, 1);
-    assert.ok(requestedUrls.some(url => url.endsWith("/plugins/core/get_simple_token/")));
+    const tokenUrl = requestedUrls.find(url => url.endsWith("/plugins/core/get_simple_token/"));
+    assert.ok(tokenUrl);
+    assert.equal(new URL(tokenUrl).hostname, "newportnewsva.simpleviewcms.com");
     const restUrl = requestedUrls.find(url => url.includes(SIMPLEVIEW_EVENTS_PATH_FOR_TEST));
     assert.ok(restUrl);
+    assert.equal(new URL(restUrl).hostname, "newportnewsva.simpleviewcms.com");
     assert.equal(new URL(restUrl).searchParams.get("token"), "public-calendar-token");
     const query = JSON.parse(new URL(restUrl).searchParams.get("json") || "null");
     assert.deepEqual(query.filter, { active: true });

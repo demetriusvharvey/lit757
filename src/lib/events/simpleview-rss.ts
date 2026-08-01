@@ -15,6 +15,7 @@ export type SimpleviewRssSource = {
   name: string;
   city: string;
   url: string;
+  apiOrigin?: string;
   venueName?: string;
 };
 
@@ -408,7 +409,8 @@ async function fetchSimpleviewRestCalendar(
   limit: number,
   now: Date,
 ) {
-  const tokenUrl = new URL(SIMPLEVIEW_TOKEN_PATH, source.url).toString();
+  const apiOrigin = source.apiOrigin || source.url;
+  const tokenUrl = new URL(SIMPLEVIEW_TOKEN_PATH, apiOrigin).toString();
   const token = (await fetchText(tokenUrl)).trim();
   if (!token) throw new Error("Simpleview public calendar token was empty");
 
@@ -425,7 +427,7 @@ async function fetchSimpleviewRestCalendar(
       sort: { date: 1, rank: 1, title_sort: 1 },
     },
   };
-  const endpoint = new URL(SIMPLEVIEW_EVENTS_PATH, source.url);
+  const endpoint = new URL(SIMPLEVIEW_EVENTS_PATH, apiOrigin);
   endpoint.searchParams.set("json", JSON.stringify(query));
   endpoint.searchParams.set("token", token);
   const response = await fetch(endpoint, {
