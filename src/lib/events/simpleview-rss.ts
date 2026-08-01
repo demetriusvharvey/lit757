@@ -31,6 +31,9 @@ export type SimpleviewRssItem = {
 
 type JsonRecord = Record<string, unknown>;
 
+const SIMPLEVIEW_TOKEN_PATH = "/plugins/core/get_simple_token/";
+const SIMPLEVIEW_EVENTS_PATH = "/includes/rest_v2/plugins_events_events_by_date/find/";
+
 const FETCH_HEADERS = {
   Accept: "application/rss+xml,application/xml,text/xml,text/html,application/xhtml+xml;q=0.9,*/*;q=0.5",
   "User-Agent": "Buzz/1.0 (https://lit757.vercel.app; demetriusvharvey@gmail.com)",
@@ -200,6 +203,115 @@ function numberValue(value: unknown) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function easternCalendarDate(value: unknown) {
+  const raw = firstString(value);
+  if (!raw) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const parsed = new Date(raw);
+  if (!Number.isFinite(parsed.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: EASTERN_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(parsed);
+  const year = parts.find(part => part.type === "year")?.value;
+  const month = parts.find(part => part.type === "month")?.value;
+  const day = parts.find(part => part.type === "day")?.value;
+  return year && month && day ? `${year}-${month}-${day}` : null;
+}
+
+function localDateTime(date: string, value: unknown, end = false) {
+  const raw = firstString(value);
+  const match = raw?.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  const hour = match ? Number(match[1]) : end ? 23 : 12;
+  const minute = match ? Number(match[2]) : end ? 59 : 0;
+  const second = match?.[3] ? Number(match[3]) : end ? 59 : 0;
+  if (hour > 23 || minute > 59 || second > 59) return null;
+  return `${date}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:${String(second).padStart(2, "0")}${easternOffset(date)}`;
+}
+
+function simpleviewEventUrl(source: SimpleviewRssSource, event: JsonRecord, title: string, recid: string) {
+  const direct = firstString(event.url);
+  if (direct) return new URL(direct, source.url).toString();
+  const slug = title
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+  return new URL(`/event/${slug || "event"}/${encodeURIComponent(recid)}/`, source.url).toString();
+}
+
+function restImageUrl(event: JsonRecord) {
+  for (const collection of [event._media, event.media_raw]) {
+    if (!Array.isArray(collection)) continue;
+    for (const item of collection) {
+      const url = firstString(asRecord(item)?.mediaurl) || firstString(asRecord(item)?.url);
+      if (url) return url;
+    }
+  }
+  return null;
+}
+
+export function parseSimpleviewRestEvents(
+  payload: unknown,
+  source: SimpleviewRssSource,
+): NormalizedCityEvent[] {
+  const root = asRecord(payload);
+  const docsContainer = asRecord(root?.docs);
+  const docs = Array.isArray(docsContainer?.docs) ? docsContainer.docs : [];
+  const events = docs.flatMap(item => {
+    const event = asRecord(item);
+    if (!event) return [];
+    const title = cleanHtml(event.title);
+    const dates = asRecord(event.dates);
+    const date = easternCalendarDate(event.date)
+      || easternCalendarDate(dates?.eventDate)
+      || easternCalendarDate(event.nextDate)
+      || easternCalendarDate(event.startDate);
+    const recid = firstString(event.recid) || firstString(event.recId) || firstString(event._id);
+    if (!title || !date || !recid) return [];
+
+    const start = localDateTime(date, event.startTime);
+    if (!start) return [];
+    let end = firstString(event.endTime) ? localDateTime(date, event.endTime, true) : null;
+    if (end && new Date(end).getTime() < new Date(start).getTime()) {
+      end = new Date(new Date(end).getTime() + 24 * 60 * 60 * 1000).toISOString();
+    }
+
+    const address = [event.address1, event.address2, event.city, event.state, event.zip]
+      .map(cleanHtml)
+      .filter((part): part is string => Boolean(part))
+      .join(", ") || null;
+    const listing = asRecord(event.listing);
+    const venue = cleanHtml(event.location) || cleanHtml(listing?.title) || address || source.name;
+    const location = asRecord(event.loc);
+    const coordinates = Array.isArray(location?.coordinates) ? location.coordinates : [];
+    const longitude = numberValue(coordinates[0]) ?? numberValue(event.longitude);
+    const latitude = numberValue(coordinates[1]) ?? numberValue(event.latitude);
+    const sourceUrl = simpleviewEventUrl(source, event, title, recid);
+    return [{
+      source_event_id: cityEventFingerprint(source.id, `${recid}:${date}`, title, start, venue),
+      name: title,
+      description: cleanHtml(event.description),
+      venue_name: venue,
+      address,
+      city: cleanHtml(event.city) || source.city,
+      latitude,
+      longitude,
+      start_time: start,
+      end_time: end,
+      source: source.id,
+      source_name: source.name,
+      source_url: sourceUrl,
+      image_url: restImageUrl(event),
+      ticket_status: null,
+    } satisfies NormalizedCityEvent];
+  });
+  return [...new Map(events.map(event => [event.source_event_id, event])).values()];
+}
+
 export function parseSimpleviewEventDetail(
   html: string,
   source: SimpleviewRssSource,
@@ -291,10 +403,51 @@ async function fetchText(url: string) {
   return response.text();
 }
 
-export async function fetchSimpleviewRssCalendar(
+async function fetchSimpleviewRestCalendar(
   source: SimpleviewRssSource,
-  detailLimit = DEFAULT_DETAIL_LIMIT,
-  now = new Date(),
+  limit: number,
+  now: Date,
+) {
+  const tokenUrl = new URL(SIMPLEVIEW_TOKEN_PATH, source.url).toString();
+  const token = (await fetchText(tokenUrl)).trim();
+  if (!token) throw new Error("Simpleview public calendar token was empty");
+
+  const query = {
+    // Akamai rejects Simpleview's `$date` query syntax from server runtimes.
+    // Ask for the next active rows, then enforce Buzz's time window below.
+    filter: {
+      active: true,
+    },
+    options: {
+      limit,
+      count: true,
+      castDocs: false,
+      sort: { date: 1, rank: 1, title_sort: 1 },
+    },
+  };
+  const endpoint = new URL(SIMPLEVIEW_EVENTS_PATH, source.url);
+  endpoint.searchParams.set("json", JSON.stringify(query));
+  endpoint.searchParams.set("token", token);
+  const response = await fetch(endpoint, {
+    cache: "no-store",
+    headers: {
+      ...FETCH_HEADERS,
+      Accept: "application/json",
+      Referer: new URL("/events-and-festivals/", source.url).toString(),
+    },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  if (!response.ok) throw new Error(`Simpleview REST calendar request failed (${response.status})`);
+  const events = parseSimpleviewRestEvents(await response.json(), source)
+    .filter(event => currentWindow(event, now));
+  if (!events.length) throw new Error("Official tourism REST calendar returned no current events");
+  return events;
+}
+
+async function fetchSimpleviewRssFeedCalendar(
+  source: SimpleviewRssSource,
+  detailLimit: number,
+  now: Date,
 ) {
   const rss = await fetchText(source.url);
   if (!/<rss\b/i.test(rss) || !/<item\b/i.test(rss)) {
@@ -316,4 +469,26 @@ export async function fetchSimpleviewRssCalendar(
 
   if (!events.length) throw new Error("Official tourism RSS details contained no current events");
   return [...new Map(events.map(event => [event.source_event_id, event])).values()];
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export async function fetchSimpleviewRssCalendar(
+  source: SimpleviewRssSource,
+  detailLimit = DEFAULT_DETAIL_LIMIT,
+  now = new Date(),
+) {
+  try {
+    return await fetchSimpleviewRssFeedCalendar(source, detailLimit, now);
+  } catch (rssError) {
+    try {
+      return await fetchSimpleviewRestCalendar(source, detailLimit, now);
+    } catch (restError) {
+      throw new Error(
+        `Official tourism calendar failed via RSS (${errorMessage(rssError)}) and REST fallback (${errorMessage(restError)})`,
+      );
+    }
+  }
 }
