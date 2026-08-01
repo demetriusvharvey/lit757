@@ -16,7 +16,7 @@ const DETAIL_CONCURRENCY = 6;
 const DETAIL_LIMIT = 45;
 
 export type InstitutionKind = "university" | "arena" | "arts" | "museum" | "festival" | "attraction" | "tourism";
-export type InstitutionFormat = "localist-api" | "tribe-api" | "venue-html" | "jsonld-html" | "embedded-json";
+export type InstitutionFormat = "localist-api" | "tribe-api" | "venue-html" | "jsonld-html" | "embedded-json" | "portsmouth-html";
 
 export type InstitutionCalendarSource = {
   id: string;
@@ -151,9 +151,11 @@ export const INSTITUTION_CALENDAR_SOURCES: InstitutionCalendarSource[] = [
     kind: "museum",
     city: "Portsmouth",
     url: "https://www.portsmouthmuseums.com/events",
-    format: "jsonld-html",
+    format: "portsmouth-html",
     enabled: true,
     venueName: "Portsmouth Museums",
+    detailPathPrefix: "/events/",
+    coverageNote: "Official Portsmouth Museums listing and first-party event detail pages.",
   },
   {
     id: "visit_norfolk_official",
@@ -277,6 +279,129 @@ export function parseInstitutionDateHeading(value: string | null) {
   const endDate = dates[1];
   const end = endDate ? `${endDate}T23:59:59${easternOffset(endDate)}` : null;
   return { start, end };
+}
+
+function currentEasternYear() {
+  const year = new Intl.DateTimeFormat("en-US", {
+    timeZone: EASTERN_TIME_ZONE,
+    year: "numeric",
+  }).formatToParts(new Date()).find(part => part.type === "year")?.value;
+  return Number(year) || new Date().getUTCFullYear();
+}
+
+function portsmouthClockMinutes(hour: string, minute: string | undefined, meridiem: string) {
+  let value = Number(hour) % 12;
+  if (meridiem.toUpperCase() === "PM") value += 12;
+  return value * 60 + Number(minute || 0);
+}
+
+function portsmouthLocalDateTime(year: number, month: number, day: number, minutes: number) {
+  const parts = new Date(Date.UTC(year, month - 1, day, 0, minutes)).toISOString();
+  const date = parts.slice(0, 10);
+  const clock = parts.slice(11, 19);
+  return `${date}T${clock}${easternOffset(date)}`;
+}
+
+function parsePortsmouthDateTimes(value: string, year: number) {
+  const expression = /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})(?:st|nd|rd|th)?\s*@\s*(\d{1,2})(?::(\d{2}))?\s*(AM|PM)(?:\s*-\s*(\d{1,2})(?::(\d{2}))?\s*(AM|PM))?/gi;
+  const matches = [...value.matchAll(expression)];
+  const primary = matches.find(match => match[6] && match[8]);
+  const primaryStartMinutes = primary
+    ? portsmouthClockMinutes(primary[3], primary[4], primary[5])
+    : null;
+  let primaryDuration: number | null = null;
+  if (primary && primaryStartMinutes !== null) {
+    let endMinutes = portsmouthClockMinutes(primary[6], primary[7], primary[8]);
+    if (endMinutes <= primaryStartMinutes) endMinutes += 24 * 60;
+    primaryDuration = endMinutes - primaryStartMinutes;
+  }
+
+  const parsed = matches.flatMap(match => {
+    const month = Number(MONTH_NUMBERS[match[1].toLowerCase()]);
+    const day = Number(match[2]);
+    const startMinutes = portsmouthClockMinutes(match[3], match[4], match[5]);
+    const start = portsmouthLocalDateTime(year, month, day, startMinutes);
+    let duration = primaryDuration;
+    if (match[6] && match[8]) {
+      let endMinutes = portsmouthClockMinutes(match[6], match[7], match[8]);
+      if (endMinutes <= startMinutes) endMinutes += 24 * 60;
+      duration = endMinutes - startMinutes;
+    }
+    return [{
+      start,
+      end: duration === null ? null : portsmouthLocalDateTime(year, month, day, startMinutes + duration),
+    }];
+  });
+  return [...new Map(parsed.map(item => [item.start, item])).values()]
+    .sort((left, right) => left.start.localeCompare(right.start));
+}
+
+function portsmouthAddress(value: string | null) {
+  if (!value) return null;
+  const visible = cleanHtml(value.replace(/<h5\b[^>]*>[\s\S]*?<\/h5>/i, ""));
+  const full = visible?.match(/^(.*?)\s+Portsmouth(?:\s*,?\s*VA)?\s+(\d{5}(?:-\d{4})?)$/i);
+  if (full) return `${full[1]}, Portsmouth, VA ${full[2]}`;
+  const lines = [...value.matchAll(/<div\b[^>]*>([\s\S]*?)<\/div>/gi)]
+    .map(match => cleanHtml(match[1]))
+    .filter((line): line is string => Boolean(line));
+  if (!lines.length) return null;
+  const street = lines[0];
+  const region = lines.slice(1).join(" ");
+  const city = region.match(/^Portsmouth(?:\s*,?\s*VA)?\s+(\d{5}(?:-\d{4})?)$/i);
+  if (city) return `${street}, Portsmouth, VA ${city[1]}`;
+  return [street, region].filter(Boolean).join(", ") || null;
+}
+
+export function parsePortsmouthMuseumDetail(
+  source: InstitutionCalendarSource,
+  html: string,
+  url: string,
+  year: number,
+) {
+  const main = html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)?.[1] || html;
+  const title = cleanHtml(main.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1])
+    || cleanHtml(metaContent(html, "og:title"));
+  const schedule = main.split(/<h4\b[^>]*>\s*Description\s*<\/h4>/i)[0];
+  const dateTimes = parsePortsmouthDateTimes(cleanHtml(schedule) || "", year);
+  if (!title || !dateTimes.length) return [] as NormalizedCityEvent[];
+
+  const location = main.match(/<h4\b[^>]*>\s*Location\s*<\/h4>\s*<div\b[^>]*>([\s\S]*?)<\/div>\s*<\/div>/i)?.[1] || null;
+  const venue = cleanHtml(location?.match(/<h5\b[^>]*>([\s\S]*?)<\/h5>/i)?.[1])
+    || source.venueName
+    || source.name;
+  const description = cleanHtml(
+    main.match(/<h4\b[^>]*>\s*Description\s*<\/h4>\s*<div\b[^>]*>([\s\S]*?)<\/div>\s*<\/div>/i)?.[1],
+  );
+  const imageValue = main.match(/<img\b[^>]*src=["']([^"']+)["']/i)?.[1]
+    || metaContent(html, "og:image");
+  let image: string | null = null;
+  if (imageValue) {
+    try {
+      image = new URL(decodeHtml(imageValue), url).toString();
+    } catch {
+      image = null;
+    }
+  }
+  const address = portsmouthAddress(location);
+  const ticketStatus = /\b(?:Get|Buy) Tickets\b/i.test(main) ? "available" : null;
+
+  return dateTimes.map(({ start, end }) => ({
+    source_event_id: externalEventId(source, `${url}#${start}`, title, start, venue),
+    name: title,
+    description,
+    venue_name: venue,
+    address,
+    city: source.city,
+    latitude: null,
+    longitude: null,
+    start_time: start,
+    end_time: end,
+    source: source.id,
+    source_name: source.name,
+    source_url: url,
+    image_url: image,
+    ticket_status: ticketStatus,
+  } satisfies NormalizedCityEvent));
 }
 
 function sourceAdapter(source: InstitutionCalendarSource, fallbackUrl = source.url): CityCalendarSource {
@@ -553,6 +678,42 @@ async function fetchJsonLdHtml(source: InstitutionCalendarSource) {
   return events;
 }
 
+function portsmouthListingLinks(html: string, source: InstitutionCalendarSource) {
+  const origin = new URL(source.url).origin;
+  const prefix = source.detailPathPrefix || "/events/";
+  const links = new Map<string, number>();
+  for (const match of html.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>/gi)) {
+    if (match.index === undefined) continue;
+    try {
+      const url = new URL(decodeHtml(match[1]), source.url);
+      if (url.origin !== origin || !url.pathname.startsWith(prefix) || url.pathname === prefix) continue;
+      const before = cleanHtml(html.slice(0, match.index)) || "";
+      const headings = [...before.matchAll(/\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})\b/gi)];
+      const year = Number(headings.at(-1)?.[1]) || currentEasternYear();
+      url.hash = "";
+      links.set(url.toString(), year);
+    } catch {
+      // Ignore malformed links.
+    }
+  }
+  return [...links.entries()].slice(0, DETAIL_LIMIT).map(([url, year]) => ({ url, year }));
+}
+
+async function fetchPortsmouthMuseums(source: InstitutionCalendarSource) {
+  const listing = await fetchHtml(source.url);
+  const links = portsmouthListingLinks(listing, source);
+  if (!links.length) throw new Error("Official Portsmouth Museums page exposed no event detail links");
+  const events = (await mapLimit(links, DETAIL_CONCURRENCY, async item => {
+    try {
+      return parsePortsmouthMuseumDetail(source, await fetchHtml(item.url), item.url, item.year);
+    } catch {
+      return [] as NormalizedCityEvent[];
+    }
+  })).flat();
+  if (!events.length) throw new Error("Official Portsmouth Museums event pages contained no parseable dates");
+  return events;
+}
+
 async function fetchEmbeddedTourism(source: InstitutionCalendarSource) {
   const html = await fetchHtml(source.url);
   const events = parseVisitNorfolkEvents(html, source);
@@ -588,6 +749,8 @@ export async function fetchInstitutionSource(source: InstitutionCalendarSource):
         ? await fetchTribe(source)
         : source.format === "venue-html"
           ? await fetchVenueHtml(source)
+          : source.format === "portsmouth-html"
+            ? await fetchPortsmouthMuseums(source)
           : source.format === "embedded-json"
             ? await fetchEmbeddedTourism(source)
             : await fetchJsonLdHtml(source);

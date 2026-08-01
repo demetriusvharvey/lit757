@@ -218,6 +218,62 @@ test("Nauticus HTML fallback preserves its official venue, address, and date", a
   }
 });
 
+test("Portsmouth Museums parser enriches official recurring event details", async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async input => {
+    const url = String(input);
+    if (url.endsWith("/events")) {
+      return response(`
+        <h2>August 2026</h2>
+        <a href="/events/48776">Game Night at the Museum</a>
+      `, "text/html");
+    }
+    return response(`
+      <meta property="og:title" content="Game Night at the Museum" />
+      <main>
+        <div>Other Dates August 14th @ 5:00 pm August 21st @ 5:00 pm View More</div>
+        <img src="https://portsmouth.example/game-night.jpg" alt="Game Night at the Museum" />
+        <h1>Game Night at the Museum</h1>
+        <div>August 7th @ 5:00 pm - 8:00 pm</div>
+        <div><h4>Location</h4><div><h5>Portsmouth Art &amp; Cultural Center</h5>
+          <div>400 High Street</div><div>Portsmouth 23704</div>
+        </div></div>
+        <div><h4>Description</h4><div><p>Games, creativity, and community after hours.</p></div></div>
+        <a href="https://tickets.example">Get Tickets</a>
+      </main>
+    `, "text/html");
+  };
+  try {
+    const source: InstitutionCalendarSource = {
+      id: "portsmouth_museums_official",
+      name: "Portsmouth Museums Events",
+      kind: "museum",
+      city: "Portsmouth",
+      url: "https://portsmouth.example/events",
+      format: "portsmouth-html",
+      enabled: true,
+      venueName: "Portsmouth Museums",
+      detailPathPrefix: "/events/",
+    };
+    const result = await fetchInstitutionSource(source);
+    assert.equal(result.status, "ok");
+    assert.equal(result.events.length, 3);
+    assert.deepEqual(result.events.map(event => event.start_time), [
+      "2026-08-07T17:00:00-04:00",
+      "2026-08-14T17:00:00-04:00",
+      "2026-08-21T17:00:00-04:00",
+    ]);
+    assert.ok(result.events.every(event => event.end_time?.endsWith("20:00:00-04:00")));
+    assert.equal(result.events[0].venue_name, "Portsmouth Art & Cultural Center");
+    assert.equal(result.events[0].address, "400 High Street, Portsmouth, VA 23704");
+    assert.equal(result.events[0].description, "Games, creativity, and community after hours.");
+    assert.equal(result.events[0].image_url, "https://portsmouth.example/game-night.jpg");
+    assert.equal(result.events[0].ticket_status, "available");
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test("institution dedupe collapses equivalent cross-source events", () => {
   const base: NormalizedCityEvent = {
     source_event_id: "official_a",
