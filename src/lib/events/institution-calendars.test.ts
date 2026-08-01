@@ -7,6 +7,7 @@ import {
   fetchInstitutionSource,
   institutionEventSignature,
   parseInstitutionDateHeading,
+  parseMarinersMuseumDetail,
   type InstitutionCalendarSource,
 } from "./institution-calendars";
 import type { NormalizedCityEvent } from "./city-calendars";
@@ -272,6 +273,51 @@ test("Portsmouth Museums parser enriches official recurring event details", asyn
   } finally {
     global.fetch = originalFetch;
   }
+});
+
+test("Mariners Museum detail parser preserves official time, address, image, and registration", () => {
+  const source: InstitutionCalendarSource = {
+    id: "mariners_museum_official",
+    name: "The Mariners' Museum and Park Events",
+    kind: "museum",
+    city: "Newport News",
+    url: "https://mariners.example/events-exhibits/",
+    format: "mariners-wp",
+    enabled: true,
+    venueName: "The Mariners' Museum and Park",
+    address: "100 Museum Drive, Newport News, VA 23606",
+  };
+  const event = parseMarinersMuseumDetail(source, `
+    <meta property="og:description" content="A free maritime history lecture." />
+    <meta property="og:image" content="https://mariners.example/michigan.jpg" />
+    <article id="post-28207">
+      <h1 class="entry-title">USS <em>Michigan</em>: The US Navy's First Iron Ship</h1>
+      <div class="date-format">
+        <p>Friday, September 11, 2026</p>
+        <p>12:00 PM to 1:00 PM EDT</p>
+        <p>In Person | Virtual</p>
+      </div>
+      <h2>Attend this Event</h2><a href="https://tickets.example">Register</a>
+    </article>
+  `, "https://mariners.example/event/uss-michigan/");
+
+  assert.ok(event);
+  assert.equal(event.name, "USS Michigan: The US Navy's First Iron Ship");
+  assert.equal(event.start_time, "2026-09-11T12:00:00-04:00");
+  assert.equal(event.end_time, "2026-09-11T13:00:00-04:00");
+  assert.equal(event.venue_name, "The Mariners' Museum and Park");
+  assert.equal(event.address, "100 Museum Drive, Newport News, VA 23606");
+  assert.equal(event.description, "A free maritime history lecture.");
+  assert.equal(event.image_url, "https://mariners.example/michigan.jpg");
+  assert.equal(event.ticket_status, "available");
+
+  const winter = parseMarinersMuseumDetail(source, `
+    <article><h1 class="entry-title">Friendly Hours</h1>
+      <div class="date-format"><p>Sunday, December 13, 2026</p><p>9:00 AM to 11:00 AM EST</p></div>
+    </article>
+  `, "https://mariners.example/event/friendly-hours/");
+  assert.equal(winter?.start_time, "2026-12-13T09:00:00-05:00");
+  assert.equal(winter?.end_time, "2026-12-13T11:00:00-05:00");
 });
 
 test("institution dedupe collapses equivalent cross-source events", () => {
