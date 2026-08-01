@@ -261,11 +261,11 @@ function fallbackEvent(item: SimpleviewRssItem, source: SimpleviewRssSource): No
   };
 }
 
-function currentWindow(event: NormalizedCityEvent) {
+function currentWindow(event: NormalizedCityEvent, now: Date) {
   const start = new Date(event.start_time).getTime();
   const end = new Date(event.end_time || event.start_time).getTime();
   if (!Number.isFinite(start) || !Number.isFinite(end)) return false;
-  return end >= Date.now() - WINDOW_PAST_MS && start <= Date.now() + WINDOW_FUTURE_MS;
+  return end >= now.getTime() - WINDOW_PAST_MS && start <= now.getTime() + WINDOW_FUTURE_MS;
 }
 
 async function mapLimit<T, R>(items: T[], concurrency: number, worker: (item: T) => Promise<R>) {
@@ -294,6 +294,7 @@ async function fetchText(url: string) {
 export async function fetchSimpleviewRssCalendar(
   source: SimpleviewRssSource,
   detailLimit = DEFAULT_DETAIL_LIMIT,
+  now = new Date(),
 ) {
   const rss = await fetchText(source.url);
   if (!/<rss\b/i.test(rss) || !/<item\b/i.test(rss)) {
@@ -311,7 +312,7 @@ export async function fetchSimpleviewRssCalendar(
       const fallback = fallbackEvent(item, source);
       return fallback ? [fallback] : [];
     }
-  })).flat().filter(currentWindow);
+  })).flat().filter(event => currentWindow(event, now));
 
   if (!events.length) throw new Error("Official tourism RSS details contained no current events");
   return [...new Map(events.map(event => [event.source_event_id, event])).values()];
