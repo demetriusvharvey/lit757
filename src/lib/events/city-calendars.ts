@@ -623,10 +623,12 @@ function recurrenceCalendarDates(
   startParts: CompactIcsParts,
   rule: ParsedRRule,
   timeZone: string,
+  now: Date,
 ) {
   const output: Date[] = [];
-  const windowStart = Date.now() - RECURRENCE_WINDOW_PAST_MS;
-  const windowEnd = Date.now() + RECURRENCE_WINDOW_FUTURE_MS;
+  const referenceTime = now.getTime();
+  const windowStart = referenceTime - RECURRENCE_WINDOW_PAST_MS;
+  const windowEnd = referenceTime + RECURRENCE_WINDOW_FUTURE_MS;
   const until = untilMilliseconds(rule, timeZone);
   let occurrenceNumber = 0;
   let iterations = 0;
@@ -840,7 +842,7 @@ function cancelledIcsEvent(
   };
 }
 
-function expandIcsBlock(lines: string[], source: CityCalendarSource) {
+function expandIcsBlock(lines: string[], source: CityCalendarSource, now: Date) {
   const startProperty = propertyEntry(lines, "DTSTART");
   if (!startProperty) return [] as NormalizedCityEvent[];
   const startParts = parseCompactIcsParts(startProperty.value);
@@ -871,7 +873,7 @@ function expandIcsBlock(lines: string[], source: CityCalendarSource) {
   const uid = property(lines, "UID");
   const events: NormalizedCityEvent[] = [];
 
-  for (const occurrence of recurrenceCalendarDates(startCalendar, startParts, rule, startTimeZone)) {
+  for (const occurrence of recurrenceCalendarDates(startCalendar, startParts, rule, startTimeZone, now)) {
     const occurrenceStart = isoFromCalendarDate(occurrence, startTimeZone, startParts.zulu);
     if (!occurrenceStart) continue;
     if (excluded.has(new Date(occurrenceStart).getTime())) continue;
@@ -897,7 +899,11 @@ function expandIcsBlock(lines: string[], source: CityCalendarSource) {
   return events;
 }
 
-export function parseCityCalendarIcs(text: string, source: CityCalendarSource): NormalizedCityEvent[] {
+export function parseCityCalendarIcs(
+  text: string,
+  source: CityCalendarSource,
+  now = new Date(),
+): NormalizedCityEvent[] {
   const blocks: string[][] = [];
   let current: string[] | null = null;
   for (const line of unfoldIcs(text)) {
@@ -927,7 +933,7 @@ export function parseCityCalendarIcs(text: string, source: CityCalendarSource): 
     }
 
     if (isCancelled) {
-      for (const event of expandIcsBlock(block, source)) {
+      for (const event of expandIcsBlock(block, source, now)) {
         const cancellation = {
           ...event,
           ticket_status: "cancelled",
@@ -941,7 +947,7 @@ export function parseCityCalendarIcs(text: string, source: CityCalendarSource): 
 
 
     const isDetached = Boolean(detached);
-    for (const event of expandIcsBlock(block, source)) {
+    for (const event of expandIcsBlock(block, source, now)) {
       if (cancelled.has(event.source_event_id)) continue;
       const existing = events.get(event.source_event_id);
       if (!existing || isDetached || !existing.detached) {
