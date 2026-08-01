@@ -31,6 +31,8 @@ const jsonLdSource: CityCalendarSource = {
   timeZone: "America/New_York",
 };
 
+const recurrenceReferenceTime = new Date("2026-07-24T12:00:00.000Z");
+
 test("registry includes all seven Hampton Roads cities", () => {
   const cities = new Set(CITY_CALENDAR_SOURCES.map(source => source.city));
   assert.deepEqual(cities, new Set([
@@ -87,7 +89,7 @@ test("recurring ICS occurrences receive distinct source event ids", () => {
 });
 
 test("RRULE series expand and respect EXDATE exclusions", () => {
-  const events = parseCityCalendarIcs(`BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:weekly-series\nSUMMARY:Weekly Series\nDTSTART;TZID=America/New_York:20260725T190000\nDTEND;TZID=America/New_York:20260725T210000\nRRULE:FREQ=WEEKLY;COUNT=3\nEXDATE;TZID=America/New_York:20260801T190000\nLOCATION:Town Center\nEND:VEVENT\nEND:VCALENDAR`, icsSource);
+  const events = parseCityCalendarIcs(`BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:weekly-series\nSUMMARY:Weekly Series\nDTSTART;TZID=America/New_York:20260725T190000\nDTEND;TZID=America/New_York:20260725T210000\nRRULE:FREQ=WEEKLY;COUNT=3\nEXDATE;TZID=America/New_York:20260801T190000\nLOCATION:Town Center\nEND:VEVENT\nEND:VCALENDAR`, icsSource, recurrenceReferenceTime);
 
   assert.equal(events.length, 2);
   assert.deepEqual(events.map(event => event.start_time), [
@@ -98,7 +100,7 @@ test("RRULE series expand and respect EXDATE exclusions", () => {
 });
 
 test("daily RRULE honors BYDAY and counts only matching dates", () => {
-  const events = parseCityCalendarIcs(`BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:weekday-program\nSUMMARY:Weekday Program\nDTSTART;TZID=America/New_York:20260727T190000\nDTEND;TZID=America/New_York:20260727T200000\nRRULE:FREQ=DAILY;COUNT=4;BYDAY=MO,WE,FR\nLOCATION:Community Center\nEND:VEVENT\nEND:VCALENDAR`, icsSource);
+  const events = parseCityCalendarIcs(`BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:weekday-program\nSUMMARY:Weekday Program\nDTSTART;TZID=America/New_York:20260727T190000\nDTEND;TZID=America/New_York:20260727T200000\nRRULE:FREQ=DAILY;COUNT=4;BYDAY=MO,WE,FR\nLOCATION:Community Center\nEND:VEVENT\nEND:VCALENDAR`, icsSource, recurrenceReferenceTime);
 
   assert.deepEqual(events.map(event => event.start_time), [
     "2026-07-27T23:00:00.000Z",
@@ -117,7 +119,7 @@ test("long COUNT series retain current occurrences beyond the old cap", () => {
 });
 
 test("detached cancellation removes its master occurrence and emits a deletion marker", () => {
-  const events = parseCityCalendarIcs(`BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:cancellable-series\nSUMMARY:Neighborhood Meeting\nDTSTART;TZID=America/New_York:20260725T190000\nDTEND;TZID=America/New_York:20260725T200000\nRRULE:FREQ=WEEKLY;COUNT=2\nLOCATION:Community Center\nEND:VEVENT\nBEGIN:VEVENT\nUID:cancellable-series\nRECURRENCE-ID;TZID=America/New_York:20260801T190000\nSTATUS:CANCELLED\nSUMMARY:Neighborhood Meeting\nDTSTART;TZID=America/New_York:20260801T190000\nLOCATION:Community Center\nEND:VEVENT\nEND:VCALENDAR`, icsSource);
+  const events = parseCityCalendarIcs(`BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:cancellable-series\nSUMMARY:Neighborhood Meeting\nDTSTART;TZID=America/New_York:20260725T190000\nDTEND;TZID=America/New_York:20260725T200000\nRRULE:FREQ=WEEKLY;COUNT=2\nLOCATION:Community Center\nEND:VEVENT\nBEGIN:VEVENT\nUID:cancellable-series\nRECURRENCE-ID;TZID=America/New_York:20260801T190000\nSTATUS:CANCELLED\nSUMMARY:Neighborhood Meeting\nDTSTART;TZID=America/New_York:20260801T190000\nLOCATION:Community Center\nEND:VEVENT\nEND:VCALENDAR`, icsSource, recurrenceReferenceTime);
 
   const active = events.filter(event => !event.cancelled);
   const cancelled = events.filter(event => event.cancelled);
@@ -130,7 +132,7 @@ test("detached cancellation removes its master occurrence and emits a deletion m
 });
 
 test("cancelled recurring master emits deletion markers for every occurrence", () => {
-  const events = parseCityCalendarIcs(`BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:cancelled-master\nSTATUS:CANCELLED\nSUMMARY:Cancelled Series\nDTSTART;TZID=America/New_York:20260725T190000\nDTEND;TZID=America/New_York:20260725T200000\nRRULE:FREQ=WEEKLY;COUNT=2\nLOCATION:Community Center\nEND:VEVENT\nEND:VCALENDAR`, icsSource);
+  const events = parseCityCalendarIcs(`BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:cancelled-master\nSTATUS:CANCELLED\nSUMMARY:Cancelled Series\nDTSTART;TZID=America/New_York:20260725T190000\nDTEND;TZID=America/New_York:20260725T200000\nRRULE:FREQ=WEEKLY;COUNT=2\nLOCATION:Community Center\nEND:VEVENT\nEND:VCALENDAR`, icsSource, recurrenceReferenceTime);
 
   assert.equal(events.length, 2);
   assert.ok(events.every(event => event.cancelled));

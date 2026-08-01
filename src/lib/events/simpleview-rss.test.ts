@@ -82,7 +82,11 @@ test("fetches RSS discovery and enriches every item from its official detail pag
     });
   };
   try {
-    const events = await fetchSimpleviewRssCalendar(source);
+    const events = await fetchSimpleviewRssCalendar(
+      source,
+      undefined,
+      new Date("2026-07-22T12:00:00.000Z"),
+    );
     assert.equal(events.length, 1);
     assert.equal(events[0].source, "visit_newport_news_official");
     assert.equal(events[0].source_url, "https://www.visitnewportnews.com/event/live-music-zen-mojo/1911/");
