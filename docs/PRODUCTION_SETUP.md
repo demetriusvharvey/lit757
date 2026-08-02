@@ -1,9 +1,8 @@
 # Buzz production setup
 
-Verified against the repository and the GitHub API on **2026-07-24**. Every
-claim below was checked rather than assumed. Where something could not be
-checked from the repo (Vercel and Supabase dashboards), it is marked
-**unverified**.
+Updated from the repository cost-safety audit on **2026-08-01**. Where something
+cannot be checked from the repo (provider billing dashboards and Supabase plan
+settings), it remains **unverified**.
 
 This supersedes the earlier hand-written 101-step checklist, which had drifted:
 three phases were already complete, one phase asked for API keys no code reads,
@@ -17,22 +16,18 @@ and the environment list was missing several variables the app requires.
 `npm run validate` (test + lint + typecheck + build) exits 0 locally. There is
 no build error to find.
 
-The recurring red X is the scheduled **`Buzz signal refresh`** workflow, and it
-is not a code fault:
+BestTime's exhausted free credits previously caused the scheduled **`Buzz signal
+refresh`** workflow to fail:
 
 ```
 Your free forecast credits are used up. Choose a plan to continue using Radar.
 ```
 
-All 11 mapped BestTime venues fail with this. The key is valid; the free tier is
-exhausted. This is a product decision, not a bug:
-
-- Pay for BestTime, or
-- Drop BestTime and lean on the first-party evidence path (partner pulse,
-  ground truth, passive presence), which is the stated direction anyway.
-
-Until it is resolved the foot-traffic provider contributes nothing, and the
-workflow will keep failing.
+The zero-cost policy resolves that operational issue: BestTime and PredictHQ
+are manual-only and runtime billing-gated. Google Places, OpenAI, and Resend are
+also default-denied even when credentials exist. Buzz uses deterministic photo,
+copy, and notification fallbacks until a separate `ALLOW_METERED_*` flag is
+deliberately set. Production should leave every such flag unset.
 
 ---
 
@@ -51,16 +46,16 @@ Generated from every `process.env.*` read in `app/`, `src/`, `lib/` and
 | `NEXT_PUBLIC_MAPBOX_TOKEN` | map rendering |
 | `NEXT_PUBLIC_SITE_URL` | canonical URLs and metadata |
 | `CRON_SECRET` | scheduled refresh jobs |
-| `OPENAI_API_KEY` | `/api/recommendation` and `/api/summary` |
 
 ### Required for features that are already built
 
 | Variable | Powers |
 | --- | --- |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | web push notifications |
-| `RESEND_API_KEY`, `SIGNUP_EMAIL_FROM` | transactional email |
+| `RESEND_API_KEY`, `SIGNUP_EMAIL_FROM` | optional transactional email; also requires `ALLOW_METERED_RESEND=true` |
 | `OWNER_SIGNUP_WEBHOOK_URL` | venue-owner signup routing |
-| `GOOGLE_PLACES_API_KEY`, `GOOGLE_STREET_VIEW_API_KEY` | venue enrichment and photos |
+| `GOOGLE_PLACES_API_KEY`, `GOOGLE_STREET_VIEW_API_KEY` | optional venue enrichment and photos; also requires `ALLOW_METERED_GOOGLE_PLACES=true` |
+| `OPENAI_API_KEY` | optional generated copy; also requires `ALLOW_METERED_OPENAI=true` |
 | `BRANDFETCH_CLIENT_ID` | venue logos (falls back to site icon) |
 
 Generate the VAPID pair with the script that already exists:
@@ -178,13 +173,12 @@ urgent; both make the repository harder to reason about.
 
 ## Order of operations
 
-1. Resolve the BestTime credit decision — it is the only thing currently red.
-2. Set environment variables in Vercel across Production, Preview and
+1. Keep every `ALLOW_METERED_*` flag unset under the zero-cost policy.
+2. Set required non-metered environment variables in Vercel across Production, Preview and
    Development. Redeploy.
-3. Apply Supabase migrations, including `20260724160000` once PR #98 lands.
-4. Merge PR #98, then PR #88.
-5. Enable Dependabot security updates and branch protection.
+3. Apply pending Supabase migrations in chronological order.
+4. Expand first-party partner and verified-user coverage.
+5. Keep Dependabot security updates and branch protection enabled.
 
-Steps 1–3 gate everything else. Merging before the environment is configured
-means the new calibration trainer will return 401 on every scheduled run — which
-is correct fail-closed behavior, not a fault.
+Missing secrets correctly fail closed. Do not solve a missing provider by
+enabling billing; use the documented free or deterministic fallback.

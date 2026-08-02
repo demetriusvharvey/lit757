@@ -1,3 +1,5 @@
+import { meteredProviderCallsEnabled } from "../../../src/lib/metered-providers";
+
 export const dynamic = "force-dynamic";
 export const maxDuration = 20;
 
@@ -116,12 +118,15 @@ async function fetchVerifiedPlacePhoto(apiKey: string, placeId: string) {
 }
 
 export async function GET(request: Request) {
-  const apiKey = process.env.GOOGLE_PLACES_API_KEY;
   const url = new URL(request.url);
   const placeId = url.searchParams.get("placeId") || "";
   const name = url.searchParams.get("name") || "Local place";
   const category = (url.searchParams.get("category") || "other").toLowerCase();
 
+  if (!meteredProviderCallsEnabled("google_places")) {
+    return fallbackImage(name, category, "google-places-disabled-by-zero-cost-policy");
+  }
+  const apiKey = process.env.GOOGLE_PLACES_API_KEY;
   if (!apiKey) return fallbackImage(name, category, "google-places-key-missing");
   if (!isValidPlaceId(placeId)) return fallbackImage(name, category, "google-place-id-missing-or-invalid");
 

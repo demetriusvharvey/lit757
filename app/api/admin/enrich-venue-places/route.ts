@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import { meteredProviderCallsEnabled } from "../../../../src/lib/metered-providers";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -70,6 +71,9 @@ async function searchPlace(apiKey: string, venue: Venue) {
 
 export async function POST(request: Request) {
   if (!authorized(request)) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  if (!meteredProviderCallsEnabled("google_places")) {
+    return NextResponse.json({ success: true, skipped: true, reason: "zero_cost_policy" });
+  }
   const apiKey = process.env.GOOGLE_PLACES_API_KEY;
   if (!apiKey) return NextResponse.json({ success: false, error: "GOOGLE_PLACES_API_KEY is missing" }, { status: 500 });
 

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { meteredProviderCallsEnabled } from "../../../src/lib/metered-providers";
 
 export const dynamic = "force-dynamic";
 
@@ -17,9 +18,15 @@ function isValidPlaceId(value: string) {
 }
 
 export async function GET(request: Request) {
-  const apiKey = process.env.GOOGLE_PLACES_API_KEY;
   const placeId = new URL(request.url).searchParams.get("placeId") || "";
 
+  if (!meteredProviderCallsEnabled("google_places")) {
+    return NextResponse.json(
+      { photos: [], disabled: true, reason: "zero_cost_policy" },
+      { headers: { "Cache-Control": "private, no-store" } },
+    );
+  }
+  const apiKey = process.env.GOOGLE_PLACES_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
       { photos: [], error: "Photo service unavailable" },

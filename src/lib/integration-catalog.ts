@@ -37,11 +37,11 @@ export type IntegrationDefinition = {
 
 export const BUZZ_INTEGRATIONS: IntegrationDefinition[] = [
   { id: "mapbox", name: "Mapbox", category: "Maps & venue intelligence", state: "live", role: "platform", detail: "Primary map rendering, heat layers, venue pins, clustering, and navigation controls.", env: ["NEXT_PUBLIC_MAPBOX_TOKEN"] },
-  { id: "google-places", name: "Google Places API", category: "Maps & venue intelligence", state: "live", role: "discovery", detail: "Venue identity, place metadata, photos, and enrichment.", env: ["GOOGLE_PLACES_API_KEY"] },
-  { id: "google-street-view", name: "Google Street View API", category: "Maps & venue intelligence", state: "ready", role: "discovery", detail: "Configured interface for venue-area imagery; production usage should remain cost-controlled.", env: ["GOOGLE_STREET_VIEW_API_KEY"] },
+  { id: "google-places", name: "Google Places API", category: "Maps & venue intelligence", state: "ready", role: "discovery", detail: "Venue identity, metadata, and photos are implemented but disabled by default under Buzz's zero-cost policy.", env: ["GOOGLE_PLACES_API_KEY", "ALLOW_METERED_GOOGLE_PLACES"] },
+  { id: "google-street-view", name: "Google Street View API", category: "Maps & venue intelligence", state: "ready", role: "discovery", detail: "Storefront verification is implemented but disabled by default under Buzz's zero-cost policy.", env: ["GOOGLE_STREET_VIEW_API_KEY", "ALLOW_METERED_GOOGLE_PLACES"] },
   { id: "osm-overpass", name: "OpenStreetMap / Overpass", category: "Maps & venue intelligence", state: "live", role: "discovery", detail: "Open venue discovery and enrichment with protected dry-run monitoring.", env: ["OVERPASS_API_URL"] },
   { id: "tomtom", name: "TomTom", category: "Maps & venue intelligence", state: "live", role: "forecast-context", detail: "Production-validated traffic flow across eight Hampton Roads activity districts every 15 minutes, normalized against district history and stored only as forecast-supporting mobility evidence.", env: ["TOMTOM_API_KEY"] },
-  { id: "besttime", name: "BestTime", category: "Maps & venue intelligence", state: "partial", role: "direct-evidence", detail: "Private-key live requests and public-key forecast lookups are wired. The free trial is exhausted and no venue mappings are active; only provider-confirmed live readings may count as direct evidence after paid coverage is activated.", env: ["BESTTIME_API_KEY_PRIVATE", "BESTTIME_API_KEY_PUBLIC"] },
+  { id: "besttime", name: "BestTime", category: "Maps & venue intelligence", state: "partial", role: "direct-evidence", detail: "The adapter is wired but billing-capable calls are disabled by default. The exhausted trial contributes no direct evidence.", env: ["BESTTIME_API_KEY_PRIVATE", "BESTTIME_API_KEY_PUBLIC", "ALLOW_METERED_BESTTIME"] },
   { id: "brandfetch", name: "Brandfetch", category: "Maps & venue intelligence", state: "ready", role: "discovery", detail: "Logo enrichment with official-site icon fallback when Brandfetch is unavailable.", env: ["BRANDFETCH_CLIENT_ID"] },
 
   { id: "supabase", name: "Supabase", category: "Platform", state: "live", role: "platform", detail: "Primary database, authentication, persisted signals, scores, favorites, subscriptions, and event storage.", env: ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY"] },
@@ -91,9 +91,14 @@ export const BUZZ_INTEGRATIONS: IntegrationDefinition[] = [
   { id: "analytics", name: "Analytics and conversion tracking", category: "Operations", state: "partial", role: "operations", detail: "Share, fallback, referral-open, venue-view, favorite, and watch tracking is implemented; persistence is migration-gated and remains non-blocking until enabled." },
 ];
 
-export function integrationConfigured(integration: IntegrationDefinition, env = process.env) {
+export function integrationConfigured(
+  integration: IntegrationDefinition,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+) {
   if (!integration.env?.length) return integration.state === "live";
-  return integration.env.every(key => Boolean(env[key]));
+  return integration.env.every(key => key.startsWith("ALLOW_METERED_")
+    ? env[key] === "true"
+    : Boolean(env[key]));
 }
 
 export function integrationSnapshot(env = process.env) {

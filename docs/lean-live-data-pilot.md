@@ -1,11 +1,12 @@
 # Buzz lean live-data pilot
 
-This pilot uses the services already paid for (Vercel Pro and Supabase Pro) plus free data sources.
+This pilot uses existing platform resources plus free data sources. Automatic
+provider work must remain inside documented free quotas.
 
 ## What runs automatically
 
-- Every 15 minutes: TomTom traffic around 25 priority venues and first-party signal recovery.
-- Every hour: BestTime, Ticketmaster inventory, and PredictHQ refresh routes. Providers without keys safely skip.
+- Every 15 minutes: 16 rotating TomTom road samples across eight activity districts, plus first-party signal recovery.
+- Every hour: Ticketmaster inventory only. BestTime and PredictHQ are manual-only and billing-gated.
 - Every 4 hours: Ticketmaster/Eventbrite event discovery plus configured local ICS calendars.
 - Venue partner pulses update the Buzz score immediately and expire after 30 minutes.
 - Verified user reports update the Buzz score immediately and expire after 45 minutes.
@@ -18,12 +19,16 @@ This pilot uses the services already paid for (Vercel Pro and Supabase Pro) plus
 - `BUZZ_PARTNER_INGEST_SECRET`: pilot access key entered by venue managers.
 - `LOCAL_EVENT_FEEDS_JSON`: optional JSON array of HTTPS ICS feeds.
 
-Optional providers safely skip when their keys are absent:
+Optional providers safely skip when their keys are absent. Metered providers
+also skip when credentials exist unless their separate `ALLOW_METERED_*` flag is
+exactly `true`:
 
 - `BESTTIME_API_KEY_PRIVATE`
 - `TICKETMASTER_INVENTORY_API_KEY`
 - `PREDICTHQ_ACCESS_TOKEN`
 - `EVENTBRITE_PRIVATE_TOKEN`
+
+Buzz's zero-cost production policy leaves all `ALLOW_METERED_*` flags unset.
 
 Example local calendar configuration:
 

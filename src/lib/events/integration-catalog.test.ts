@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BUZZ_INTEGRATIONS } from "../integration-catalog";
+import { BUZZ_INTEGRATIONS, integrationConfigured } from "../integration-catalog";
 
 const requiredNames = [
   "Mapbox",
@@ -60,4 +60,18 @@ test("integration IDs are unique and every source has a truth role", () => {
   const ids = BUZZ_INTEGRATIONS.map(integration => integration.id);
   assert.equal(new Set(ids).size, ids.length);
   assert.ok(BUZZ_INTEGRATIONS.every(integration => integration.role && integration.detail));
+});
+
+test("billing-capable integrations are not configured by credentials alone", () => {
+  const google = BUZZ_INTEGRATIONS.find(integration => integration.id === "google-places");
+  assert.ok(google);
+  assert.equal(integrationConfigured(google, { GOOGLE_PLACES_API_KEY: "configured" }), false);
+  assert.equal(integrationConfigured(google, {
+    GOOGLE_PLACES_API_KEY: "configured",
+    ALLOW_METERED_GOOGLE_PLACES: "false",
+  }), false);
+  assert.equal(integrationConfigured(google, {
+    GOOGLE_PLACES_API_KEY: "configured",
+    ALLOW_METERED_GOOGLE_PLACES: "true",
+  }), true);
 });

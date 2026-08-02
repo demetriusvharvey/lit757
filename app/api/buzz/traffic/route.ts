@@ -38,8 +38,9 @@ type TrafficBaseline = {
   sampleSize: number;
 };
 
-// Three road samples across eight activity districts = 24 calls per run.
-// At a 15-minute cadence this stays below the pilot's TomTom daily allowance.
+// Two rotating road samples across eight activity districts = 16 calls per
+// run, or 1,536 automatic calls/day. This preserves 15-minute freshness while
+// leaving substantial room below TomTom's 2,500 free non-tile requests/day.
 const TRAFFIC_ZONES: TrafficZone[] = [
   {
     id: "virginia-beach-oceanfront",
@@ -312,6 +313,7 @@ async function run(request: Request) {
 
   const venues = ((data || []) as VenueRow[]).filter(venue => Number.isFinite(Number(venue.lat)) && Number.isFinite(Number(venue.lng)));
   const generatedAt = new Date();
+  const rotation = Math.floor(generatedAt.getTime() / (15 * 60 * 1000));
   const historyStart = new Date(generatedAt.getTime() - 14 * 24 * 60 * 60 * 1000).toISOString();
   const zoneResults: Array<Record<string, unknown>> = [];
   let calls = 0;
@@ -320,7 +322,9 @@ async function run(request: Request) {
 
   await mapLimit(TRAFFIC_ZONES, 2, async zone => {
     const samples: Array<{ point: TrafficPoint; flow: TomTomFlow }> = [];
-    await mapLimit(zone.points, 3, async point => {
+    const omittedPoint = rotation % zone.points.length;
+    const scheduledPoints = zone.points.filter((_, index) => index !== omittedPoint);
+    await mapLimit(scheduledPoints, 2, async point => {
       calls += 1;
       try {
         samples.push({ point, flow: await fetchFlow(apiKey, point) });

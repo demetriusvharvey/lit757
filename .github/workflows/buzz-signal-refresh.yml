@@ -139,7 +139,9 @@ jobs:
             "${BASE_URL%/}/api/buzz/refresh?provider=ticketmaster&limit=100"
 
   event-forecast:
-    if: github.event_name == 'workflow_dispatch' && (inputs.tier == 'all' || inputs.tier == 'forecast') || github.event.schedule == '19 * * * *'
+    # PredictHQ is a trial/subscription product. Keep it manual-only; a token
+    # alone must never turn into unattended billable traffic.
+    if: github.event_name == 'workflow_dispatch' && (inputs.tier == 'all' || inputs.tier == 'forecast')
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:

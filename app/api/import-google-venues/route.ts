@@ -1,6 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- Google Places payloads are normalized at runtime. */
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import { isCronAuthorized } from "../../../src/lib/cron-auth";
+import { meteredProviderCallsEnabled } from "../../../src/lib/metered-providers";
 
 const GOOGLE_KEY = process.env.GOOGLE_PLACES_API_KEY;
 
@@ -94,8 +96,14 @@ async function getPlaceDetails(placeId: string) {
   return detailsRes.json();
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    if (!isCronAuthorized(request)) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (!meteredProviderCallsEnabled("google_places")) {
+      return NextResponse.json({ success: true, skipped: true, reason: "zero_cost_policy" });
+    }
     if (!GOOGLE_KEY) {
       return NextResponse.json(
         { error: "Missing GOOGLE_PLACES_API_KEY" },

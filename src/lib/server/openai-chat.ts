@@ -1,3 +1,5 @@
+import { meteredProviderCallsEnabled } from "../metered-providers";
+
 type ChatCompletionResponse = {
   choices?: Array<{ message?: { content?: string } }>;
 };
@@ -8,6 +10,7 @@ export async function generateShortOpenAiText(args: {
   maxTokens: number;
   timeoutMs?: number;
 }) {
+  if (!meteredProviderCallsEnabled("openai")) return null;
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
 
