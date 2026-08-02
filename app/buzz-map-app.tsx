@@ -46,6 +46,7 @@ import {
   type DiscoveryDaypart,
 } from "../src/lib/adaptive-discovery";
 import type { LocationSearchResult } from "../src/lib/location-search";
+import { contributePassivePresence } from "../src/lib/buzz/passive-presence-client";
 import {
   DEFAULT_BUZZ_CENTER as DEFAULT_CENTER,
   getBrowserPosition as getPosition,
@@ -298,6 +299,11 @@ export default function BuzzMapApp() {
       const position = await getPosition();
       const latitude = position.coords.latitude;
       const longitude = position.coords.longitude;
+      await contributePassivePresence({
+        latitude,
+        longitude,
+        accuracy: position.coords.accuracy,
+      }, { explicit: true });
       mapRef.current?.easeTo({ center: [longitude, latitude], zoom: 12.4, duration: 650 });
       await loadNearby({ lat: latitude, lng: longitude, radius: 10, label: "near you" });
     } catch {
@@ -387,13 +393,15 @@ export default function BuzzMapApp() {
           score: nextScore,
           label: payload.buzz?.label || venue.activity?.label || statusFor(venue),
           trendLabel: "Verified local vote",
-          scoreMode: "live",
+          scoreMode: payload.buzz?.mode === "live" ? "live" : "forecast",
           confidence: payload.buzz?.confidence || venue.activity?.confidence,
         },
       } : venue;
       setVenues(current => current.map(update));
       setSelected(current => current ? update(current) : current);
-      setVoteMessage(`Verified. ${payload.reportCount || 1} live report${payload.reportCount === 1 ? "" : "s"} now influence Buzz.`);
+      setVoteMessage(payload.buzz?.mode === "live"
+        ? `Verified. ${payload.reportCount || 1} unique nearby report${payload.reportCount === 1 ? "" : "s"} now establish live activity.`
+        : "Verified. Your report improves the forecast; Buzz waits for another nearby person before calling it Live.");
       if (payload.pointsAwarded) setReward({ points: payload.pointsAwarded, total: payload.totalPoints ?? null });
     } catch (voteError) {
       setVoteMessage(voteError instanceof Error ? voteError.message : "Could not submit your vote");

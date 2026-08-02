@@ -125,7 +125,9 @@ export default function BuzzCrowdReport() {
           setTone("error");
         } else {
           const scoreText = payload.buzz?.score != null ? ` Buzz is now ${payload.buzz.score}.` : "";
-          const proofText = payload.reportCount === 1 ? " You’re the first verified report." : ` ${payload.reportCount} verified reports are now active.`;
+          const proofText = payload.buzz?.mode === "live"
+            ? ` ${payload.reportCount} unique nearby people now establish live activity.`
+            : " Buzz will wait for another nearby person before calling the venue Live.";
           setMessage(`Verified. Thanks for making Buzz more accurate.${scoreText}${proofText}`);
           setTone("success");
           window.dispatchEvent(new CustomEvent("lit757:buzz-report-saved", {

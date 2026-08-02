@@ -1,18 +1,10 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import { summarizeVerifiedCrowdReports } from "../../../../src/lib/buzz/verified-reports";
 
 export const dynamic = "force-dynamic";
 
 const db = getSupabaseAdmin();
-
-const allowedLevels = new Set(["quiet", "steady", "busy", "packed"]);
-
-function levelValue(level: string) {
-  if (level === "packed") return 95;
-  if (level === "busy") return 75;
-  if (level === "steady") return 45;
-  return 15;
-}
 
 function labelFor(value: number) {
   if (value >= 85) return "Packed";
@@ -31,7 +23,7 @@ export async function GET(request: Request) {
   const [{ data: reports, error: reportError }, { data: partner, error: partnerError }] = await Promise.all([
     db
       .from("buzz_user_reports")
-      .select("user_id,crowd_level,observed_at")
+      .select("user_id,crowd_level,observed_at,expires_at")
       .eq("venue_id", venueId)
       .eq("verified_nearby", true)
       .gte("observed_at", since)
@@ -50,21 +42,18 @@ export async function GET(request: Request) {
   if (reportError) return NextResponse.json({ success: false, error: reportError.message }, { status: 500 });
   if (partnerError) console.error("Partner pulse unavailable", partnerError.message);
 
-  const validReports = (reports || []).filter(report => allowedLevels.has(String(report.crowd_level)));
-  const uniqueUsers = new Set(validReports.map(report => report.user_id).filter(Boolean));
-  const values = validReports.map(report => levelValue(String(report.crowd_level)));
-  const average = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
-  const variance = average == null ? 0 : values.reduce((sum, value) => sum + (value - average) ** 2, 0) / Math.max(1, values.length);
-  const consensus = values.length < 2 ? null : Math.max(0, Math.min(1, 1 - Math.sqrt(variance) / 100));
-  const latestObservedAt = [validReports[0]?.observed_at, partner?.observed_at].filter(Boolean).sort().reverse()[0] || null;
+  const summary = summarizeVerifiedCrowdReports(reports || []);
+  const average = summary?.average ?? null;
+  const consensus = (summary?.uniqueReporterCount || 0) < 2 ? null : summary?.consensus ?? null;
+  const latestObservedAt = [summary?.latestObservedAt, partner?.observed_at].filter(Boolean).sort().reverse()[0] || null;
 
   return NextResponse.json({
     success: true,
     venueId,
     generatedAt: now.toISOString(),
     community: {
-      verifiedReportCount: validReports.length,
-      uniqueReporterCount: uniqueUsers.size,
+      verifiedReportCount: summary?.uniqueReporterCount || 0,
+      uniqueReporterCount: summary?.uniqueReporterCount || 0,
       crowdLevel: average == null ? null : labelFor(average),
       crowdValue: average == null ? null : Math.round(average),
       consensus: consensus == null ? null : Number(consensus.toFixed(2)),

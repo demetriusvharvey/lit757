@@ -55,7 +55,12 @@ function signalPoints(signal: BuzzSignal) {
     case "besttime_live": return clamp(value / 100, 0, 1) * 45;
     case "besttime_forecast": return clamp(value / 100, 0, 1) * 14;
     case "verified_presence": return Math.min(24, Math.max(0, Number(signal.metadata?.uniqueDevices ?? value)) * 5);
-    case "crowd_report": return clamp(value / 100, 0, 1) * 25 * clamp(Number(signal.metadata?.consensus ?? signal.confidence), 0, 1);
+    case "crowd_report": {
+      const uniqueUsers = Number(signal.metadata?.uniqueUsers ?? signal.metadata?.uniqueDevices ?? 0);
+      return uniqueUsers >= 2
+        ? clamp(value / 100, 0, 1) * 25 * clamp(Number(signal.metadata?.consensus ?? signal.confidence), 0, 1)
+        : 0;
+    }
     case "partner_pulse": return Math.min(42, clamp(value / 100, 0, 1) * 35 + Math.min(4, Number(signal.metadata?.waitMinutes || 0) / 15) + scarcity(signal.metadata) * 0.05);
     case "reservation_inventory": return Math.max(clamp(value / 100, 0, 1) * 18, scarcity(signal.metadata) * 0.18);
     case "ticket_inventory": return Math.max(clamp(value / 100, 0, 1) * 16, scarcity(signal.metadata) * 0.16);
@@ -108,7 +113,14 @@ function confidenceFor(
 }
 
 function directEvidence(signal: BuzzSignal) {
-  return signal.isLive && ["besttime_live", "verified_presence", "crowd_report", "partner_pulse", "ticket_scans"].includes(signal.type);
+  if (!signal.isLive) return false;
+  if (signal.type === "verified_presence") {
+    return Number(signal.metadata?.uniqueDevices ?? signal.value) >= 2;
+  }
+  if (signal.type === "crowd_report") {
+    return Number(signal.metadata?.uniqueUsers ?? signal.metadata?.uniqueDevices ?? 0) >= 2;
+  }
+  return ["besttime_live", "partner_pulse", "ticket_scans"].includes(signal.type);
 }
 
 export function calculateBuzzScore(venue: VenueForBuzz, signals: BuzzSignal[], referenceTime = new Date()): BuzzScoreResult {

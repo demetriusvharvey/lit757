@@ -5,6 +5,7 @@ import { fetchTicketmasterInventory, isTicketmasterInventoryConfigured, ticketma
 import { fetchPredictedEvents, isPredictHQConfigured, predictedAttendanceSignal } from "../../../../src/lib/buzz/providers/predicthq";
 import { recomputeBuzzScore, saveBuzzSignals } from "../../../../src/lib/buzz/repository";
 import type { BuzzSignal, VenueForBuzz } from "../../../../src/lib/buzz/types";
+import { crowdLevelValue, summarizeVerifiedCrowdReports } from "../../../../src/lib/buzz/verified-reports";
 import { meteredProviderCallsEnabled } from "../../../../src/lib/metered-providers";
 
 export const dynamic = "force-dynamic";
@@ -257,13 +258,6 @@ async function refreshPredictHQ(limit: number): Promise<RefreshResult> {
   return result;
 }
 
-function crowdValue(level: string) {
-  if (level === "packed") return 95;
-  if (level === "busy") return 75;
-  if (level === "steady") return 45;
-  return 15;
-}
-
 async function refreshFirstParty(limit: number): Promise<RefreshResult> {
   const result: RefreshResult = { provider: "first_party", attempted: 0, succeeded: 0, failed: 0, details: [] };
   const now = new Date();
@@ -277,7 +271,7 @@ async function refreshFirstParty(limit: number): Promise<RefreshResult> {
   const latestPulse = new Map<string, (typeof pulses)[number]>();
   for (const pulse of pulses || []) if (!latestPulse.has(pulse.venue_id)) latestPulse.set(pulse.venue_id, pulse);
   for (const [venueId, pulse] of latestPulse) {
-    const value = pulse.occupancy_pct ?? crowdValue(pulse.occupancy_band);
+    const value = pulse.occupancy_pct ?? crowdLevelValue(pulse.occupancy_band);
     const signal: BuzzSignal = {
       source: "venue_partner",
       family: "first_party_occupancy",
@@ -296,34 +290,30 @@ async function refreshFirstParty(limit: number): Promise<RefreshResult> {
   const grouped = new Map<string, (typeof reports)>();
   for (const report of reports || []) grouped.set(report.venue_id, [...(grouped.get(report.venue_id) || []), report]);
   for (const [venueId, venueReports] of grouped) {
-    const identities = new Set(venueReports.map(report => report.user_id || report.device_hash).filter(Boolean));
-    const levels = venueReports.map(report => crowdValue(report.crowd_level));
-    const average = levels.reduce((sum, value) => sum + value, 0) / Math.max(1, levels.length);
-    const variance = levels.reduce((sum, value) => sum + (value - average) ** 2, 0) / Math.max(1, levels.length);
-    const consensus = Math.max(0.35, Math.min(1, 1 - Math.sqrt(variance) / 100));
-    const observedAt = venueReports[0].observed_at;
-    const expiresAt = venueReports.map(report => report.expires_at).sort()[0];
+    const summary = summarizeVerifiedCrowdReports(venueReports);
+    if (!summary) continue;
+    const uniqueUsers = summary.uniqueReporterCount;
     const signals: BuzzSignal[] = [{
       source: "lit757_users",
       family: "verified_users",
       type: "verified_presence",
-      value: identities.size,
+      value: uniqueUsers,
       isLive: true,
-      confidence: Math.min(0.9, 0.45 + identities.size * 0.1),
-      observedAt,
-      expiresAt,
-      metadata: { uniqueDevices: identities.size, reportCount: venueReports.length },
+      confidence: Math.min(0.9, 0.45 + uniqueUsers * 0.1),
+      observedAt: summary.latestObservedAt,
+      expiresAt: summary.expiresAt,
+      metadata: { uniqueDevices: uniqueUsers, reportCount: summary.reports.length },
     }];
-    if (venueReports.length >= 2) signals.push({
+    if (uniqueUsers >= 2) signals.push({
       source: "lit757_users",
       family: "verified_users",
       type: "crowd_report",
-      value: average,
+      value: summary.average,
       isLive: true,
-      confidence: Math.min(0.9, consensus * (0.55 + Math.min(0.35, venueReports.length * 0.05))),
-      observedAt,
-      expiresAt,
-      metadata: { consensus, reportCount: venueReports.length },
+      confidence: Math.min(0.9, summary.consensus * (0.55 + Math.min(0.35, uniqueUsers * 0.05))),
+      observedAt: summary.latestObservedAt,
+      expiresAt: summary.expiresAt,
+      metadata: { consensus: summary.consensus, reportCount: summary.reports.length, uniqueUsers },
     });
     await saveBuzzSignals(db, venueId, signals);
     affected.add(venueId);

@@ -4,6 +4,16 @@ import { getRequestUser } from "../../../../src/lib/server-auth";
 import { loadActiveSignals, recomputeBuzzScore, saveBuzzSignals } from "../../../../src/lib/buzz/repository";
 import { calculateBuzzScore } from "../../../../src/lib/buzz/score-v1";
 import type { BuzzSignal, VenueForBuzz } from "../../../../src/lib/buzz/types";
+import {
+  summarizeVerifiedCrowdReports,
+  verifiesVenueProximity,
+} from "../../../../src/lib/buzz/verified-reports";
+import {
+  exceedsRequestRate,
+  guardErrorResponse,
+  readBoundedJson,
+  requestClientKey,
+} from "../../../../src/lib/server/request-guards";
 
 export const dynamic = "force-dynamic";
 
@@ -27,13 +37,6 @@ type ReportRow = {
   expires_at: string;
   metadata?: Record<string, unknown> | null;
 };
-
-function levelValue(level: string) {
-  if (level === "packed") return 95;
-  if (level === "busy") return 75;
-  if (level === "steady") return 45;
-  return 15;
-}
 
 function occupancyBand(value: number) {
   if (value >= 85) return "packed";
@@ -181,21 +184,23 @@ async function recordConsensusGroundTruth(args: {
 export async function POST(request: Request) {
   const member = await getRequestUser(request);
   if (!member) return NextResponse.json({ success: false, error: "Sign in to verify live activity" }, { status: 401 });
+  if (exceedsRequestRate(`buzz-report:${member.id}:${requestClientKey(request)}`, 12, 60_000)) {
+    return NextResponse.json({ success: false, error: "Too many crowd reports" }, { status: 429 });
+  }
 
-  const body = await request.json().catch(() => null) as {
-    venueId?: string;
-    crowdLevel?: string;
-    latitude?: number;
-    longitude?: number;
-    gpsAccuracyMeters?: number;
-  } | null;
+  let body: Record<string, unknown>;
+  try {
+    body = await readBoundedJson(request, 4_096);
+  } catch (error) {
+    return guardErrorResponse(error);
+  }
   const venueId = String(body?.venueId || "");
   const crowdLevel = String(body?.crowdLevel || "").toLowerCase();
   const latitude = Number(body?.latitude);
   const longitude = Number(body?.longitude);
-  const accuracy = Math.max(0, Number(body?.gpsAccuracyMeters || 0));
+  const accuracy = Number(body?.gpsAccuracyMeters);
 
-  if (!venueId || !allowedLevels.has(crowdLevel) || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+  if (!venueId || !allowedLevels.has(crowdLevel) || ![latitude, longitude, accuracy].every(Number.isFinite) || accuracy <= 0) {
     return NextResponse.json({ success: false, error: "Venue, crowd level, and location are required" }, { status: 400 });
   }
 
@@ -209,7 +214,7 @@ export async function POST(request: Request) {
   const observedAt = new Date();
   const previous = await scoreBeforeVote(venue as VenueForBuzz, observedAt);
   const distance = meters(latitude, longitude, Number(venue.lat), Number(venue.lng));
-  const verifiedNearby = accuracy <= 250 && distance <= Math.max(220, Math.min(500, accuracy * 2.2));
+  const verifiedNearby = verifiesVenueProximity(distance, accuracy);
   const tenMinutesAgo = new Date(observedAt.getTime() - 10 * 60 * 1000).toISOString();
   const { data: duplicate } = await db
     .from("buzz_user_reports")
@@ -259,54 +264,51 @@ export async function POST(request: Request) {
     .limit(100);
   if (reportError) return NextResponse.json({ success: false, error: reportError.message }, { status: 500 });
 
-  const reports = (reportData || []) as ReportRow[];
-  const identities = new Set(reports.map(report => report.user_id).filter(Boolean));
-  const values = reports.map(report => levelValue(report.crowd_level));
-  const average = values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length);
-  const variance = values.reduce((sum, value) => sum + (value - average) ** 2, 0) / Math.max(1, values.length);
-  const consensus = Math.max(0.35, Math.min(1, 1 - Math.sqrt(variance) / 100));
-  const latest = reports[0] || { observed_at: observedAt.toISOString(), expires_at: expiresAt.toISOString() };
+  const summary = summarizeVerifiedCrowdReports((reportData || []) as ReportRow[]);
+  if (!summary) return NextResponse.json({ success: false, error: "No trustworthy crowd reports were available" }, { status: 500 });
+  const reports = summary.reports;
+  const uniqueUsers = summary.uniqueReporterCount;
   const signals: BuzzSignal[] = [{
     source: "lit757_users",
     family: "verified_users",
     type: "verified_presence",
-    value: identities.size,
+    value: uniqueUsers,
     isLive: true,
-    confidence: Math.min(0.9, 0.45 + identities.size * 0.1),
-    observedAt: latest.observed_at,
-    expiresAt: latest.expires_at,
-    metadata: { uniqueDevices: identities.size, reportCount: reports.length },
+    confidence: Math.min(0.9, 0.45 + uniqueUsers * 0.1),
+    observedAt: summary.latestObservedAt,
+    expiresAt: summary.expiresAt,
+    metadata: { uniqueDevices: uniqueUsers, reportCount: reports.length },
   }];
-  if (reports.length >= 2) signals.push({
+  if (uniqueUsers >= 2) signals.push({
     source: "lit757_users",
     family: "verified_users",
     type: "crowd_report",
-    value: average,
+    value: summary.average,
     isLive: true,
-    confidence: Math.min(0.9, consensus * (0.55 + Math.min(0.35, reports.length * 0.05))),
-    observedAt: latest.observed_at,
-    expiresAt: latest.expires_at,
-    metadata: { consensus, reportCount: reports.length },
+    confidence: Math.min(0.9, summary.consensus * (0.55 + Math.min(0.35, uniqueUsers * 0.05))),
+    observedAt: summary.latestObservedAt,
+    expiresAt: summary.expiresAt,
+    metadata: { consensus: summary.consensus, reportCount: reports.length, uniqueUsers },
   });
 
   await saveBuzzSignals(db, venueId, signals);
   const groundTruthRecorded = await recordConsensusGroundTruth({
     venueId,
     reports,
-    average,
-    consensus,
-    uniqueUsers: identities.size,
+    average: summary.average,
+    consensus: summary.consensus,
+    uniqueUsers,
     observedAt,
   });
   const buzz = await recomputeBuzzScore(db, venue as VenueForBuzz);
-  const points = await awardBuzzPoints(member.id, venueId, String(insertedReport.id), reports.length === 1);
+  const points = await awardBuzzPoints(member.id, venueId, String(insertedReport.id), uniqueUsers === 1);
 
   return NextResponse.json({
     success: true,
     accepted: true,
     verifiedNearby: true,
     distanceMeters: Math.round(distance),
-    reportCount: reports.length,
+    reportCount: uniqueUsers,
     groundTruthRecorded,
     buzz,
     ...points,
