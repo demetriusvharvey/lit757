@@ -1,5 +1,5 @@
 import { unstable_cache } from "next/cache";
-import { ACTIVITY_DISTRICTS, distanceMiles } from "../buzz/districts";
+import { ACTIVITY_DISTRICTS, distanceMiles, nearestActivityDistrict } from "../buzz/districts";
 import { fetchHrtRealtime, fetchHrtStatic } from "./hrt";
 import {
   fetchNwsWeather,
@@ -130,17 +130,6 @@ const cachedHrtRealtime = unstable_cache(async () => fetchHrtRealtime(), ["buzz-
   revalidate: 30,
 });
 
-function nearestDistrict(latitude: number, longitude: number) {
-  let nearest: { id: string; distance: number; radius: number } | null = null;
-  for (const district of ACTIVITY_DISTRICTS) {
-    const distance = distanceMiles(district.center.lat, district.center.lng, latitude, longitude);
-    const radius = district.radiusMiles + 0.45;
-    if (distance > radius) continue;
-    if (!nearest || distance < nearest.distance) nearest = { id: district.id, distance, radius };
-  }
-  return nearest?.id || null;
-}
-
 function arrivalTimestamp(arrival: HrtArrival) {
   const value = arrival.arrivalTime || arrival.departureTime;
   const timestamp = value ? new Date(value).getTime() : Number.NaN;
@@ -164,7 +153,7 @@ export function buildTransitDistrictContext(args: {
   const arrivals = new Map<string, Array<{ minutes: number; delaySeconds: number | null }>>();
 
   for (const stop of args.stops) {
-    const districtId = nearestDistrict(stop.latitude, stop.longitude);
+    const districtId = nearestActivityDistrict(stop.latitude, stop.longitude, null, 0.45)?.id || null;
     if (!districtId) continue;
     const ids = nearbyStops.get(districtId) || new Set<string>();
     ids.add(stop.id);
@@ -179,7 +168,7 @@ export function buildTransitDistrictContext(args: {
       if (minutes < -2 || minutes > 60) continue;
       const stop = stopById.get(arrival.stopId);
       if (!stop) continue;
-      const districtId = nearestDistrict(stop.latitude, stop.longitude);
+      const districtId = nearestActivityDistrict(stop.latitude, stop.longitude, null, 0.45)?.id || null;
       if (!districtId) continue;
       const rows = arrivals.get(districtId) || [];
       rows.push({ minutes, delaySeconds: delaySeconds(arrival) });

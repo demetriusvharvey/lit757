@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { getVenueImage } from "../../../src/lib/venue-image";
-import { ACTIVITY_DISTRICTS, distanceMiles, type ActivityDistrict } from "../../../src/lib/buzz/districts";
+import { distanceMiles, nearestActivityDistrict, type ActivityDistrict } from "../../../src/lib/buzz/districts";
 import {
   DIRECT_PRESENCE_WINDOW_MINUTES,
   groupDirectPresence,
@@ -14,6 +14,7 @@ import {
   weatherEvidenceForVenue,
   type SupportingEvidence,
 } from "../../../src/lib/integrations/public-context";
+import { dedupeVenueRows } from "../../../src/lib/venue-dedupe";
 
 export const dynamic = "force-dynamic";
 
@@ -154,16 +155,6 @@ function expectedPeak(kind: string, reference: Date) {
   return { points: 0, label: null as string | null };
 }
 
-function nearestDistrict(lat: number, lng: number): ActivityDistrict | null {
-  let match: { district: ActivityDistrict; distance: number } | null = null;
-  for (const district of ACTIVITY_DISTRICTS) {
-    const distance = distanceMiles(district.center.lat, district.center.lng, lat, lng);
-    if (distance > district.radiusMiles) continue;
-    if (!match || distance < match.distance) match = { district, distance };
-  }
-  return match?.district || null;
-}
-
 function districtStatus(mobilityPoints: number, stats: DistrictEventStats, nearbyPhones: number) {
   if (nearbyPhones >= 5 || (mobilityPoints >= 9 && (stats.active > 0 || stats.soon > 1))) return "Hot";
   if (nearbyPhones >= 3 || mobilityPoints >= 6 || stats.active > 1) return "Busy";
@@ -235,25 +226,48 @@ export async function GET(request: Request) {
   if (scoreResult.error) console.error("Buzz snapshots unavailable; using autonomous forecast", scoreResult.error.message);
   if (trafficResult.error) console.error("TomTom area signals unavailable", trafficResult.error.message);
 
-  const venueRows = (venueResult.data || []) as VenueRow[];
+  const venueIdentity = dedupeVenueRows((venueResult.data || []) as VenueRow[]);
+  const venueRows = venueIdentity.venues;
+  const primaryVenueIdBySourceId = venueIdentity.primaryVenueIdBySourceId;
   const eventRows = (eventResult.data || []) as EventRow[];
   const eventsById = new Map(eventRows.map(event => [event.id, event]));
   const venueByCanonical = new Map(venueRows.map(venue => [canonical(venue.name), venue.id]));
   const eventsByVenueId = new Map<string, EventRow[]>();
   for (const mapping of (mappingResult.data || []) as EventMappingRow[]) {
     if (!mapping.venue_id) continue;
+    const venueId = primaryVenueIdBySourceId.get(mapping.venue_id) || mapping.venue_id;
     const event = eventsById.get(mapping.event_id);
-    if (event) addVenueEvent(eventsByVenueId, mapping.venue_id, event);
+    if (event) addVenueEvent(eventsByVenueId, venueId, event);
   }
   for (const event of eventRows) {
     const venueId = venueByCanonical.get(canonical(event.venue_name));
     if (venueId) addVenueEvent(eventsByVenueId, venueId, event);
   }
 
-  const presence = groupDirectPresence((presenceResult.data || []) as DirectPresenceRow[], now).byVenue;
+  const rawPresence = groupDirectPresence((presenceResult.data || []) as DirectPresenceRow[], now).byVenue;
+  const presence = new Map<string, { passive: Set<string>; verified: Set<string> }>();
+  for (const [sourceVenueId, group] of rawPresence) {
+    const venueId = primaryVenueIdBySourceId.get(sourceVenueId) || sourceVenueId;
+    const current = presence.get(venueId) || { passive: new Set<string>(), verified: new Set<string>() };
+    for (const deviceId of group.passive) current.passive.add(deviceId);
+    for (const deviceId of group.verified) current.verified.add(deviceId);
+    presence.set(venueId, current);
+  }
 
   const scoreMap = new Map<string, ScoreRow>();
-  for (const snapshot of (scoreResult.data || []) as ScoreRow[]) scoreMap.set(snapshot.venue_id, snapshot);
+  for (const snapshot of (scoreResult.data || []) as ScoreRow[]) {
+    const venueId = primaryVenueIdBySourceId.get(snapshot.venue_id) || snapshot.venue_id;
+    const current = scoreMap.get(venueId);
+    const snapshotTime = new Date(snapshot.computed_at).getTime();
+    const currentTime = new Date(current?.computed_at || 0).getTime();
+    if (
+      !current
+      || (snapshot.score_mode === "live" && current.score_mode !== "live")
+      || (snapshot.score_mode === current.score_mode && snapshotTime > currentTime)
+    ) {
+      scoreMap.set(venueId, { ...snapshot, venue_id: venueId });
+    }
+  }
 
   const trafficByDistrict = new Map<string, TrafficRow>();
   for (const signal of (trafficResult.data || []) as TrafficRow[]) {
@@ -266,7 +280,7 @@ export async function GET(request: Request) {
     const venueLat = Number(venue.lat);
     const venueLng = Number(venue.lng);
     if (!Number.isFinite(venueLat) || !Number.isFinite(venueLng)) continue;
-    const district = nearestDistrict(venueLat, venueLng);
+    const district = nearestActivityDistrict(venueLat, venueLng, String(venue.city || ""));
     if (district) districtByVenueId.set(venue.id, district);
   }
 

@@ -131,3 +131,34 @@ export function distanceMiles(lat1: number, lng1: number, lat2: number, lng2: nu
   const value = Math.sin(deltaLat / 2) ** 2 + Math.cos(radians(lat1)) * Math.cos(radians(lat2)) * Math.sin(deltaLng / 2) ** 2;
   return 3958.8 * 2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
 }
+
+function normalizedCity(value: unknown) {
+  return String(value || "").toLowerCase().replace(/[^a-z]/g, "");
+}
+
+export function venueBelongsToActivityDistrict(
+  district: ActivityDistrict,
+  latitude: number,
+  longitude: number,
+  city?: string | null,
+  radiusPaddingMiles = 0,
+) {
+  if (city && normalizedCity(city) !== normalizedCity(district.city)) return false;
+  return distanceMiles(district.center.lat, district.center.lng, latitude, longitude)
+    <= district.radiusMiles + Math.max(0, radiusPaddingMiles);
+}
+
+export function nearestActivityDistrict(
+  latitude: number,
+  longitude: number,
+  city?: string | null,
+  radiusPaddingMiles = 0,
+) {
+  let nearest: { district: ActivityDistrict; distance: number } | null = null;
+  for (const district of ACTIVITY_DISTRICTS) {
+    if (!venueBelongsToActivityDistrict(district, latitude, longitude, city, radiusPaddingMiles)) continue;
+    const distance = distanceMiles(district.center.lat, district.center.lng, latitude, longitude);
+    if (!nearest || distance < nearest.distance) nearest = { district, distance };
+  }
+  return nearest?.district || null;
+}
