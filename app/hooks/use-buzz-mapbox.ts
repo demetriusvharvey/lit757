@@ -93,7 +93,9 @@ export function useBuzzMapbox({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapReady || map.getSource("buzz-map-venues")) return;
+    // A rejected or interrupted style request must leave the map in its base
+    // fallback state instead of throwing while a separate UI action renders.
+    if (!map || !mapReady || !map.isStyleLoaded() || map.getSource("buzz-map-venues")) return;
 
     const empty: GeoJSON.FeatureCollection<GeoJSON.Point> = {
       type: "FeatureCollection",

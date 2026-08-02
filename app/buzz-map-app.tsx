@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import type { Session } from "@supabase/supabase-js";
+import dynamic from "next/dynamic";
 import "mapbox-gl/dist/mapbox-gl.css";
 import "./buzz-map-app.css";
 import "./buzz-map-notifications.css";
@@ -90,6 +91,7 @@ const ALERTS_KEY = "lit757-mobile-alerts";
 const VENUE_ALERTS_KEY = "lit757-venue-alerts";
 const logoKeyFor = (venue: Venue) => `venue-logo-${String(venue.id).replace(/[^a-zA-Z0-9_-]/g, "")}`;
 const logoUrlFor = (venue: Pick<Venue, "name" | "website">) => getVenueLogo({ name: venue.name, website: venue.website });
+const BuzzNightPlanner = dynamic(() => import("./components/buzz-night-planner").then(module => module.BuzzNightPlanner));
 
 export default function BuzzMapApp() {
   const [venues, setVenues] = useState<Venue[]>([]);
@@ -112,6 +114,7 @@ export default function BuzzMapApp() {
   const [shareMessage, setShareMessage] = useState("");
   const [sharing, setSharing] = useState(false);
   const [reward, setReward] = useState<{ points: number; total: number | null } | null>(null);
+  const [plannerOpen, setPlannerOpen] = useState(false);
 
   const requestSequenceRef = useRef(0);
   const deepLinkHandledRef = useRef(false);
@@ -191,6 +194,7 @@ export default function BuzzMapApp() {
   }, [venues, active, session?.access_token]);
 
   const closeVenue = useCallback(() => setSelected(null), []);
+  const closePlanner = useCallback(() => setPlannerOpen(false), []);
 
   const {
     mapElementRef: mapEl,
@@ -204,8 +208,32 @@ export default function BuzzMapApp() {
     logoUrlFor,
   });
 
+  const selectPlannedVenue = useCallback((venue: Venue) => {
+    setActive("All");
+    setBuzzingOnly(false);
+    setQuery("");
+    setListExpanded(false);
+    setVenues(current => current.some(candidate => String(candidate.id) === String(venue.id))
+      ? current
+      : [venue, ...current]);
+    setSelected(venue);
+    setVoteMessage("");
+    setWatchMessage("");
+    if (validVenue(venue)) {
+      mapRef.current?.easeTo({ center: coordinates(venue), zoom: 13.8, duration: 650 });
+    }
+    void trackConversion({
+      eventName: "venue_view",
+      venueId: venue.id,
+      source: "plan-my-night",
+      truthMode: venue.activity?.scoreMode || "forecast",
+      metadata: { entry: "natural-language-plan" },
+    }, session?.access_token);
+  }, [mapRef, session?.access_token]);
+
   useEffect(() => {
     document.body.classList.add("buzz-map-active");
+    document.documentElement.classList.add("mobile-home-mounted");
     try {
       // Browser storage is hydrated after SSR so the server and first client
       // render remain deterministic.
@@ -236,6 +264,7 @@ export default function BuzzMapApp() {
 
     return () => {
       document.body.classList.remove("buzz-map-active");
+      document.documentElement.classList.remove("mobile-home-mounted");
       unsubscribe?.();
     };
   }, [loadNearby, mapRef]);
@@ -536,6 +565,10 @@ export default function BuzzMapApp() {
       </header>
 
       <nav className="buzz-map-filters" aria-label="Filter places">
+        <button type="button" className="buzz-plan-night" onClick={() => setPlannerOpen(true)}>
+          <Sparkles /><span>Plan my night</span>
+        </button>
+        <span className="buzz-filter-divider" aria-hidden="true" />
         <button type="button" className={active === allLabel ? "active" : ""} onClick={() => setActive(allLabel)} aria-pressed={active === allLabel}><AllIcon /><span>{allLabel}</span></button>
         <button
           type="button"
@@ -583,6 +616,15 @@ export default function BuzzMapApp() {
           {error && <button type="button" className="buzz-map-error" onClick={() => void loadNearby()}>{error} · Retry</button>}
         </section>
       </main>
+
+      {plannerOpen ? (
+        <BuzzNightPlanner
+          open
+          venues={venues}
+          onClose={closePlanner}
+          onSelectVenue={selectPlannedVenue}
+        />
+      ) : null}
 
       {selected && (
         <BuzzVenueDetail

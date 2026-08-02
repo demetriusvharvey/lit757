@@ -202,7 +202,7 @@ export async function GET(request: Request) {
   const presenceStart = new Date(now.getTime() - DIRECT_PRESENCE_WINDOW_MINUTES * 60_000).toISOString();
 
   const [venueResult, eventResult, mappingResult, presenceResult, scoreResult, trafficResult, publicContext] = await Promise.all([
-    db.from("venues").select("id,name,city,address,lat,lng,type,category,ai_score,ai_summary,google_rating,google_place_id,photo_source,phone,website,hours,enriched_at").limit(2500),
+    db.from("venues").select("id,name,city,address,lat,lng,type,category,music_genre,age_limit,cover,parking,dress_code,ai_score,ai_summary,google_rating,google_place_id,photo_source,phone,website,hours,enriched_at").limit(2500),
     db.from("events").select("id,name,venue_name,start_time,end_time,ticket_status,source_url").gte("start_time", eventStart).lte("start_time", eventEnd).order("start_time").limit(1800),
     db.from("buzz_provider_events").select("event_id,venue_id").not("venue_id", "is", null).limit(4000),
     db.from("venue_live_reports").select("venue_id,device_id,report_type,created_at").in("report_type", ["nearby_presence", "passive_presence"]).gte("created_at", presenceStart).order("created_at", { ascending: false }).limit(5000),
@@ -428,6 +428,11 @@ export async function GET(request: Request) {
       openNow: hoursEvidence.open,
       phone: venue.phone || null,
       website: venue.website || null,
+      musicGenre: venue.music_genre || null,
+      ageLimit: venue.age_limit || null,
+      cover: venue.cover || null,
+      parking: venue.parking || null,
+      dressCode: venue.dress_code || null,
       score: buzzScore,
       distanceMiles: distance === null ? null : Number(distance.toFixed(2)),
       area: district ? {
