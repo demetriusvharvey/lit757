@@ -3,6 +3,11 @@ import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { getRequestUser } from "../../../src/lib/server-auth";
 import { inferInterestTags } from "../../../src/lib/interest-tags";
 import { getVenueImage } from "../../../src/lib/venue-image";
+import {
+  DIRECT_PRESENCE_WINDOW_MINUTES,
+  groupDirectPresence,
+  type DirectPresenceRow,
+} from "../../../src/lib/buzz/direct-presence";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -890,7 +895,7 @@ export async function GET(request: Request) {
   const daypart = getDaypart(clock.hour);
   const eventStart = new Date(referenceTime - 2 * 60 * 60 * 1000).toISOString();
   const eventEnd = new Date(referenceTime + 7 * 24 * 60 * 60 * 1000).toISOString();
-  const presenceStart = new Date(referenceTime - 45 * 60 * 1000).toISOString();
+  const presenceStart = new Date(referenceTime - DIRECT_PRESENCE_WINDOW_MINUTES * 60_000).toISOString();
   const member = await getRequestUser(request);
 
   const [
@@ -914,9 +919,10 @@ export async function GET(request: Request) {
       .limit(700),
     supabaseAdmin
       .from("venue_live_reports")
-      .select("venue_id,device_id,created_at")
+      .select("venue_id,device_id,report_type,created_at")
       .eq("report_type", "nearby_presence")
       .gte("created_at", presenceStart)
+      .order("created_at", { ascending: false })
       .limit(1000),
     member
       ? supabaseAdmin
@@ -950,13 +956,10 @@ export async function GET(request: Request) {
         latitude <= 37.38
       );
     });
-  const nearbyMembers = new Map<string, Set<string>>();
-  for (const report of presenceReports || []) {
-    if (!report.venue_id || !report.device_id) continue;
-    const members = nearbyMembers.get(report.venue_id) || new Set<string>();
-    members.add(report.device_id);
-    nearbyMembers.set(report.venue_id, members);
-  }
+  const nearbyMembers = groupDirectPresence(
+    (presenceReports || []) as DirectPresenceRow[],
+    new Date(referenceTime)
+  ).byVenue;
   const likedVenueIds = new Set((likes || []).map((like) => like.venue_id).filter(Boolean));
   const likedTags = new Set(
     eligibleVenues
@@ -976,7 +979,7 @@ export async function GET(request: Request) {
         daypart,
         clock,
         referenceTime,
-        nearbyMembers.get(venue.id)?.size || 0,
+        nearbyMembers.get(venue.id)?.verified.size || 0,
         memberBoost(venue)
       )
     )

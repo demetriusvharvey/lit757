@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { getVenueImage } from "../../../src/lib/venue-image";
 import { ACTIVITY_DISTRICTS, distanceMiles, type ActivityDistrict } from "../../../src/lib/buzz/districts";
+import {
+  DIRECT_PRESENCE_WINDOW_MINUTES,
+  groupDirectPresence,
+  type DirectPresenceRow,
+} from "../../../src/lib/buzz/direct-presence";
 import { clamp, openHoursAdjustment, passivePresenceEvidence, trafficEvidence } from "../../../src/lib/buzz/forecast-v2";
 import {
   loadPublicActivityContext,
@@ -26,12 +31,6 @@ type EventRow = {
   source_url?: string | null;
 };
 type EventMappingRow = { event_id: string; venue_id?: string | null };
-type PresenceRow = {
-  venue_id?: string | null;
-  device_id?: string | null;
-  report_type?: string | null;
-  report_value?: string | null;
-};
 type TrafficRow = {
   source: string;
   value: number;
@@ -56,7 +55,6 @@ type ScoreRow = {
   factors?: unknown;
 };
 type DistrictEventStats = { active: number; soon: number; total: number };
-type PresenceGroup = { passive: Set<string>; verified: Set<string> };
 
 const normalize = (value: unknown) => String(value || "").toLowerCase().normalize("NFKD").replace(/\p{Diacritic}/gu, "").replace(/&/g, " and ").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
 const canonical = (value: unknown) => normalize(value).replace(/^the\s+/, "");
@@ -215,13 +213,13 @@ export async function GET(request: Request) {
   const now = new Date();
   const eventStart = new Date(now.getTime() - 4 * 60 * 60 * 1000).toISOString();
   const eventEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
-  const presenceStart = new Date(now.getTime() - 30 * 60 * 1000).toISOString();
+  const presenceStart = new Date(now.getTime() - DIRECT_PRESENCE_WINDOW_MINUTES * 60_000).toISOString();
 
   const [venueResult, eventResult, mappingResult, presenceResult, scoreResult, trafficResult, publicContext] = await Promise.all([
     db.from("venues").select("id,name,city,address,lat,lng,type,category,ai_score,ai_summary,google_rating,google_place_id,photo_source,phone,website,hours,enriched_at").limit(2500),
     db.from("events").select("id,name,venue_name,start_time,end_time,ticket_status,source_url").gte("start_time", eventStart).lte("start_time", eventEnd).order("start_time").limit(1800),
     db.from("buzz_provider_events").select("event_id,venue_id").not("venue_id", "is", null).limit(4000),
-    db.from("venue_live_reports").select("venue_id,device_id,report_type,report_value").in("report_type", ["nearby_presence", "passive_presence"]).gte("created_at", presenceStart).limit(5000),
+    db.from("venue_live_reports").select("venue_id,device_id,report_type,created_at").in("report_type", ["nearby_presence", "passive_presence"]).gte("created_at", presenceStart).order("created_at", { ascending: false }).limit(5000),
     db.from("buzz_score_snapshots").select("venue_id,score,label,score_mode,confidence,version,computed_at,expires_at,evidence_age_minutes,source_families,explanation,factors").gt("expires_at", now.toISOString()).limit(3000),
     db.from("buzz_signal_snapshots").select("source,value,observed_at,expires_at,metadata").like("source", "tomtom:%").gt("expires_at", now.toISOString()).order("observed_at", { ascending: false }).limit(1000),
     loadPublicActivityContext().catch(error => {
@@ -252,14 +250,7 @@ export async function GET(request: Request) {
     if (venueId) addVenueEvent(eventsByVenueId, venueId, event);
   }
 
-  const presence = new Map<string, PresenceGroup>();
-  for (const report of (presenceResult.data || []) as PresenceRow[]) {
-    if (!report.venue_id || !report.device_id) continue;
-    const group = presence.get(report.venue_id) || { passive: new Set<string>(), verified: new Set<string>() };
-    if (report.report_type === "passive_presence") group.passive.add(report.device_id);
-    else group.verified.add(report.device_id);
-    presence.set(report.venue_id, group);
-  }
+  const presence = groupDirectPresence((presenceResult.data || []) as DirectPresenceRow[], now).byVenue;
 
   const scoreMap = new Map<string, ScoreRow>();
   for (const snapshot of (scoreResult.data || []) as ScoreRow[]) scoreMap.set(snapshot.venue_id, snapshot);
