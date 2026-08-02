@@ -1,14 +1,14 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
-import type { Session, SupabaseClient } from "@supabase/supabase-js";
+import { FormEvent, useEffect, useState } from "react";
+import type { Session } from "@supabase/supabase-js";
 import { ChevronLeft, LockKeyhole, Mail, Sparkles, X } from "lucide-react";
+import { supabase } from "../src/lib/supabase";
 import "./notification-auth.css";
 
 type Providers = { google?: boolean; apple?: boolean; email?: boolean };
 
 export default function NotificationAuth() {
-  const clientRef = useRef<SupabaseClient | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
@@ -44,25 +44,15 @@ export default function NotificationAuth() {
     };
 
     const boot = async () => {
-      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-      if (!url || !key) return;
-
-      const { createClient } = await import("@supabase/supabase-js");
-      const client = createClient(url, key, {
-        auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
-      });
-      clientRef.current = client;
-
       const [{ data }, providerResponse] = await Promise.all([
-        client.auth.getSession(),
+        supabase.auth.getSession(),
         fetch("/api/auth/providers", { cache: "no-store" }).catch(() => null),
       ]);
       if (destroyed) return;
       setSession(data.session);
       if (providerResponse?.ok) setProviders(await providerResponse.json() as Providers);
 
-      const listener = client.auth.onAuthStateChange((_event, nextSession) => {
+      const listener = supabase.auth.onAuthStateChange((_event, nextSession) => {
         if (destroyed) return;
         setSession(nextSession);
         if (nextSession) {
@@ -90,11 +80,10 @@ export default function NotificationAuth() {
 
   async function submitEmail(event: FormEvent) {
     event.preventDefault();
-    const client = clientRef.current;
-    if (!client || !email.trim()) return;
+    if (!email.trim()) return;
     setWorking(true);
     setMessage("");
-    const { error } = await client.auth.signInWithOtp({
+    const { error } = await supabase.auth.signInWithOtp({
       email: email.trim(),
       options: { emailRedirectTo: window.location.origin },
     });
@@ -103,11 +92,9 @@ export default function NotificationAuth() {
   }
 
   async function oauth(provider: "google" | "apple") {
-    const client = clientRef.current;
-    if (!client) return;
     setWorking(true);
     setMessage("");
-    const { error } = await client.auth.signInWithOAuth({
+    const { error } = await supabase.auth.signInWithOAuth({
       provider,
       options: { redirectTo: window.location.origin },
     });

@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { Session, SupabaseClient } from "@supabase/supabase-js";
+import { useEffect, useMemo, useState } from "react";
+import type { Session } from "@supabase/supabase-js";
 import { X } from "lucide-react";
+import { supabase } from "../src/lib/supabase";
 import { useMapController } from "./map-controller";
 import "./buzz-crowd-report.css";
 
@@ -19,7 +20,6 @@ const options: Array<{ level: CrowdLevel; label: string }> = [
 
 export default function BuzzCrowdReport() {
   const { selectedVenueId } = useMapController();
-  const clientRef = useRef<SupabaseClient | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [venues, setVenues] = useState<Venue[]>([]);
   const [dismissedId, setDismissedId] = useState<string | null>(null);
@@ -36,17 +36,9 @@ export default function BuzzCrowdReport() {
     let destroyed = false;
     let unsubscribe: (() => void) | null = null;
     const boot = async () => {
-      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-      if (!url || !key) return;
-      const { createClient } = await import("@supabase/supabase-js");
-      const client = createClient(url, key, {
-        auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
-      });
-      clientRef.current = client;
-      const { data } = await client.auth.getSession();
+      const { data } = await supabase.auth.getSession();
       if (!destroyed) setSession(data.session);
-      const listener = client.auth.onAuthStateChange((_event, nextSession) => {
+      const listener = supabase.auth.onAuthStateChange((_event, nextSession) => {
         if (!destroyed) setSession(nextSession);
       });
       unsubscribe = () => listener.data.subscription.unsubscribe();

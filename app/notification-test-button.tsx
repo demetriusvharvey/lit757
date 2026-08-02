@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { supabase } from "../src/lib/supabase";
 
 const PUSH_STATUS_KEY = "lit757-push-status";
 
@@ -33,12 +34,7 @@ export default function NotificationTestButton() {
           button!.disabled = true;
           button!.textContent = "Sending test…";
           try {
-            const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-            const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-            if (!url || !key) throw new Error("Account setup is unavailable.");
-            const { createClient } = await import("@supabase/supabase-js");
-            const client = createClient(url, key);
-            const { data } = await client.auth.getSession();
+            const { data } = await supabase.auth.getSession();
             if (!data.session) {
               window.dispatchEvent(new Event("lit757:open-notification-auth"));
               throw new Error("Sign in first.");
