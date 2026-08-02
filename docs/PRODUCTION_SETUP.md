@@ -182,3 +182,7 @@ urgent; both make the repository harder to reason about.
 
 Missing secrets correctly fail closed. Do not solve a missing provider by
 enabling billing; use the documented free or deterministic fallback.
+
+Production workflows are intentionally read-only. Historical one-time fix
+workflows that committed directly to branches have been removed; new source
+changes must go through a tested pull request.
