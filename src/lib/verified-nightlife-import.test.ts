@@ -8,8 +8,8 @@ import {
 } from "./verified-nightlife-import";
 
 test("verified nightlife import has fixed rollback IDs and two-source evidence", () => {
-  assert.equal(VERIFIED_NIGHTLIFE_IMPORT.venues.length, 11);
-  assert.equal(new Set(VERIFIED_NIGHTLIFE_IMPORT.venues.map(venue => venue.id)).size, 11);
+  assert.equal(VERIFIED_NIGHTLIFE_IMPORT.venues.length, 17);
+  assert.equal(new Set(VERIFIED_NIGHTLIFE_IMPORT.venues.map(venue => venue.id)).size, 17);
   assert.match(VERIFIED_NIGHTLIFE_IMPORT.backup.sha256, /^[a-f0-9]{64}$/);
   for (const venue of VERIFIED_NIGHTLIFE_IMPORT.venues) {
     assert.match(venue.id, /^[a-f0-9-]{36}$/);
