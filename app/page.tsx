@@ -31,7 +31,7 @@ import AccountPanel, {
 } from "./account-panel";
 import { canInitializeMapbox } from "./mapbox-config";
 
-type DiscoveryMode = "all" | "food" | "explore" | "events";
+type DiscoveryMode = "all" | "food" | "nightlife" | "explore" | "events";
 
 type DiscoveryEvent = {
   id: string;
@@ -52,6 +52,7 @@ type DiscoveryVenue = {
   type: string;
   category: string;
   kind: "food" | "nightlife" | "activity" | "events" | "other";
+  kinds?: Array<"food" | "nightlife" | "activity" | "events" | "other">;
   rating: number | null;
   ageLimit: string | null;
   cover: string | null;
@@ -112,6 +113,7 @@ const CITIES = [
 const MODES: Array<{ id: DiscoveryMode; label: string }> = [
   { id: "all", label: "For now" },
   { id: "food", label: "Eat" },
+  { id: "nightlife", label: "Nightlife" },
   { id: "explore", label: "Explore" },
   { id: "events", label: "Events" },
 ];

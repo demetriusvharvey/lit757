@@ -16,6 +16,7 @@ import {
 } from "../../../src/lib/integrations/public-context";
 import { dedupeVenueRows } from "../../../src/lib/venue-dedupe";
 import { activityStatusLabel } from "../../../src/lib/buzz/truth-labels";
+import { venueKinds, type VenueKind } from "../../../src/lib/venue-kind";
 
 export const dynamic = "force-dynamic";
 
@@ -79,23 +80,16 @@ function hoursFromNow(value?: string | null, reference = Date.now()) {
   return Number.isFinite(timestamp) ? (timestamp - reference) / 3_600_000 : null;
 }
 
-function kindFor(text: string) {
-  if (/restaurant|food|diner|cafe|pizza|grill|kitchen|taco|burger|bakery|seafood|brunch/.test(text)) return "food";
-  if (/bar|brew|cocktail|wine|pub|club|dj|nightlife|lounge|music/.test(text)) return "nightlife";
-  if (/park|trail|beach|garden|outdoor|museum|shopping|mall|market|arcade|bowling|golf|zoo|aquarium|theater|theatre|comedy/.test(text)) return "activity";
-  return "other";
-}
-
 function outdoorVenue(text: string) {
   return /park|trail|beach|garden|outdoor|boardwalk|golf|zoo|festival|amphitheater|amphitheatre/.test(text);
 }
 
-function categoryMatch(category: string, kind: string, text: string, hasEvent: boolean) {
+function categoryMatch(category: string, kinds: VenueKind[], text: string, hasEvent: boolean) {
   if (!category || category === "all") return true;
   if (category === "events") return hasEvent;
-  if (category === "drinks") return kind === "nightlife";
-  if (category === "outdoors" || category === "shopping" || category === "explore") return kind === "activity";
-  return kind === category || text.includes(category);
+  if (category === "drinks") return kinds.includes("nightlife");
+  if (category === "outdoors" || category === "shopping" || category === "explore") return kinds.includes("activity");
+  return kinds.includes(category as VenueKind) || text.includes(category);
 }
 
 function ticketSignal(status?: string | null) {
@@ -309,9 +303,15 @@ export async function GET(request: Request) {
 
     const event = chooseEvent(eventsByVenueId.get(venue.id) || [], now);
     const text = normalize(`${venue.name} ${venue.city} ${venue.address} ${venue.type} ${venue.category} ${venue.ai_summary} ${event?.name}`);
-    const baseKind = kindFor(text);
+    const baseKinds = venueKinds({
+      name: venue.name,
+      type: venue.type,
+      category: venue.category,
+      summary: venue.ai_summary,
+    });
+    const baseKind = baseKinds[0];
     const kind = event ? "events" : baseKind;
-    if (!categoryMatch(category, baseKind, text, Boolean(event))) return [];
+    if (!categoryMatch(category, baseKinds, text, Boolean(event))) return [];
     if (query && !query.split(" ").every(term => text.includes(term))) return [];
 
     const eventEvidence = eventSignal(event, now);
@@ -422,6 +422,7 @@ export async function GET(request: Request) {
       type: String(venue.type || venue.category || "Local spot"),
       category: String(venue.category || venue.type || "Local spot"),
       kind,
+      kinds: event ? [...new Set<VenueKind>(["events", ...baseKinds])] : baseKinds,
       photoUrl,
       reason: trendLabel,
       openNow: hoursEvidence.open,

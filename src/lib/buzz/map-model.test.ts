@@ -5,6 +5,8 @@ import {
   BUZZING_PIN_MIN_SCORE,
   ON_FIRE_PIN_MIN_SCORE,
   milesLabel,
+  venueCategories,
+  venueMatchesCategory,
   venueScore,
   venueStatus,
   venueTruthLabel,
@@ -49,4 +51,29 @@ test("distance labels stay compact across responsive layouts", () => {
   assert.equal(milesLabel(0.04), "Here");
   assert.equal(milesLabel(3.24), "3.2 mi");
   assert.equal(milesLabel(14.6), "15 mi");
+});
+
+test("mixed restaurant bars remain discoverable under food, drinks, and nightlife", () => {
+  const mixed: BuzzVenue = {
+    id: "mixed-venue",
+    name: "NuVibez Restaurant Bar & Lounge",
+    type: "Bar",
+    category: "Bar",
+    kinds: ["nightlife", "food"],
+    lat: 37.1,
+    lng: -76.5,
+  };
+
+  assert.deepEqual(venueCategories(mixed), ["Food", "Drinks", "Nightlife"]);
+  assert.equal(venueMatchesCategory(mixed, "Food"), true);
+  assert.equal(venueMatchesCategory(mixed, "Drinks"), true);
+  assert.equal(venueMatchesCategory(mixed, "Nightlife"), true);
+  assert.equal(venueMatchesCategory(mixed, "Outdoors"), false);
+});
+
+test("clubs and pure bars resolve to their distinct discovery filters", () => {
+  const club: BuzzVenue = { id: "club", name: "Local Nightclub", type: "Nightclub", lat: 36.8, lng: -76.2 };
+  const bar: BuzzVenue = { id: "bar", name: "Local Pub", type: "Bar", lat: 36.8, lng: -76.2 };
+  assert.deepEqual(venueCategories(club), ["Nightlife"]);
+  assert.deepEqual(venueCategories(bar), ["Drinks"]);
 });

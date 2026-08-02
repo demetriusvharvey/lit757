@@ -1,4 +1,5 @@
 import { activityStatusLabel } from "../src/lib/buzz/truth-labels";
+import { venueKinds } from "../src/lib/venue-kind";
 
 export type CrowdLevel = "quiet" | "steady" | "busy" | "packed";
 export type BuzzCategory =
@@ -16,6 +17,7 @@ export type BuzzVenue = {
   city?: string;
   address?: string | null;
   kind?: string;
+  kinds?: string[];
   type?: string;
   category?: string;
   lat: number | string;
@@ -126,18 +128,36 @@ export function milesLabel(value?: number | null) {
   return value < 10 ? `${value.toFixed(1)} mi` : `${Math.round(value)} mi`;
 }
 
+export function venueCategories(venue: BuzzVenue): BuzzCategory[] {
+  const normalized = `${venue.name} ${venue.kind || ""} ${venue.type || ""} ${venue.category || ""}`.toLowerCase();
+  const kinds = new Set(venue.kinds || venueKinds({
+    name: venue.name,
+    type: venue.type,
+    category: venue.category,
+  }));
+  const categories = new Set<BuzzCategory>();
+
+  if (venue.event?.name || venue.kind === "events" || kinds.has("events")) categories.add("Events");
+  if (kinds.has("food")) categories.add("Food");
+  if (kinds.has("nightlife")) {
+    const drinks = /bar|brew|wine|drink|pub|cocktail|tap|tavern|biergarten/.test(normalized);
+    const nightlife = /club|music|nightlife|dj|lounge|concert|hookah|cabaret/.test(normalized);
+    if (drinks) categories.add("Drinks");
+    if (nightlife || !drinks) categories.add("Nightlife");
+  }
+  if (kinds.has("activity") && /park|trail|beach|garden|museum|outdoor|zoo|aquarium|golf/.test(normalized)) categories.add("Outdoors");
+  if (kinds.has("activity") && /shop|mall|market|store/.test(normalized)) categories.add("Shopping");
+  if (!categories.size) categories.add("All");
+  return ["Events", "Food", "Drinks", "Nightlife", "Outdoors", "Shopping", "All"]
+    .filter(category => categories.has(category as BuzzCategory)) as BuzzCategory[];
+}
+
 export function venueCategory(venue: BuzzVenue): BuzzCategory {
-  const text =
-    `${venue.name} ${venue.kind || ""} ${venue.type || ""} ${venue.category || ""} ` +
-    `${venue.reason || ""} ${venue.event?.name || ""}`;
-  const normalized = text.toLowerCase();
-  if (venue.event?.name || venue.kind === "events") return "Events";
-  if (/restaurant|food|cafe|pizza|grill|seafood|bakery|burger|brunch|kitchen/.test(normalized)) return "Food";
-  if (/bar|brew|wine|drink|pub|cocktail/.test(normalized)) return "Drinks";
-  if (/club|music|nightlife|dj|lounge|concert/.test(normalized)) return "Nightlife";
-  if (/park|trail|beach|garden|museum|outdoor/.test(normalized)) return "Outdoors";
-  if (/shop|mall|market|store/.test(normalized)) return "Shopping";
-  return "All";
+  return venueCategories(venue)[0];
+}
+
+export function venueMatchesCategory(venue: BuzzVenue, category: BuzzCategory) {
+  return category === "All" || venueCategories(venue).includes(category);
 }
 
 export function formatEventTime(value?: string | null) {
