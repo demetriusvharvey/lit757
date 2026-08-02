@@ -62,14 +62,24 @@ export type OsmVenueMatch = {
 
 export type OsmCoverageCandidate = {
   candidate: OsmVenueCandidate;
+  evidence: OsmNightlifeEvidence;
   sourceKeys: string[];
   match: OsmVenueMatch | null;
+};
+
+export type OsmNightlifeEvidence = "primary-tag" | "secondary-tag" | "name-review";
+
+export type OsmNightlifeEvidenceCounts = {
+  primaryTag: number;
+  secondaryTag: number;
+  nameReview: number;
 };
 
 export type OsmNightlifeCoverage = {
   rawNightlifeCandidates: number;
   uniqueNightlifeCandidates: number;
   duplicateElementsRemoved: number;
+  evidenceCounts: OsmNightlifeEvidenceCounts;
   matchedCandidates: number;
   unmatchedCandidates: number;
   candidates: OsmCoverageCandidate[];
@@ -86,11 +96,13 @@ const RELEVANT_TAGS = {
     "community_centre",
     "fast_food",
     "food_court",
+    "hookah_lounge",
     "marketplace",
     "music_venue",
     "nightclub",
     "pub",
     "restaurant",
+    "stripclub",
     "theatre",
   ],
   tourism: ["aquarium", "attraction", "gallery", "museum", "theme_park", "zoo"],
@@ -110,6 +122,17 @@ const RELEVANT_TAGS = {
 
 const GENERIC_VALUES = new Set(["", "other", "unknown", "local spot", "local business", "place"]);
 const CORPORATE_TOKENS = new Set(["llc", "inc", "incorporated", "ltd", "company", "co"]);
+const PRIMARY_NIGHTLIFE_AMENITIES = new Set([
+  "bar",
+  "biergarten",
+  "hookah_lounge",
+  "music_venue",
+  "nightclub",
+  "pub",
+  "stripclub",
+]);
+const NIGHTLIFE_NAME_REVIEW = /\b(?:ale ?house|bar|brewery|brewing|brewpub|cabaret|cocktails?|hookah|lounge|night ?club|pub|saloon|tap ?house|taproom|tavern|wine bar|winery)\b/;
+const NON_NIGHTLIFE_BAR_NAME = /\b(?:coffee|espresso|juice|milkshake|raw|salad|snack|smoothie|sushi) bar\b|\bbar (?:b )?q(?:ue)?\b|\bbarbe?cue\b/;
 
 function regex(values: readonly string[]) {
   return `^(${values.join("|")})$`;
@@ -123,6 +146,9 @@ export function buildHamptonRoadsOverpassQuery() {
     + `  nwr["name"]["tourism"~"${regex(RELEVANT_TAGS.tourism)}"](${bbox});\n`
     + `  nwr["name"]["leisure"~"${regex(RELEVANT_TAGS.leisure)}"](${bbox});\n`
     + `  nwr["name"]["shop"~"${regex(RELEVANT_TAGS.shop)}"](${bbox});\n`
+    + `  nwr["name"]["bar"="yes"](${bbox});\n`
+    + `  nwr["name"]["microbrewery"="yes"](${bbox});\n`
+    + `  nwr["name"]["club"="music"](${bbox});\n`
     + `);\nout tags center qt;`;
 }
 
@@ -156,8 +182,9 @@ function titleCase(value: string) {
 }
 
 function categoryFor(key: string, value: string) {
+  if (["bar", "microbrewery", "club", "smoking"].includes(key)) return "Nightlife";
   if (key === "amenity") {
-    if (["bar", "pub", "nightclub", "biergarten", "music_venue"].includes(value)) return "Nightlife";
+    if (PRIMARY_NIGHTLIFE_AMENITIES.has(value)) return "Nightlife";
     if (["restaurant", "cafe", "fast_food", "food_court"].includes(value)) return "Food";
     if (["theatre", "cinema", "arts_centre"].includes(value)) return "Arts & Culture";
     if (value === "bowling_alley") return "Entertainment";
@@ -182,7 +209,40 @@ function relevantTag(tags: Record<string, string>) {
     const value = clean(tags[key]);
     if (value) return { key, value };
   }
+  for (const key of ["bar", "microbrewery", "club", "smoking"] as const) {
+    const value = clean(tags[key]);
+    if (value) return { key, value };
+  }
   return null;
+}
+
+function isYes(value: unknown) {
+  return ["yes", "true", "1"].includes(String(value || "").trim().toLowerCase());
+}
+
+/**
+ * Separates authoritative OSM venue tags from weaker review hints. A name-only
+ * result is allowed into the protected review queue, but is never promoted to
+ * verified nightlife metadata or used as an activity signal.
+ */
+export function osmNightlifeEvidence(candidate: OsmVenueCandidate): OsmNightlifeEvidence | null {
+  const amenity = clean(candidate.tags.amenity);
+  if (amenity && PRIMARY_NIGHTLIFE_AMENITIES.has(amenity)) return "primary-tag";
+  if (
+    isYes(candidate.tags.bar)
+    || isYes(candidate.tags.microbrewery)
+    || candidate.tags.club === "music"
+    || candidate.tags.smoking === "hookah"
+    || isYes(candidate.tags.live_music)
+  ) {
+    return "secondary-tag";
+  }
+
+  if (!["Food", "Local Spot"].includes(candidate.category)) return null;
+  const name = normalizeVenueName(candidate.name);
+  return NIGHTLIFE_NAME_REVIEW.test(name) && !NON_NIGHTLIFE_BAR_NAME.test(name)
+    ? "name-review"
+    : null;
 }
 
 export function normalizeOsmElement(element: OsmElement): OsmVenueCandidate | null {
@@ -429,19 +489,38 @@ export function buildOsmNightlifeCoverage(
   venues: readonly VenueForOsmMatch[],
   candidates: readonly OsmVenueCandidate[],
 ): OsmNightlifeCoverage {
-  const nightlife = candidates.filter(candidate => candidate.category === "Nightlife");
+  const evidenceBySourceKey = new Map<string, OsmNightlifeEvidence>();
+  const nightlife = candidates.filter(candidate => {
+    const evidence = osmNightlifeEvidence(candidate);
+    if (!evidence) return false;
+    evidenceBySourceKey.set(osmSourceKey(candidate), evidence);
+    return true;
+  });
   const deduplicated = dedupeOsmVenueCandidates(nightlife);
-  const coverageCandidates = deduplicated.candidates.map(({ candidate, sourceKeys }) => ({
-    candidate,
-    sourceKeys,
-    match: findBestVenueForOsmCandidate(candidate, venues),
-  }));
+  const evidencePriority: OsmNightlifeEvidence[] = ["primary-tag", "secondary-tag", "name-review"];
+  const coverageCandidates = deduplicated.candidates.map(({ candidate, sourceKeys }) => {
+    const evidence = evidencePriority.find(value => sourceKeys.some(key => evidenceBySourceKey.get(key) === value))
+      || "name-review";
+    return {
+      candidate,
+      evidence,
+      sourceKeys,
+      match: findBestVenueForOsmCandidate(candidate, venues),
+    };
+  });
   const matchedCandidates = coverageCandidates.filter(item => item.match).length;
+  const evidenceCounts = coverageCandidates.reduce<OsmNightlifeEvidenceCounts>((counts, item) => {
+    if (item.evidence === "primary-tag") counts.primaryTag += 1;
+    else if (item.evidence === "secondary-tag") counts.secondaryTag += 1;
+    else counts.nameReview += 1;
+    return counts;
+  }, { primaryTag: 0, secondaryTag: 0, nameReview: 0 });
 
   return {
     rawNightlifeCandidates: nightlife.length,
     uniqueNightlifeCandidates: coverageCandidates.length,
     duplicateElementsRemoved: deduplicated.duplicateElementsRemoved,
+    evidenceCounts,
     matchedCandidates,
     unmatchedCandidates: coverageCandidates.length - matchedCandidates,
     candidates: coverageCandidates,

@@ -94,6 +94,24 @@ function metadataCompleteness(items: OsmCoverageCandidate[]) {
   };
 }
 
+function evidenceBreakdown(items: OsmCoverageCandidate[]) {
+  const counts = {
+    primaryTag: { total: 0, matched: 0, unmatched: 0 },
+    secondaryTag: { total: 0, matched: 0, unmatched: 0 },
+    nameReview: { total: 0, matched: 0, unmatched: 0 },
+  };
+  for (const item of items) {
+    const key = item.evidence === "primary-tag"
+      ? "primaryTag"
+      : item.evidence === "secondary-tag"
+        ? "secondaryTag"
+        : "nameReview";
+    counts[key].total += 1;
+    counts[key][item.match ? "matched" : "unmatched"] += 1;
+  }
+  return counts;
+}
+
 function candidateSummary(item: OsmCoverageCandidate) {
   const candidate = item.candidate;
   const city = candidateCity(item);
@@ -108,6 +126,7 @@ function candidateSummary(item: OsmCoverageCandidate) {
     phone: candidate.phone,
     website: candidate.website,
     type: candidate.type,
+    evidence: item.evidence,
     osmUrl: candidate.osmUrl,
     sourceElements: item.sourceKeys,
   };
@@ -169,6 +188,7 @@ export async function GET(request: Request) {
           : 0,
         byCity: cityBreakdown(coverage.candidates),
         byScope: scopeBreakdown(coverage.candidates),
+        byEvidence: evidenceBreakdown(coverage.candidates),
         metadataCompleteness: metadataCompleteness(coverage.candidates),
       },
       reviewCandidates,
@@ -186,7 +206,7 @@ export async function GET(request: Request) {
         },
       })),
       reviewLimit: limit,
-      truthNote: "This is a review queue, not proof of complete nightlife coverage. OSM can be incomplete or stale; unmatched candidates require verification before any import. No venue or activity data is changed by this endpoint.",
+      truthNote: "This is a review queue, not proof of complete nightlife coverage. Primary and secondary OSM tags are kept separate from conservative name-only suggestions. OSM can be incomplete or stale; unmatched candidates require verification before any import. No venue or activity data is changed by this endpoint.",
     }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     console.error("OSM nightlife coverage audit failed", error);

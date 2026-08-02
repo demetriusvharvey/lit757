@@ -81,6 +81,18 @@ jobs:
           assert int(venue_summary.get("updated") or 0) == 0, "Dry run must not update venues"
           assert int(venue_summary.get("failedUpdates") or 0) == 0, "Dry run reported failed updates"
 
+          coverage = get("/api/venues/osm-coverage?limit=500", protected=True)
+          coverage_summary = coverage.get("coverage") or {}
+          database_summary = coverage.get("database") or {}
+          unique_candidates = int(coverage_summary.get("uniqueNightlifeCandidates") or 0)
+          matched_candidates = int(coverage_summary.get("matchedCandidates") or 0)
+          unmatched_candidates = int(coverage_summary.get("unmatchedReviewCandidates") or 0)
+          assert coverage.get("mode") == "read-only-review", "Coverage audit is not read-only"
+          assert unique_candidates > 0, "Nightlife coverage review set is empty"
+          assert matched_candidates + unmatched_candidates == unique_candidates, "Coverage totals do not balance"
+          assert int(database_summary.get("venuesEvaluated") or 0) > 0, "Coverage audit evaluated no database venues"
+          assert coverage.get("truthNote"), "Coverage audit truth note is missing"
+
           print(json.dumps({
               "osmCandidates": source_summary.get("total"),
               "osmByCategory": source_summary.get("byCategory"),
@@ -93,6 +105,9 @@ jobs:
               "usefulMatches": venue_summary.get("matchedWithUsefulPatch"),
               "fieldsProposed": venue_summary.get("fieldsProposed"),
               "sampleMatches": dry_run.get("matches"),
+              "nightlifeCoverage": coverage_summary,
+              "nightlifeReviewCandidates": coverage.get("reviewCandidates"),
+              "nightlifeClassificationGaps": coverage.get("classificationGaps"),
           }, indent=2))
           PY
       - name: Upload OSM smoke output

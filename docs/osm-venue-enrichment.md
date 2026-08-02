@@ -8,7 +8,8 @@ The integration identifies itself with a unique User-Agent, posts Overpass QL in
 
 - `/api/data/osm-venues` reports candidate coverage and attribution.
 - `/api/venues/osm-enrich?dryRun=1` compares live Buzz venues without writing changes.
-- `.github/workflows/osm-production-smoke.yml` requires nonempty OSM coverage, useful proposed matches, and zero dry-run writes.
+- `/api/venues/osm-coverage` keeps primary nightlife tags, secondary tags such as `bar=yes` and `microbrewery=yes`, and conservative name-only review suggestions in separate evidence bands. It never imports a venue.
+- `.github/workflows/osm-production-smoke.yml` requires a balanced, nonempty read-only nightlife review queue, useful proposed matches, and zero dry-run writes. Its short-lived artifact includes city/evidence coverage and unmatched candidates for review.
 - The first audited dry run found 4,254 relevant OSM candidates and 29 useful venue matches, limited to 15 missing phone numbers and 29 missing websites.
 - `.github/workflows/osm-venue-enrichment.yml` performs the write-enabled enrichment weekly after the dry-run gate has proven match quality.
 
