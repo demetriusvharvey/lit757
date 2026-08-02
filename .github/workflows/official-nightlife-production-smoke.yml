@@ -1,0 +1,100 @@
+name: Official nightlife production smoke
+
+on:
+  schedule:
+    - cron: "17 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: official-nightlife-production-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Verify official directories and protected coverage report
+        env:
+          BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${BASE_URL:?Add BUZZ_PRODUCTION_URL as a GitHub Actions secret}"
+          : "${CRON_SECRET:?Add CRON_SECRET as a GitHub Actions secret}"
+          BASE_URL="${BASE_URL%/}"
+          python - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          base = os.environ["BASE_URL"].rstrip("/")
+          secret = os.environ["CRON_SECRET"]
+          output_path = "official-nightlife-production-smoke-output.json"
+          request = urllib.request.Request(
+              f"{base}/api/venues/official-nightlife-coverage?limit=500",
+              headers={
+                  "Accept": "application/json",
+                  "Authorization": f"Bearer {secret}",
+                  "User-Agent": "BuzzOfficialNightlifeProductionSmoke/1.0",
+              },
+          )
+          try:
+              response = urllib.request.urlopen(request, timeout=180)
+          except urllib.error.HTTPError as error:
+              body = error.read().decode("utf-8", errors="replace")
+              with open(output_path, "w", encoding="utf-8") as output:
+                  json.dump({"httpStatus": error.code, "body": body[:30000]}, output, indent=2)
+              raise AssertionError(f"Coverage report returned HTTP {error.code}: {body[:4000]}") from error
+
+          with response:
+              report = json.load(response)
+          with open(output_path, "w", encoding="utf-8") as output:
+              json.dump(report, output, indent=2)
+
+          assert report.get("success") is True, json.dumps(report)[:4000]
+          assert report.get("mode") == "read-only-review"
+          assert int((report.get("database") or {}).get("venuesEvaluated") or 0) > 0
+          coverage = report.get("coverage") or {}
+          active = int(coverage.get("activeCandidates") or 0)
+          matched = int(coverage.get("matchedCandidates") or 0)
+          unmatched = int(coverage.get("unmatchedReviewCandidates") or 0)
+          assert active > 0, "Official source candidate set is empty"
+          assert matched + unmatched == active, "Official coverage totals do not balance"
+
+          sources = {source.get("id"): source for source in report.get("sources") or []}
+          assert sources["downtown-norfolk-nightlife"].get("status") == "ok"
+          assert int(sources["downtown-norfolk-nightlife"].get("candidates") or 0) >= 15
+          assert sources["portsmouth-visitor-directory"].get("status") == "ok"
+          assert int(sources["portsmouth-visitor-directory"].get("candidates") or 0) >= 20
+          assert sources["virginia-beach-oceanfront"].get("status") == "not-audited"
+
+          scopes = {scope.get("id"): scope for scope in report.get("priorityScopes") or []}
+          assert set(scopes) == {
+              "virginia-beach-oceanfront",
+              "downtown-norfolk",
+              "portsmouth-city",
+          }
+          assert scopes["virginia-beach-oceanfront"].get("sourceStatus") == "not-audited"
+          assert scopes["virginia-beach-oceanfront"].get("truthNote")
+          print(json.dumps({
+              "sources": report.get("sources"),
+              "coverage": coverage,
+              "reviewCandidates": report.get("reviewCandidates"),
+              "classificationGaps": report.get("classificationGaps"),
+              "inactiveCandidates": report.get("inactiveCandidates"),
+          }, indent=2))
+          PY
+      - name: Upload official nightlife smoke output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: official-nightlife-production-smoke-output
+          path: official-nightlife-production-smoke-output.json
+          if-no-files-found: warn
+          retention-days: 7
