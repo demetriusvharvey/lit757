@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
-import { ACTIVITY_DISTRICTS, distanceMiles, venueBelongsToActivityDistrict } from "../../../src/lib/buzz/districts";
+import { ACTIVITY_DISTRICTS, distanceMiles, nearestActivityDistrict } from "../../../src/lib/buzz/districts";
 import { dedupeVenueRows } from "../../../src/lib/venue-dedupe";
 
 export const dynamic = "force-dynamic";
@@ -66,15 +66,15 @@ export async function GET() {
     if (key) eventsByVenue.set(key, [...(eventsByVenue.get(key) || []), event]);
   }
 
+  const districtIdByVenueId = new Map(venues.map(venue => [
+    venue.id,
+    nearestActivityDistrict(Number(venue.lat), Number(venue.lng), venue.city)?.id || null,
+  ]));
+
   const districts = ACTIVITY_DISTRICTS.map((district) => {
     const nearby = venues
+      .filter(venue => districtIdByVenueId.get(venue.id) === district.id)
       .map((venue) => ({ venue, distance: distanceMiles(district.center.lat, district.center.lng, Number(venue.lat), Number(venue.lng)) }))
-      .filter((item) => venueBelongsToActivityDistrict(
-        district,
-        Number(item.venue.lat),
-        Number(item.venue.lng),
-        item.venue.city,
-      ))
       .sort((left, right) => Number(scoreMap.get(right.venue.id)?.score || right.venue.ai_score || 35) - Number(scoreMap.get(left.venue.id)?.score || left.venue.ai_score || 35));
 
     const venueIds = new Set(nearby.map((item) => item.venue.id));

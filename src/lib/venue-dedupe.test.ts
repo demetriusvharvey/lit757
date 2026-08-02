@@ -55,3 +55,8 @@ test("venue district matching requires both local geography and city", () => {
   assert.equal(venueBelongsToActivityDistrict(downtownNorfolk!, 36.8505547, -76.2900178, "Norfolk"), true);
   assert.equal(venueBelongsToActivityDistrict(downtownNorfolk!, 36.8505547, -76.2900178, "Portsmouth"), false);
 });
+
+test("overlapping Norfolk districts resolve to one nearest district", () => {
+  const district = nearestActivityDistrict(36.8566333, -76.2788986, "Norfolk");
+  assert.equal(district?.id, "downtown-norfolk-waterside");
+});
