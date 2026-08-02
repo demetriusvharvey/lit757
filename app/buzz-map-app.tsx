@@ -19,7 +19,6 @@ import {
   Compass,
   Flame,
   LocateFixed,
-  MapPin,
   Music2,
   Search,
   ShoppingBag,
@@ -75,6 +74,11 @@ import { useBuzzMapbox } from "./hooks/use-buzz-mapbox";
 import { BuzzVenueDetail } from "./components/buzz-venue-detail";
 import { BuzzVenueList } from "./components/buzz-venue-list";
 import { BuzzMapSearch } from "./components/buzz-map-search";
+import { BuzzPulseBrief } from "./components/buzz-pulse-brief";
+import {
+  pulseScopePhrase,
+  summarizeBuzzPulse,
+} from "./buzz-pulse-summary";
 
 const categories = [
   ["All", Compass],
@@ -164,6 +168,8 @@ export default function BuzzMapApp() {
       .sort((left, right) => score(right) - score(left) || (left.distanceMiles ?? 999) - (right.distanceMiles ?? 999));
   }, [venues, active, buzzingOnly, query]);
 
+  const pulseSummary = useMemo(() => summarizeBuzzPulse(venues), [venues]);
+
   const vibeFor = useCallback((venue: Venue) => contextualVibe({
     category: categoryFor(venue),
     type: venue.type || venue.kind,
@@ -207,6 +213,11 @@ export default function BuzzMapApp() {
     logoKeyFor,
     logoUrlFor,
   });
+  const mapGuide = mapZoom < FEATURED_LOGO_MIN_ZOOM
+    ? "Tap an area or zoom in for places."
+    : mapZoom < ALL_LOGO_MIN_ZOOM
+      ? "Orange/red marks a stronger activity score."
+      : "Tap a logo to inspect its evidence.";
 
   const selectPlannedVenue = useCallback((venue: Venue) => {
     setActive("All");
@@ -605,13 +616,12 @@ export default function BuzzMapApp() {
             <button type="button" onClick={() => void requestMyLocation()}><LocateFixed /> Near me</button>
             <button type="button" onClick={() => void searchThisMap()}><Search /> Search this map</button>
           </div>
-          <div className="buzz-map-mode">
-            {mapZoom < FEATURED_LOGO_MIN_ZOOM
-              ? <><Sparkles /><span>City activity forecast</span><small>Tap an area or zoom in for places</small></>
-              : mapZoom < ALL_LOGO_MIN_ZOOM
-                ? <><Sparkles /><span>Activity pins</span><small>Orange/red = a higher Buzz score</small></>
-                : <><MapPin /><span>Activity pins</span><small>Tap a logo to see Live or Forecast</small></>}
-          </div>
+          <BuzzPulseBrief
+            loading={loading}
+            mapGuide={mapGuide}
+            scopePhrase={pulseScopePhrase(scopeLabel)}
+            summary={pulseSummary}
+          />
           {loading && <div className="buzz-map-loading"><i /> Updating Buzz</div>}
           {error && <button type="button" className="buzz-map-error" onClick={() => void loadNearby()}>{error} · Retry</button>}
         </section>

@@ -14,6 +14,7 @@ import {
   DENSE_LOGO_MIN_ZOOM,
   FEATURED_LOGO_MIN_ZOOM,
   isBuzzingPinScore,
+  isVenueEventSoon,
   selectFeaturedVenueIds,
 } from "../buzz-map-presentation";
 import {
@@ -55,10 +56,16 @@ export function useBuzzMapbox({
   const loadingLogosRef = useRef(new Set<string>());
   const [mapReady, setMapReady] = useState(false);
   const [mapZoom, setMapZoom] = useState(8.8);
+  const [eventPulseNow, setEventPulseNow] = useState(Date.now);
 
   useEffect(() => {
     selectVenueRef.current = onSelectVenue;
   }, [onSelectVenue]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setEventPulseNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
@@ -403,6 +410,7 @@ export function useBuzzMapbox({
             id: venue.id,
             score,
             buzzing: isBuzzingPinScore(score),
+            eventSoon: isVenueEventSoon(venue, eventPulseNow),
             logoKey,
             selected: selectedVenueId === venue.id,
           },
@@ -416,6 +424,7 @@ export function useBuzzMapbox({
       selectFeaturedVenueIds(
         features.map((feature) => ({
           id: String(feature.properties?.id || ""),
+          pulsePriority: Boolean(feature.properties?.eventSoon),
           score: Number(feature.properties?.score || 0),
         })),
         selectedVenueId,
@@ -428,7 +437,7 @@ export function useBuzzMapbox({
     };
     (mapRef.current?.getSource("buzz-map-venues") as mapboxgl.GeoJSONSource | undefined)?.setData(collection);
     (mapRef.current?.getSource("buzz-map-featured") as mapboxgl.GeoJSONSource | undefined)?.setData(featuredCollection);
-  }, [logoKeyFor, logoUrlFor, selectedVenueId, venues]);
+  }, [eventPulseNow, logoKeyFor, logoUrlFor, selectedVenueId, venues]);
 
   return { mapElementRef, mapRef, mapReady, mapZoom };
 }

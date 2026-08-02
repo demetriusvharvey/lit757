@@ -82,7 +82,7 @@ export function BuzzVenueList({
       <div className="buzz-map-list-head">
         <div>
           <small>HIGHEST ACTIVITY SCORE FIRST</small>
-          <h1>{heading}</h1>
+          <h2>{heading}</h2>
           <p>{loading ? "Updating activity…" : `${venues.length} places ${scopeLabel}`}</p>
         </div>
         <span className="buzz-heat-key"><i /> Activity score <b>→</b> stronger colors</span>
