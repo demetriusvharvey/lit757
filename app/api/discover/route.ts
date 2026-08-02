@@ -9,6 +9,7 @@ import {
   type DirectPresenceRow,
 } from "../../../src/lib/buzz/direct-presence";
 import { dedupeVenueRows } from "../../../src/lib/venue-dedupe";
+import { venueKinds } from "../../../src/lib/venue-kind";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -17,7 +18,7 @@ const supabaseAdmin = getSupabaseAdmin();
 
 let lastRefreshAttemptAt = 0;
 
-type DiscoveryMode = "all" | "food" | "explore" | "events";
+type DiscoveryMode = "all" | "food" | "nightlife" | "explore" | "events";
 
 type VenueRow = {
   id: string;
@@ -458,19 +459,6 @@ function categoryText(venue: VenueRow) {
   return normalize(`${venue.type || ""} ${venue.category || ""} ${venue.music_genre || ""}`);
 }
 
-function venueKind(venue: VenueRow) {
-  const text = categoryText(venue);
-  const name = normalize(venue.name);
-  if (
-    /aquarium|arcade|arts|beach|boardwalk|casino|comedy|district|entertainment|farm|gallery|historic|indoor|movie|museum|nature|opera|outdoor|paint|park|performing|shopping|social area|surf park|theater|theatre|theme park|waterpark|zoo/.test(text) ||
-    /aquarium|botanical|childrens museum|hermitage museum|living museum|nauticus|surf park|water country|waterpark|virginia zoo/.test(name)
-  ) return "activity";
-  if (/restaurant|food|cafe|coffee|brunch|brewery|dining|kitchen/.test(text)) return "food";
-  if (/club|nightlife|bar|lounge|hookah|dj|dance/.test(text)) return "nightlife";
-  if (/concert|theater|theatre|music|arena|pavilion|event/.test(text)) return "events";
-  return "other";
-}
-
 function daypartBoost(venue: VenueRow, daypart: ReturnType<typeof getDaypart>["key"]) {
   const text = categoryText(venue);
 
@@ -591,7 +579,14 @@ function rankVenue(
       personalBoost +
       daypartBoost(venue, daypart.key)
   );
-  const kind = venueKind(venue);
+  const kinds = venueKinds({
+    name: venue.name,
+    type: venue.type,
+    category: venue.category,
+    musicGenre: venue.music_genre,
+    summary: venue.ai_summary,
+  });
+  const kind = kinds[0];
   const city = venueCity(venue);
   const interestTags = inferInterestTags(venue);
   const eventTime = formatEventTime(event?.start_time);
@@ -618,6 +613,7 @@ function rankVenue(
     ...venue,
     city,
     kind,
+    kinds,
     score,
     openNow,
     eventHours,
@@ -685,13 +681,13 @@ function searchMatchScore(venue: RankedVenue, search: string) {
       theme.requiredTerms &&
       !theme.requiredTerms.some((term) => hasNormalizedPhrase(haystack, term))
     ) continue;
-    if (theme.strictKinds && !theme.kinds.includes(venue.kind)) continue;
+    if (theme.strictKinds && !theme.kinds.some(kind => venue.kinds.includes(kind))) continue;
 
     const termMatches = theme.terms.filter((term) => hasNormalizedPhrase(haystack, term)).length;
     if (termMatches === 0) continue;
 
     matchedTheme = true;
-    if (theme.kinds.includes(venue.kind)) score += 18;
+    if (theme.kinds.some(kind => venue.kinds.includes(kind))) score += 18;
     score += Math.min(36, termMatches * 9);
   }
 
@@ -764,6 +760,10 @@ function chooseDiversePicks(
     takeBest((venue) => venue.kind === "activity" && venue.openNow === true);
     takeBest((venue) => venue.kind === "activity" && venue.openNow === true);
     takeBest((venue) => venue.kind === "activity");
+  } else if (mode === "nightlife" && !hasSearch) {
+    takeBest((venue) => venue.kinds.includes("nightlife") && venue.openNow === true);
+    takeBest((venue) => venue.kinds.includes("nightlife") && venue.openNow !== false);
+    takeBest((venue) => venue.kinds.includes("nightlife"));
   }
 
   while (chosen.length < 3 && remaining.length > 0) {
@@ -841,6 +841,7 @@ function publicVenue(venue: RankedVenue, index?: number) {
     type: venue.type || venue.category || "Local spot",
     category: venue.category || venue.type || "Local spot",
     kind: venue.kind,
+    kinds: venue.kinds,
     rating: Number(venue.google_rating || 0) || null,
     ageLimit: venue.age_limit || null,
     cover: venue.cover || null,
@@ -873,9 +874,8 @@ function publicVenue(venue: RankedVenue, index?: number) {
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const requestedMode = url.searchParams.get("mode") || "all";
-  const normalizedMode = requestedMode === "nightlife" ? "explore" : requestedMode;
-  const mode: DiscoveryMode = ["food", "explore", "events"].includes(normalizedMode)
-    ? normalizedMode as DiscoveryMode
+  const mode: DiscoveryMode = ["food", "nightlife", "explore", "events"].includes(requestedMode)
+    ? requestedMode as DiscoveryMode
     : "all";
   const requestedCity = url.searchParams.get("city") || "All 757";
   const city = CITIES.includes(requestedCity) ? requestedCity : "All 757";
@@ -1000,8 +1000,9 @@ export async function GET(request: Request) {
       // Interest search is global. Category tabs only narrow the unsearched feed.
       if (search) return true;
       if (mode === "events") return Boolean(venue.event);
-      if (mode === "food") return venue.kind === "food";
-      if (mode === "explore") return venue.kind === "activity";
+      if (mode === "food") return venue.kinds.includes("food");
+      if (mode === "nightlife") return venue.kinds.includes("nightlife");
+      if (mode === "explore") return venue.kinds.includes("activity");
       return true;
     })
     .filter((venue) => !search || venue.openNow !== false || Boolean(venue.event))

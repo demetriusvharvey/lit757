@@ -53,6 +53,7 @@ import {
   getBrowserPosition as getPosition,
   hasValidVenueCoordinates as validVenue,
   venueCategory as categoryFor,
+  venueMatchesCategory,
   venueCoordinates as coordinates,
   venueScore as score,
   venueStatus as statusFor,
@@ -154,7 +155,7 @@ export default function BuzzMapApp() {
   const filtered = useMemo(() => {
     const clean = query.trim().toLowerCase();
     return [...venues]
-      .filter(venue => active === "All" || categoryFor(venue) === active)
+      .filter(venue => venueMatchesCategory(venue, active))
       .filter(venue => !buzzingOnly || isBuzzingPinScore(score(venue)))
       .filter(venue => !clean || `${venue.name} ${venue.city || ""} ${venue.type || ""} ${venue.category || ""} ${venue.event?.name || ""}`.toLowerCase().includes(clean))
       .sort((left, right) => score(right) - score(left) || (left.distanceMiles ?? 999) - (right.distanceMiles ?? 999));
