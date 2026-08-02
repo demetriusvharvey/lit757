@@ -1,0 +1,72 @@
+name: Verified nightlife import
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Insert reviewed missing venues after a successful dry run"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verified-nightlife-import
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Run protected verified import
+        env:
+          BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          APPLY: ${{ inputs.apply }}
+          CONFIRMATION: apply:priority-nightlife-2026-08-02:094f072df51a35e1304c537869637de03aae0b853251c30c7fc9c4dcb5734a0f
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${BASE_URL:?Add BUZZ_PRODUCTION_URL as a GitHub Actions secret}"
+          : "${CRON_SECRET:?Add CRON_SECRET as a GitHub Actions secret}"
+          BASE_URL="${BASE_URL%/}"
+          if [[ "${APPLY}" == "true" ]]; then
+            query="dryRun=0&confirm=${CONFIRMATION}"
+          else
+            query="dryRun=1"
+          fi
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer ${CRON_SECRET}" \
+            --header "Accept: application/json" \
+            "${BASE_URL}/api/venues/verified-nightlife?${query}" \
+            --output verified-nightlife-import.json
+          python - <<'PY'
+          import json
+          import os
+
+          with open("verified-nightlife-import.json", encoding="utf-8") as source:
+              report = json.load(source)
+          assert report.get("success") is True, report
+          assert report.get("batchId") == "priority-nightlife-2026-08-02", report
+          assert report.get("truthNote"), report
+          assert len(report.get("rollbackVenueIds") or []) == len(report.get("reviewedAdditions") or []), report
+          if os.environ["APPLY"] == "true":
+              assert report.get("mode") == "apply", report
+              assert int(report.get("inserted") or 0) == len(report.get("insertedVenues") or []), report
+          else:
+              assert report.get("mode") == "dry-run", report
+              assert int(report.get("inserted") or 0) == 0, report
+          print(json.dumps(report, indent=2))
+          PY
+      - name: Upload import audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-nightlife-import-${{ inputs.apply && 'apply' || 'dry-run' }}
+          path: verified-nightlife-import.json
+          if-no-files-found: warn
+          retention-days: 30
