@@ -163,6 +163,10 @@ Summary of what matters most:
 - BestTime's free forecast credits are exhausted. Its job and runtime adapter
   are now manual-only and billing-gated, so it no longer creates scheduled
   failures or spend exposure.
+- Obsolete one-time source-mutation workflows were removed. Production
+  workflows are read-only and regression-tested against `contents: write` and
+  `git push`, preventing stale fix scripts from creating false failed runs or
+  rewriting `main`.
 - `AIRNOW_API_KEY`, `NPS_API_KEY` and `AI_GATEWAY_API_KEY` are not read by any
   code. They appear only as catalog entries.
 - CodeQL, secret scanning and push protection are enabled. Branch protection and

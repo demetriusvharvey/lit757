@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 
 const repositoryRoot = new URL("../../../", import.meta.url);
@@ -88,4 +88,15 @@ test("public AI and signup-email paths are billing-gated", async () => {
   ]);
   assert.match(openAi, /meteredProviderCallsEnabled\("openai"\)/);
   assert.match(signupEmail, /meteredProviderCallsEnabled\("resend"\)/);
+});
+
+test("production workflows are read-only and cannot push source changes", async () => {
+  const workflowDirectory = new URL(".github/workflows/", repositoryRoot);
+  const names = (await readdir(workflowDirectory)).filter(name => /\.ya?ml$/.test(name));
+  const sources = await Promise.all(names.map(name => workflow(name)));
+
+  for (const [index, source] of sources.entries()) {
+    assert.doesNotMatch(source, /^\s*contents:\s*write\s*$/m, names[index]);
+    assert.doesNotMatch(source, /^\s*git\s+push(?:\s|$)/m, names[index]);
+  }
 });
