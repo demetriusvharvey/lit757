@@ -121,6 +121,7 @@ export default function ProviderHealthDashboard() {
   const integrations = record(payload.integrations);
   const eventHealth = record(dataHealth.events);
   const realtime = record(dataHealth.realtime);
+  const directPresence = record(realtime.directPresence);
   const publicFeeds = record(dataHealth.publicFeeds);
   const weather = record(publicFeeds.weather);
   const transit = record(publicFeeds.transit);
@@ -167,7 +168,7 @@ export default function ProviderHealthDashboard() {
 
       <section className="provider-summary-grid">
         <article><CalendarDays /><div><strong>{numberValue(eventHealth.upcomingNext60Days)}</strong><span>Upcoming events</span><small>Next 60 days</small></div></article>
-        <article><Activity /><div><strong>{numberValue(realtime.activeSignals)}</strong><span>Active signals</span><small>{numberValue(realtime.liveSignals)} direct/live</small></div></article>
+        <article><Activity /><div><strong>{text(directPresence.activeDeviceBand, "none")}</strong><span>Fresh nearby phones</span><small>{numberValue(directPresence.venuesMeetingLiveThreshold)} live-ready venues</small></div></article>
         <article><Database /><div><strong>{numberValue(realtime.activeScores)}</strong><span>Active Buzz scores</span><small>Newest {formatTime(realtime.newestScoreAt)}</small></div></article>
         <article><RadioTower /><div><strong>{numberValue(integrationCounts.live)}</strong><span>Live integrations</span><small>{numberValue(integrationCounts["needs-key"])} need keys</small></div></article>
         <article><CalendarDays /><div><strong>{numberValue(citySummary.successfulFeeds)}/{numberValue(citySummary.registeredFeeds)}</strong><span>Municipal feeds</span><small>{numberValue(citySummary.dedupedEvents)} events</small></div></article>
@@ -212,6 +213,11 @@ export default function ProviderHealthDashboard() {
               <div><span>Newest provider success</span><strong>{formatTime(realtime.newestProviderSuccessAt)}</strong></div>
               <div><span>Newest signal</span><strong>{formatTime(realtime.newestSignalAt)}</strong></div>
               <div><span>Newest score</span><strong>{formatTime(realtime.newestScoreAt)}</strong></div>
+              <div><span>Fresh nearby phones</span><strong>{text(directPresence.activeDeviceBand, "none")}</strong></div>
+              <div><span>Venues with phone evidence</span><strong>{numberValue(directPresence.venuesWithEvidence)}</strong></div>
+              <div><span>Venues meeting Live threshold</span><strong>{numberValue(directPresence.venuesMeetingLiveThreshold)}</strong></div>
+              <div><span>Newest phone evidence</span><strong>{formatTime(directPresence.newestPresenceAt)}</strong></div>
+              <div><span>Snapshot signals</span><strong>{numberValue(realtime.activeSignals)} active · {numberValue(realtime.liveSignals)} live</strong></div>
               <div><span>Events with source links</span><strong>{numberValue(eventHealth.withTicketLink)}</strong></div>
             </div>
           </section>

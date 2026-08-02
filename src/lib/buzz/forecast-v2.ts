@@ -1,3 +1,5 @@
+import { presenceMeetsLiveThreshold } from "./direct-presence";
+
 export type GoogleHours = {
   periods?: Array<{
     open?: { day?: number; hour?: number; minute?: number };
@@ -143,7 +145,7 @@ export function passivePresenceEvidence(args: { passiveDevices: number; verified
   const passive = Math.max(0, Math.round(args.passiveDevices));
   const verified = Math.max(0, Math.round(args.verifiedDevices));
   const points = Math.min(24, passive * 4 + verified * 7);
-  const live = passive >= 3 || verified >= 2 || (passive >= 2 && verified >= 1);
+  const live = presenceMeetsLiveThreshold({ passiveDevices: passive, verifiedDevices: verified });
   const confidence: "low" | "medium" | "high" = live && passive + verified >= 5 ? "high" : live ? "medium" : "low";
   const label = live
     ? `${passive + verified} independent phones nearby`

@@ -1,5 +1,12 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import {
+  DIRECT_PRESENCE_WINDOW_MINUTES,
+  directPresenceBand,
+  groupDirectPresence,
+  privacySafeDirectPresenceCount,
+  type DirectPresenceRow,
+} from "../../../src/lib/buzz/direct-presence";
 import { fetchHrtRealtime, fetchHrtStatic } from "../../../src/lib/integrations/hrt";
 import {
   fetchNwsWeather,
@@ -42,6 +49,7 @@ export async function GET() {
   const now = new Date();
   const nowIso = now.toISOString();
   const eventEnd = new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000).toISOString();
+  const presenceStart = new Date(now.getTime() - DIRECT_PRESENCE_WINDOW_MINUTES * 60_000).toISOString();
 
   const databasePromise = Promise.all([
     db.from("events").select("source,start_time,created_at,source_url").gte("start_time", nowIso).lte("start_time", eventEnd).limit(5000),
@@ -50,6 +58,7 @@ export async function GET() {
     db.from("buzz_provider_events").select("provider,venue_id,external_id").limit(5000),
     db.from("buzz_signal_snapshots").select("source,is_live,observed_at,expires_at").gt("expires_at", nowIso).limit(5000),
     db.from("buzz_score_snapshots").select("score_mode,confidence,computed_at,expires_at").gt("expires_at", nowIso).limit(5000),
+    db.from("venue_live_reports").select("venue_id,device_id,report_type,created_at").in("report_type", ["nearby_presence", "passive_presence"]).gte("created_at", presenceStart).order("created_at", { ascending: false }).limit(5000),
   ]);
 
   const publicFeedsPromise = Promise.allSettled([
@@ -72,13 +81,14 @@ export async function GET() {
   ]);
 
   const [results, publicFeeds] = await Promise.all([databasePromise, publicFeedsPromise]);
-  const [eventResult, venueResult, providerVenueResult, providerEventResult, signalResult, scoreResult] = results as Result[];
+  const [eventResult, venueResult, providerVenueResult, providerEventResult, signalResult, scoreResult, presenceResult] = results as Result[];
   const events = records(eventResult);
   const venues = records(venueResult);
   const providerVenues = records(providerVenueResult);
   const providerEvents = records(providerEventResult);
   const signals = records(signalResult);
   const scores = records(scoreResult);
+  const directPresence = groupDirectPresence(records(presenceResult) as DirectPresenceRow[], now);
 
   const [weatherResult, staticTransitResult, realtimeTransitResult] = publicFeeds;
   const weatherPoints = weatherResult.status === "fulfilled" ? weatherResult.value : [];
@@ -89,6 +99,9 @@ export async function GET() {
   if (!events.length) warnings.push("No upcoming events were found in the next 60 days.");
   if (!signals.length) warnings.push("No unexpired activity signals are stored.");
   if (!scores.length) warnings.push("No unexpired Buzz Score snapshots are stored.");
+  if (presenceResult.error) warnings.push(`Direct presence health check failed: ${error(presenceResult)}`);
+  else if (!directPresence.activeDevices) warnings.push("No fresh opt-in nearby presence is available; Buzz remains forecast-only without other direct evidence.");
+  else if (!directPresence.venuesMeetingLiveThreshold) warnings.push("Fresh nearby presence is below the independent-phone Live threshold.");
   if (!providerEvents.length) warnings.push("No ticket-inventory event mappings are stored.");
   if (weatherResult.status === "rejected") warnings.push(`National Weather Service health check failed: ${rejectionMessage(weatherResult)}`);
   if (staticTransitResult.status === "rejected") warnings.push(`HRT static GTFS health check failed: ${rejectionMessage(staticTransitResult)}`);
@@ -137,11 +150,26 @@ export async function GET() {
       scoreModes: countBy(scores, "score_mode"),
       scoreConfidence: countBy(scores, "confidence"),
       newestScoreAt: latest(scores, "computed_at"),
+      directPresence: {
+        windowMinutes: directPresence.windowMinutes,
+        activeDeviceBand: directPresenceBand(directPresence.activeDevices),
+        activeDeviceCount: privacySafeDirectPresenceCount(directPresence.activeDevices),
+        passiveDeviceBand: directPresenceBand(directPresence.passiveDevices),
+        verifiedDeviceBand: directPresenceBand(directPresence.verifiedDevices),
+        venuesWithEvidence: directPresence.venuesWithEvidence,
+        venuesMeetingLiveThreshold: directPresence.venuesMeetingLiveThreshold,
+        venuesBelowLiveThreshold: directPresence.venuesBelowLiveThreshold,
+        newestPresenceAt: directPresence.activeDevices >= 3 ? directPresence.latestObservedAt : null,
+        liveThreshold: "3 passive phones, 2 signed-in verified phones, or 2 passive plus 1 verified phone",
+        privacy: "Counts of 1 or 2 devices are grouped; venue, user, device, and exact-location identifiers are never returned.",
+        error: error(presenceResult),
+      },
       errors: {
         providerVenues: error(providerVenueResult),
         providerEvents: error(providerEventResult),
         signals: error(signalResult),
         scores: error(scoreResult),
+        directPresence: error(presenceResult),
       },
     },
     publicFeeds: {
