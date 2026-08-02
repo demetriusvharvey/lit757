@@ -30,6 +30,7 @@ test("cross-source verified nightlife names repair generic restaurant metadata",
   assert.equal(venueKind({ name: "Bad Habits", type: "Restaurant", category: "Restaurant" }), "nightlife");
   assert.equal(venueKind({ name: "The Katt", type: "Restaurant", category: "Restaurant" }), "nightlife");
   assert.deepEqual(venueKinds({ name: "37th & Zen", type: "Live Music" }), ["nightlife", "events"]);
+  assert.deepEqual(venueKinds({ name: "Froggie’s", type: "Live Music" }), ["nightlife", "events"]);
 });
 
 test("ordinary restaurants and activities keep their primary kind", () => {

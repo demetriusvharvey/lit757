@@ -25,6 +25,7 @@ const VERIFIED_NIGHTLIFE_NAMES = new Set([
   "brickhouse tavern",
   "37th and zen",
   "froggies",
+  "froggie s",
   "gershwins",
   "mels place",
   "neo kitchen and bar",
