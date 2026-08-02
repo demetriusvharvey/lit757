@@ -13,11 +13,11 @@ function sessionId() {
     if (existing) return existing;
     const created = typeof crypto.randomUUID === "function"
       ? crypto.randomUUID().replace(/-/g, "")
-      : `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}_${Math.random().toString(36).slice(2)}`;
+      : Array.from(crypto.getRandomValues(new Uint8Array(24)), byte => byte.toString(16).padStart(2, "0")).join("");
     localStorage.setItem(SESSION_KEY, created);
     return created;
   } catch {
-    return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}_${Math.random().toString(36).slice(2)}`;
+    return null;
   }
 }
 
@@ -50,10 +50,12 @@ export async function contributePassivePresence(
   ) return false;
 
   try {
+    const anonymousSessionId = sessionId();
+    if (!anonymousSessionId) return false;
     const response = await fetch("/api/buzz/passive-presence", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId: sessionId(), ...detail }),
+      body: JSON.stringify({ sessionId: anonymousSessionId, ...detail }),
       keepalive: true,
       signal: AbortSignal.timeout(6_000),
     });
