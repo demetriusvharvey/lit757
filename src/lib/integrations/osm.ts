@@ -60,6 +60,21 @@ export type OsmVenueMatch = {
   cityMatched: boolean;
 };
 
+export type OsmCoverageCandidate = {
+  candidate: OsmVenueCandidate;
+  sourceKeys: string[];
+  match: OsmVenueMatch | null;
+};
+
+export type OsmNightlifeCoverage = {
+  rawNightlifeCandidates: number;
+  uniqueNightlifeCandidates: number;
+  duplicateElementsRemoved: number;
+  matchedCandidates: number;
+  unmatchedCandidates: number;
+  candidates: OsmCoverageCandidate[];
+};
+
 const RELEVANT_TAGS = {
   amenity: [
     "arts_centre",
@@ -308,6 +323,53 @@ function informationScore(candidate: OsmVenueCandidate) {
   return [candidate.address, candidate.phone, candidate.website, candidate.city].filter(Boolean).length;
 }
 
+function osmSourceKey(candidate: OsmVenueCandidate) {
+  return `${candidate.osmType}:${candidate.osmId}`;
+}
+
+/**
+ * OSM can describe one business with both a node and a building way. Coverage
+ * review should count the business once, while preserving every source element
+ * for a human reviewer. Exact normalized names plus close coordinates keep this
+ * intentionally conservative so nearby chain locations are not collapsed.
+ */
+export function dedupeOsmVenueCandidates(
+  candidates: readonly OsmVenueCandidate[],
+  maximumDistanceMiles = 0.12,
+) {
+  const groups: Array<{ candidate: OsmVenueCandidate; sourceKeys: string[] }> = [];
+
+  for (const candidate of candidates) {
+    const normalizedName = normalizeVenueName(candidate.name);
+    const group = groups.find(item => (
+      normalizedName
+      && normalizeVenueName(item.candidate.name) === normalizedName
+      && distanceMiles(
+        item.candidate.latitude,
+        item.candidate.longitude,
+        candidate.latitude,
+        candidate.longitude,
+      ) <= maximumDistanceMiles
+    ));
+    const sourceKey = osmSourceKey(candidate);
+
+    if (!group) {
+      groups.push({ candidate, sourceKeys: [sourceKey] });
+      continue;
+    }
+
+    group.sourceKeys.push(sourceKey);
+    if (informationScore(candidate) > informationScore(group.candidate)) {
+      group.candidate = candidate;
+    }
+  }
+
+  return {
+    candidates: groups,
+    duplicateElementsRemoved: candidates.length - groups.length,
+  };
+}
+
 export function findBestOsmMatch(
   venue: VenueForOsmMatch,
   candidates: OsmVenueCandidate[],
@@ -343,6 +405,47 @@ export function findBestOsmMatch(
       - (right.distanceMiles || 0) * 8;
     return rightScore - leftScore;
   })[0] || null;
+}
+
+function findBestVenueForOsmCandidate(
+  candidate: OsmVenueCandidate,
+  venues: readonly VenueForOsmMatch[],
+) {
+  const matches = venues.flatMap(venue => {
+    const match = findBestOsmMatch(venue, [candidate]);
+    return match ? [match] : [];
+  });
+
+  return matches.sort((left, right) => {
+    const leftDistance = left.distanceMiles ?? 2;
+    const rightDistance = right.distanceMiles ?? 2;
+    const leftScore = left.nameScore * 100 + (left.cityMatched ? 8 : 0) - leftDistance * 8;
+    const rightScore = right.nameScore * 100 + (right.cityMatched ? 8 : 0) - rightDistance * 8;
+    return rightScore - leftScore;
+  })[0] || null;
+}
+
+export function buildOsmNightlifeCoverage(
+  venues: readonly VenueForOsmMatch[],
+  candidates: readonly OsmVenueCandidate[],
+): OsmNightlifeCoverage {
+  const nightlife = candidates.filter(candidate => candidate.category === "Nightlife");
+  const deduplicated = dedupeOsmVenueCandidates(nightlife);
+  const coverageCandidates = deduplicated.candidates.map(({ candidate, sourceKeys }) => ({
+    candidate,
+    sourceKeys,
+    match: findBestVenueForOsmCandidate(candidate, venues),
+  }));
+  const matchedCandidates = coverageCandidates.filter(item => item.match).length;
+
+  return {
+    rawNightlifeCandidates: nightlife.length,
+    uniqueNightlifeCandidates: coverageCandidates.length,
+    duplicateElementsRemoved: deduplicated.duplicateElementsRemoved,
+    matchedCandidates,
+    unmatchedCandidates: coverageCandidates.length - matchedCandidates,
+    candidates: coverageCandidates,
+  };
 }
 
 function missing(value: unknown) {
