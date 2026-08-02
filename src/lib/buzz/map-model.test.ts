@@ -26,11 +26,11 @@ function venue(score: number, scoreMode?: "live" | "forecast"): BuzzVenue {
   };
 }
 
-test("map presentation uses the shared Buzz activity thresholds", () => {
-  assert.equal(venueStatus(venue(ACTIVE_MIN_SCORE - 1)), "Chill");
-  assert.equal(venueStatus(venue(ACTIVE_MIN_SCORE)), "Active");
-  assert.equal(venueStatus(venue(BUZZING_PIN_MIN_SCORE)), "Heating Up");
-  assert.equal(venueStatus(venue(ON_FIRE_PIN_MIN_SCORE)), "On Fire");
+test("map presentation uses truth-aware activity thresholds", () => {
+  assert.equal(venueStatus(venue(ACTIVE_MIN_SCORE - 1)), "Moderate Forecast");
+  assert.equal(venueStatus(venue(ACTIVE_MIN_SCORE, "forecast")), "Active Forecast");
+  assert.equal(venueStatus(venue(BUZZING_PIN_MIN_SCORE, "forecast")), "High Activity Forecast");
+  assert.equal(venueStatus(venue(ON_FIRE_PIN_MIN_SCORE, "live")), "Strong Live Activity");
 });
 
 test("map presentation clamps provider scores to the public 0-100 range", () => {

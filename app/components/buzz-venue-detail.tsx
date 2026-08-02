@@ -95,7 +95,7 @@ export function BuzzVenueDetail({
   const website = detail?.website || venue.website || null;
   const address = detail?.address || venue.address || null;
   const hours = todayHours(detail?.hours);
-  const truthLabel = venueTruthLabel(venue).toUpperCase();
+  const live = venueTruthLabel(venue) === "Live";
 
   useEffect(() => {
     const returnTarget =
@@ -148,7 +148,7 @@ export function BuzzVenueDetail({
       <div className="buzz-detail-body">
         <div className="buzz-detail-title">
           <div>
-            <small>{venueStatus(venue).toUpperCase()} · {truthLabel}</small>
+            <small>{venueStatus(venue).toUpperCase()}</small>
             <h2 id={titleId}>{venue.name}</h2>
             <p>
               <MapPin /> {milesLabel(venue.distanceMiles) || venue.city || "Nearby"}
@@ -180,7 +180,9 @@ export function BuzzVenueDetail({
           <ShieldCheck />
           <div>
             <strong>What this score can prove</strong>
-            <p>Buzz creates a useful forecast from hours, events, ticket demand, traffic patterns, provider data, and nearby phones. Exact physical occupancy still requires ticket scans, POS activity, door counters, or another direct venue feed.</p>
+            <p>{live
+              ? "Buzz has fresh, truth-gated direct evidence near this venue. That supports Live activity, but it does not reveal an exact headcount or guarantee how crowded the room feels."
+              : "This is not a measured crowd. Buzz is forecasting likely activity from hours, events, ticket demand, area movement, weather, transit, and venue patterns. Direct nearby or verified venue evidence is still required for Live status."}</p>
           </div>
         </div>
 

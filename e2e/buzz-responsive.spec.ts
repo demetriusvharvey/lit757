@@ -128,13 +128,13 @@ test("responsive Buzz discovery supports filtering and venue details", async (
 
   await expect(page.getByRole("button", { name: /BUZZ/ })).toBeVisible();
   if (isMobile) {
-    await expect(page.getByRole("button", { name: "Top Buzz" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Top Activity" })).toBeVisible();
   } else {
-    await expect(page.getByRole("heading", { name: "Places buzzing now" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Best activity signals" })).toBeVisible();
   }
   await expect(page.locator(".buzz-map-list-scroll article")).toHaveCount(2);
 
-  const buzzingFilter = page.getByRole("button", { name: "Buzzing", exact: true });
+  const buzzingFilter = page.getByRole("button", { name: "High activity", exact: true });
   await buzzingFilter.click();
   await expect(buzzingFilter).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".buzz-map-list-scroll article")).toHaveCount(1);
@@ -158,7 +158,12 @@ test("responsive Buzz discovery supports filtering and venue details", async (
   await venueButton.focus();
   await expect(venueButton).toBeFocused();
   await page.keyboard.press("Enter");
+  const venueDialog = page.getByRole("dialog", { name: "Harbor Kitchen" });
   await expect(page.getByRole("heading", { name: "Harbor Kitchen" })).toBeVisible();
+  await expect(venueDialog).toContainText("CURRENT FORECAST");
+  await expect(venueDialog).toContainText("This is not a measured crowd");
+  await expect(venueDialog.getByText("Buzzing", { exact: true })).toHaveCount(0);
+  await expect(venueDialog.getByText("Lit", { exact: true })).toHaveCount(0);
   const closeButton = page.getByRole("button", { name: "Close venue" });
   await expect(closeButton).toBeFocused();
 

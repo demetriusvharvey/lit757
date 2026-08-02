@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { activityStatusLabel, activityTruthMode } from "../src/lib/buzz/truth-labels";
 import "./buzz-status-trends.css";
 
 type TrendDirection = "rising_fast" | "rising" | "steady" | "cooling" | "cooling_fast" | "new";
@@ -39,11 +40,9 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 const normalize = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
 const clampScore = (value: unknown) => Math.max(0, Math.min(100, Number(value ?? 35)));
 
-function statusFor(score: number) {
-  if (score >= 75) return { label: "Lit", slug: "lit" };
-  if (score >= 55) return { label: "Buzzing", slug: "buzzing" };
-  if (score >= 35) return { label: "Picking up", slug: "picking-up" };
-  return { label: "Chill", slug: "chill" };
+function statusFor(score: number, mode?: string) {
+  const slug = score >= 75 ? "lit" : score >= 55 ? "buzzing" : score >= 35 ? "picking-up" : "chill";
+  return { label: activityStatusLabel(score, mode), slug };
 }
 
 function trendFromSamples(values: number[]): VenueTrend {
@@ -189,8 +188,8 @@ function enhanceList(root: ParentNode, venuesByName: Map<string, Venue>, trends:
     const venue = venuesByName.get(normalize(name));
     if (!venue) return;
     const trend = trends.get(venue.id) || trendFromSamples([clampScore(venue.activity?.score)]);
-    const status = statusFor(clampScore(venue.activity?.score));
-    const signature = `${status.slug}:${trend.direction}:${trend.samples.join(",")}`;
+    const status = statusFor(clampScore(venue.activity?.score), venue.activity?.scoreMode);
+    const signature = `${status.slug}:${venue.activity?.scoreMode || "forecast"}:${trend.direction}:${trend.samples.join(",")}`;
     if (article.dataset.buzzSignal === signature) return;
 
     article.querySelector(".buzz-list-signal")?.remove();
@@ -221,9 +220,10 @@ function enhanceDetail(root: ParentNode, venuesByName: Map<string, Venue>, trend
   const venue = venuesByName.get(normalize(name));
   if (!venue) return;
   const trend = trends.get(venue.id) || trendFromSamples([clampScore(venue.activity?.score)]);
-  const status = statusFor(clampScore(venue.activity?.score));
-  const mode = venue.activity?.scoreMode === "live" ? "Live signal" : "Forecast";
-  const signature = `${venue.id}:${status.slug}:${trend.direction}:${trend.samples.join(",")}:${venue.reason || ""}`;
+  const truthMode = activityTruthMode(venue.activity?.scoreMode);
+  const status = statusFor(clampScore(venue.activity?.score), truthMode);
+  const mode = truthMode === "live" ? "Live evidence" : "Current forecast";
+  const signature = `${venue.id}:${status.slug}:${truthMode}:${trend.direction}:${trend.samples.join(",")}:${venue.reason || ""}`;
   if (detail.dataset.buzzSignal === signature) {
     enhanceCrowdButtons(detail);
     return;
@@ -232,7 +232,7 @@ function enhanceDetail(root: ParentNode, venuesByName: Map<string, Venue>, trend
   const title = detail.querySelector<HTMLElement>(".buzz-detail-title");
   const titleLabel = title?.querySelector<HTMLElement>("small");
   if (titleLabel) {
-    titleLabel.className = `buzz-live-pill${venue.activity?.scoreMode === "live" ? " live" : ""}`;
+    titleLabel.className = `buzz-live-pill${truthMode === "live" ? " live" : ""}`;
     titleLabel.textContent = mode.toUpperCase();
   }
 
@@ -243,13 +243,13 @@ function enhanceDetail(root: ParentNode, venuesByName: Map<string, Venue>, trend
 
     const now = document.createElement("div");
     now.className = "buzz-signal-now";
-    now.append(createTextElement("small", "", "Right now"));
+    now.append(createTextElement("small", "", truthMode === "live" ? "Live evidence" : "Current forecast"));
     now.append(createTextElement("strong", "", status.label));
     now.append(createTextElement("span", "", confidenceLabel(venue.activity?.confidence)));
 
     const movement = document.createElement("div");
     movement.className = "buzz-signal-trend";
-    movement.append(createTextElement("small", "", "Movement"));
+    movement.append(createTextElement("small", "", truthMode === "live" ? "Live movement" : "Forecast movement"));
     movement.append(createTextElement("strong", `trend-${trend.direction.replaceAll("_", "-")}`, `${trendGlyph(trend.direction)} ${trend.label}`));
     movement.append(createTextElement("span", "", formatWindow(trend.windowMinutes)));
 
@@ -274,14 +274,16 @@ function enhanceDetail(root: ParentNode, venuesByName: Map<string, Venue>, trend
   }
 
   const truth = detail.querySelector<HTMLElement>(".buzz-truth-note");
-  if (truth) truth.hidden = true;
+  if (truth) truth.hidden = false;
   detail.querySelector(".buzz-method-details")?.remove();
   if (reason) {
     const method = document.createElement("details");
     method.className = "buzz-method-details";
     const summary = document.createElement("summary");
-    summary.textContent = "How Buzz estimates this";
-    const explanation = createTextElement("p", "", "Buzz combines opening hours, events, ticket demand, area movement, provider data, and anonymous nearby activity. Exact occupancy requires a direct venue feed such as ticket scans, POS activity, or door counters.");
+    summary.textContent = truthMode === "live" ? "How Buzz verifies this" : "How Buzz estimates this";
+    const explanation = createTextElement("p", "", truthMode === "live"
+      ? "Live means fresh direct evidence passed Buzz’s truth threshold. It confirms nearby activity, not an exact headcount or room capacity."
+      : "This is a forecast, not a measured crowd. Buzz combines opening hours, events, ticket demand, area movement, weather, transit, provider data, and venue patterns.");
     method.append(summary, explanation);
     reason.insertAdjacentElement("afterend", method);
   }

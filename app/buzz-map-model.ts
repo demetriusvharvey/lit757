@@ -1,3 +1,5 @@
+import { activityStatusLabel } from "../src/lib/buzz/truth-labels";
+
 export type CrowdLevel = "quiet" | "steady" | "busy" | "packed";
 export type BuzzCategory =
   | "All"
@@ -111,11 +113,7 @@ export function hasValidVenueCoordinates(venue: BuzzVenue) {
 }
 
 export function venueStatus(venue: BuzzVenue) {
-  const score = venueScore(venue);
-  if (score >= ON_FIRE_PIN_MIN_SCORE) return "On Fire";
-  if (score >= BUZZING_PIN_MIN_SCORE) return "Heating Up";
-  if (score >= ACTIVE_MIN_SCORE) return "Active";
-  return "Chill";
+  return activityStatusLabel(venueScore(venue), venue.activity?.scoreMode);
 }
 
 export function venueTruthLabel(venue: BuzzVenue) {

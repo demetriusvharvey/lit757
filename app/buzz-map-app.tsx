@@ -542,7 +542,7 @@ export default function BuzzMapApp() {
           onClick={toggleBuzzingFilter}
           aria-pressed={buzzingOnly}
         >
-          <Flame /><span>Buzzing</span>
+          <Flame /><span>High activity</span>
         </button>
         <span className="buzz-filter-divider" aria-hidden="true" />
         {otherCategories.map(([label, Icon]) => <button type="button" key={label} className={active === label ? "active" : ""} onClick={() => setActive(label)} aria-pressed={active === label}><Icon /><span>{label}</span></button>)}
@@ -573,10 +573,10 @@ export default function BuzzMapApp() {
           </div>
           <div className="buzz-map-mode">
             {mapZoom < FEATURED_LOGO_MIN_ZOOM
-              ? <><Sparkles /><span>City pulse</span><small>Tap a hot zone or zoom in for places</small></>
+              ? <><Sparkles /><span>City activity forecast</span><small>Tap an area or zoom in for places</small></>
               : mapZoom < ALL_LOGO_MIN_ZOOM
-                ? <><Sparkles /><span>Buzzing pins</span><small>Orange/red pulse = heating up</small></>
-                : <><MapPin /><span>Buzzing pins</span><small>Tap a pulsing logo for details</small></>}
+                ? <><Sparkles /><span>Activity pins</span><small>Orange/red = a higher Buzz score</small></>
+                : <><MapPin /><span>Activity pins</span><small>Tap a logo to see Live or Forecast</small></>}
           </div>
           {loading && <div className="buzz-map-loading"><i /> Updating Buzz</div>}
           {error && <button type="button" className="buzz-map-error" onClick={() => void loadNearby()}>{error} · Retry</button>}
