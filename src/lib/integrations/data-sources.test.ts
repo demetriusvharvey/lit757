@@ -87,6 +87,27 @@ test("trip updates normalize arrival predictions", () => {
   assert.equal(updates[0].stops[0].arrivalDelaySeconds, 120);
 });
 
+test("trip updates normalize HRT's current snake-case JSON feed", () => {
+  const updates = normalizeTripUpdates({ entity: [{ id: "two", trip_update: {
+    trip: { trip_id: "trip-2", route_id: "105", start_date: "20260801" },
+    vehicle: { id: "bus-55" },
+    timestamp: 1785636028,
+    stop_time_update: [{
+      stop_id: "stop-9",
+      stop_sequence: 4,
+      arrival: { time: 1785636300, delay: 60 },
+      departure: { time: 1785636360 },
+      schedule_relationship: 0,
+    }],
+  } }] });
+
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].tripId, "trip-2");
+  assert.equal(updates[0].routeId, "105");
+  assert.equal(updates[0].stops[0].stopId, "stop-9");
+  assert.equal(updates[0].stops[0].stopSequence, 4);
+});
+
 test("vehicle positions normalize coordinates when a feed becomes available", () => {
   const vehicles = normalizeVehiclePositions({ entity: [{ id: "v1", vehicle: {
     vehicle: { id: "bus-12", label: "12" }, trip: { tripId: "t1", routeId: "1" },
