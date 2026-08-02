@@ -48,7 +48,7 @@ jobs:
           zones = payload.get("zones") or []
           covered = [zone for zone in zones if zone.get("status") == "covered"]
 
-          assert calls == 24, f"Expected 24 TomTom road samples, received {calls}"
+          assert calls == 16, f"Expected 16 TomTom road samples, received {calls}"
           assert len(zones) == 8, f"Expected 8 activity districts, received {len(zones)}"
           assert len(covered) >= 6, f"Only {len(covered)} of 8 TomTom districts returned usable traffic"
           assert failed_calls <= 8, f"TomTom failed {failed_calls} of {calls} road samples"

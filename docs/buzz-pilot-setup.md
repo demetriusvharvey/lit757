@@ -68,23 +68,26 @@ Coverage states:
 - `no_data`: provider matched but returned no usable activity value
 - `error`: matching or refresh failed
 
-## 3. Refresh cadence
+## 3. Refresh cadence and zero-cost policy
 
-BestTime live data should be fetched during each clock hour. For 100 venues, run 25 least-recently-checked venues every 15 minutes:
+BestTime and PredictHQ are trial/subscription providers. Their routes are
+manual-only and default-denied even when credentials exist. Do not set
+`ALLOW_METERED_BESTTIME` or `ALLOW_METERED_PREDICTHQ` under Buzz's zero-cost
+production policy.
+
+If a future owner explicitly approves billing, a deliberate manual BestTime run
+would use:
 
 ```bash
 curl -H "Authorization: Bearer $CRON_SECRET" \
   "https://lit757.vercel.app/api/buzz/refresh?provider=besttime&limit=25"
 ```
 
-Run the remaining providers hourly:
+Ticketmaster inventory is the only commercial-demand provider refreshed hourly:
 
 ```bash
 curl -H "Authorization: Bearer $CRON_SECRET" \
   "https://lit757.vercel.app/api/buzz/refresh?provider=ticketmaster&limit=100"
-
-curl -H "Authorization: Bearer $CRON_SECRET" \
-  "https://lit757.vercel.app/api/buzz/refresh?provider=predicthq&limit=10"
 ```
 
 First-party reports recompute a venue immediately. A periodic recovery pass is still available:

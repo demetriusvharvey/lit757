@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { isCronAuthorized } from "../../../src/lib/cron-auth";
+import { meteredProviderCallsEnabled } from "../../../src/lib/metered-providers";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -316,6 +317,10 @@ async function refreshVenue(venue: VenueRow, apiKey: string) {
 export async function GET(request: Request) {
   if (!isCronAuthorized(request)) {
     return new Response("Unauthorized", { status: 401 });
+  }
+
+  if (!meteredProviderCallsEnabled("google_places")) {
+    return NextResponse.json({ success: true, skipped: true, reason: "zero_cost_policy" });
   }
 
   const apiKey =

@@ -5,6 +5,7 @@ import { fetchTicketmasterInventory, isTicketmasterInventoryConfigured, ticketma
 import { fetchPredictedEvents, isPredictHQConfigured, predictedAttendanceSignal } from "../../../../src/lib/buzz/providers/predicthq";
 import { recomputeBuzzScore, saveBuzzSignals } from "../../../../src/lib/buzz/repository";
 import type { BuzzSignal, VenueForBuzz } from "../../../../src/lib/buzz/types";
+import { meteredProviderCallsEnabled } from "../../../../src/lib/metered-providers";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -93,6 +94,10 @@ async function loadVenues(ids: string[]) {
 
 async function refreshBestTime(limit: number, bootstrap: boolean): Promise<RefreshResult> {
   const result: RefreshResult = { provider: "besttime", attempted: 0, succeeded: 0, failed: 0, details: [] };
+  if (!meteredProviderCallsEnabled("besttime")) {
+    result.details.push({ status: "skipped", error: "BestTime is disabled by the zero-cost provider policy" });
+    return result;
+  }
   if (!isBestTimeConfigured()) {
     result.details.push({ status: "skipped", error: "BESTTIME_API_KEY_PRIVATE is not configured" });
     return result;
@@ -210,6 +215,10 @@ async function refreshTicketmaster(limit: number): Promise<RefreshResult> {
 
 async function refreshPredictHQ(limit: number): Promise<RefreshResult> {
   const result: RefreshResult = { provider: "predicthq", attempted: 0, succeeded: 0, failed: 0, details: [] };
+  if (!meteredProviderCallsEnabled("predicthq")) {
+    result.details.push({ status: "skipped", error: "PredictHQ is disabled by the zero-cost provider policy" });
+    return result;
+  }
   if (!isPredictHQConfigured()) {
     result.details.push({ status: "skipped", error: "PREDICTHQ_ACCESS_TOKEN is not configured" });
     return result;

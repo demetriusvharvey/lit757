@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { getRequestUser } from "../../../../src/lib/server-auth";
+import { meteredProviderCallsEnabled } from "../../../../src/lib/metered-providers";
 
 const OWNER_EMAIL = "demetriusvharvey@gmail.com";
 
@@ -38,6 +39,9 @@ export async function POST(request: Request) {
     { onConflict: "user_id" }
   );
 
+  if (!meteredProviderCallsEnabled("resend")) {
+    return NextResponse.json({ success: true, emailSkipped: true, reason: "zero_cost_policy" });
+  }
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
     return NextResponse.json(

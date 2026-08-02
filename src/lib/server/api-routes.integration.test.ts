@@ -116,7 +116,9 @@ test("AI helper falls back without calling a provider when no key exists", async
 
 test("AI helper returns its fallback signal on provider failure", async () => {
   const previousKey = process.env.OPENAI_API_KEY;
+  const previousOptIn = process.env.ALLOW_METERED_OPENAI;
   process.env.OPENAI_API_KEY = "integration-test-key";
+  process.env.ALLOW_METERED_OPENAI = "true";
   mock.method(globalThis, "fetch", async () =>
     new Response(JSON.stringify({ error: "unavailable" }), { status: 503 }),
   );
@@ -131,5 +133,7 @@ test("AI helper returns its fallback signal on provider failure", async () => {
     mock.restoreAll();
     if (previousKey == null) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = previousKey;
+    if (previousOptIn == null) delete process.env.ALLOW_METERED_OPENAI;
+    else process.env.ALLOW_METERED_OPENAI = previousOptIn;
   }
 });

@@ -160,8 +160,9 @@ Summary of what matters most:
 
 - The build is **not** broken. `Build Check` passes and `npm run validate`
   exits 0.
-- The recurring red X is `Buzz signal refresh`: BestTime reports its free
-  forecast credits are exhausted. That is a plan decision, not a code fault.
+- BestTime's free forecast credits are exhausted. Its job and runtime adapter
+  are now manual-only and billing-gated, so it no longer creates scheduled
+  failures or spend exposure.
 - `AIRNOW_API_KEY`, `NPS_API_KEY` and `AI_GATEWAY_API_KEY` are not read by any
   code. They appear only as catalog entries.
 - CodeQL, secret scanning and push protection are enabled. Branch protection and

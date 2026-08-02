@@ -1,6 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- Google Places returns provider-defined JSON fields. */
 import { NextResponse } from "next/server";
 import { supabase } from "../../../src/lib/supabase";
+import { isCronAuthorized } from "../../../src/lib/cron-auth";
+import { meteredProviderCallsEnabled } from "../../../src/lib/metered-providers";
 
 const GOOGLE_KEY = process.env.GOOGLE_PLACES_API_KEY;
 
@@ -16,8 +18,14 @@ function cityFromAddress(address: string | null | undefined, fallback: string | 
     .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    if (!isCronAuthorized(request)) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (!meteredProviderCallsEnabled("google_places")) {
+      return NextResponse.json({ success: true, skipped: true, reason: "zero_cost_policy" });
+    }
     if (!GOOGLE_KEY) {
       return NextResponse.json(
         { error: "Missing GOOGLE_PLACES_API_KEY" },
