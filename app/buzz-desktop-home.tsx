@@ -350,7 +350,7 @@ export default function BuzzDesktopHome() {
       },
       () => {
         setLoading(false);
-        setError("We could not access your location. Search a city or ZIP instead.");
+        setError("We could not access your location. Search a Hampton Roads city or area instead.");
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 },
     );
@@ -393,8 +393,8 @@ export default function BuzzDesktopHome() {
           <div className="buzz-search-panel-head"><div><strong>{query ? `Search “${query}”` : "Popular right now"}</strong><small>Places and areas</small></div><button type="button" onClick={() => setSearchOpen(false)}><X /></button></div>
           {filtered.slice(0, 6).map(venue => <button type="button" key={venue.id} onClick={() => { selectVenue(venue.id); setSearchOpen(false); }}><i>{venue.name.slice(0, 1)}</i><span><strong>{venue.name}</strong><small>{venue.city || "Nearby"} · {venue.event?.name || venue.reason || categoryFor(venue)}</small></span><b>{score(venue)}</b></button>)}
           {searchingLocations && <p>Searching areas…</p>}
-          {locationResults.length > 0 && <div className="buzz-location-results"><em>AREAS & ZIP CODES</em>{locationResults.map(result => <button type="button" key={result.id} onClick={() => void chooseLocation(result)}><MapPin /><span><strong>{result.name}</strong><small>{result.detail}</small></span><ChevronRight /></button>)}</div>}
-          {!searchingLocations && query.length >= 2 && !filtered.length && !locationResults.length && <p>No match yet. Try a city, ZIP, venue, or category.</p>}
+          {locationResults.length > 0 && <div className="buzz-location-results"><em>HAMPTON ROADS AREAS</em>{locationResults.map(result => <button type="button" key={result.id} onClick={() => void chooseLocation(result)}><MapPin /><span><strong>{result.name}</strong><small>{result.detail}</small></span><ChevronRight /></button>)}</div>}
+          {!searchingLocations && query.length >= 2 && !filtered.length && !locationResults.length && <p>No match yet. Try a Hampton Roads city, district, venue, or category.</p>}
         </div>
       )}
 

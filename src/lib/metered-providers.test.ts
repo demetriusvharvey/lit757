@@ -9,6 +9,7 @@ import {
 const providers: MeteredProvider[] = [
   "besttime",
   "google_places",
+  "mapbox_geocoding",
   "openai",
   "predicthq",
   "resend",
@@ -18,6 +19,7 @@ test("metered providers default to disabled even when their credentials exist", 
   const env = {
     BESTTIME_API_KEY_PRIVATE: "configured",
     GOOGLE_PLACES_API_KEY: "configured",
+    NEXT_PUBLIC_MAPBOX_TOKEN: "configured",
     OPENAI_API_KEY: "configured",
     PREDICTHQ_ACCESS_TOKEN: "configured",
     RESEND_API_KEY: "configured",

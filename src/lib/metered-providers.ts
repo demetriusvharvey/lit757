@@ -1,6 +1,7 @@
 export type MeteredProvider =
   | "besttime"
   | "google_places"
+  | "mapbox_geocoding"
   | "openai"
   | "predicthq"
   | "resend";
@@ -8,6 +9,7 @@ export type MeteredProvider =
 const OPT_IN_ENV: Record<MeteredProvider, string> = {
   besttime: "ALLOW_METERED_BESTTIME",
   google_places: "ALLOW_METERED_GOOGLE_PLACES",
+  mapbox_geocoding: "ALLOW_METERED_MAPBOX_GEOCODING",
   openai: "ALLOW_METERED_OPENAI",
   predicthq: "ALLOW_METERED_PREDICTHQ",
   resend: "ALLOW_METERED_RESEND",

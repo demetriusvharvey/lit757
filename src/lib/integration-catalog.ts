@@ -37,6 +37,7 @@ export type IntegrationDefinition = {
 
 export const BUZZ_INTEGRATIONS: IntegrationDefinition[] = [
   { id: "mapbox", name: "Mapbox", category: "Maps & venue intelligence", state: "live", role: "platform", detail: "Primary map rendering, heat layers, venue pins, clustering, and navigation controls.", env: ["NEXT_PUBLIC_MAPBOX_TOKEN"] },
+  { id: "mapbox-geocoding", name: "Mapbox Geocoding", category: "Maps & venue intelligence", state: "ready", role: "discovery", detail: "Optional nationwide location search. Disabled by default; Buzz uses its local Hampton Roads city and district index at zero cost.", env: ["NEXT_PUBLIC_MAPBOX_TOKEN", "ALLOW_METERED_MAPBOX_GEOCODING"] },
   { id: "google-places", name: "Google Places API", category: "Maps & venue intelligence", state: "ready", role: "discovery", detail: "Venue identity, metadata, and photos are implemented but disabled by default under Buzz's zero-cost policy.", env: ["GOOGLE_PLACES_API_KEY", "ALLOW_METERED_GOOGLE_PLACES"] },
   { id: "google-street-view", name: "Google Street View API", category: "Maps & venue intelligence", state: "ready", role: "discovery", detail: "Storefront verification is implemented but disabled by default under Buzz's zero-cost policy.", env: ["GOOGLE_STREET_VIEW_API_KEY", "ALLOW_METERED_GOOGLE_PLACES"] },
   { id: "osm-overpass", name: "OpenStreetMap / Overpass", category: "Maps & venue intelligence", state: "live", role: "discovery", detail: "Open venue discovery and enrichment with protected dry-run monitoring.", env: ["OVERPASS_API_URL"] },

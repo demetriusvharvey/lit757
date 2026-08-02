@@ -6,8 +6,10 @@ The mobile experience now discovers places by geography instead of a hard-coded 
 
 - current latitude/longitude plus a 1, 3, 10, or 25 mile radius
 - visible map bounds through **Search this area**
-- venue, category, neighborhood, city, state, and ZIP search
-- United States location autocomplete through Mapbox geocoding
+- venue and category search from Buzz's database
+- Hampton Roads city and activity-district search from Buzz's local index
+- optional United States location autocomplete through Mapbox geocoding only
+  when `ALLOW_METERED_MAPBOX_GEOCODING=true`
 
 ## API routes
 
@@ -16,7 +18,10 @@ The mobile experience now discovers places by geography instead of a hard-coded 
 - `GET /api/nearby?q=&category=`
 - `GET /api/location-search?q=`
 
-The API has no fixed Hampton Roads coordinate boundary. The current Supabase venue inventory remains the limiting factor until additional markets are ingested.
+The spatial venue API has no fixed Hampton Roads coordinate boundary. The current
+Supabase venue inventory remains the limiting factor until additional markets
+are ingested. External nationwide geocoding is billing-capable and therefore
+disabled under the zero-cost production policy.
 
 ## Product behavior
 

@@ -29,6 +29,8 @@ exactly `true`:
 - `EVENTBRITE_PRIVATE_TOKEN`
 
 Buzz's zero-cost production policy leaves all `ALLOW_METERED_*` flags unset.
+That includes `ALLOW_METERED_MAPBOX_GEOCODING`; the local Hampton Roads search
+index works without it.
 
 Example local calendar configuration:
 
