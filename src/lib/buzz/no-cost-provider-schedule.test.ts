@@ -90,6 +90,14 @@ test("public AI and signup-email paths are billing-gated", async () => {
   assert.match(signupEmail, /meteredProviderCallsEnabled\("resend"\)/);
 });
 
+test("public external geocoding is billing-gated, bounded, and rate-limited", async () => {
+  const route = await repositoryFile("app/api/location-search/route.ts");
+  assert.match(route, /meteredProviderCallsEnabled\("mapbox_geocoding"\)/);
+  assert.match(route, /query\.length > 120/);
+  assert.match(route, /exceedsRequestRate/);
+  assert.match(route, /searchLocalLocations\(query\)/);
+});
+
 test("production workflows are read-only and cannot push source changes", async () => {
   const workflowDirectory = new URL(".github/workflows/", repositoryRoot);
   const names = (await readdir(workflowDirectory)).filter(name => /\.ya?ml$/.test(name));

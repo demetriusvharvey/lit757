@@ -137,3 +137,35 @@ test("AI helper returns its fallback signal on provider failure", async () => {
     else process.env.ALLOW_METERED_OPENAI = previousOptIn;
   }
 });
+
+test("location search defaults to the local 757 index without calling Mapbox", async () => {
+  const previousToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+  const previousOptIn = process.env.ALLOW_METERED_MAPBOX_GEOCODING;
+  process.env.NEXT_PUBLIC_MAPBOX_TOKEN = "integration-test-mapbox-token";
+  delete process.env.ALLOW_METERED_MAPBOX_GEOCODING;
+  const fetchSpy = mock.method(globalThis, "fetch", async () => {
+    throw new Error("Mapbox should not be called under the zero-cost policy");
+  });
+
+  try {
+    const { GET } = await import("../../../app/api/location-search/route");
+    const response = await GET(new Request("https://buzz.example/api/location-search?q=Oceanfront", {
+      headers: { "x-forwarded-for": "198.51.100.30" },
+    }));
+    const payload = await response.json() as {
+      source?: string;
+      results?: Array<{ name?: string }>;
+    };
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.source, "buzz_local");
+    assert.equal(payload.results?.[0]?.name, "Virginia Beach Oceanfront");
+    assert.equal(fetchSpy.mock.callCount(), 0);
+  } finally {
+    mock.restoreAll();
+    if (previousToken == null) delete process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+    else process.env.NEXT_PUBLIC_MAPBOX_TOKEN = previousToken;
+    if (previousOptIn == null) delete process.env.ALLOW_METERED_MAPBOX_GEOCODING;
+    else process.env.ALLOW_METERED_MAPBOX_GEOCODING = previousOptIn;
+  }
+});

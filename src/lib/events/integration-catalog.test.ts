@@ -4,6 +4,7 @@ import { BUZZ_INTEGRATIONS, integrationConfigured } from "../integration-catalog
 
 const requiredNames = [
   "Mapbox",
+  "Mapbox Geocoding",
   "Google Places API",
   "Google Street View API",
   "OpenStreetMap / Overpass",
@@ -73,5 +74,17 @@ test("billing-capable integrations are not configured by credentials alone", () 
   assert.equal(integrationConfigured(google, {
     GOOGLE_PLACES_API_KEY: "configured",
     ALLOW_METERED_GOOGLE_PLACES: "true",
+  }), true);
+
+  const mapboxGeocoding = BUZZ_INTEGRATIONS.find(integration => integration.id === "mapbox-geocoding");
+  assert.ok(mapboxGeocoding);
+  assert.equal(integrationConfigured(mapboxGeocoding, { NEXT_PUBLIC_MAPBOX_TOKEN: "configured" }), false);
+  assert.equal(integrationConfigured(mapboxGeocoding, {
+    NEXT_PUBLIC_MAPBOX_TOKEN: "configured",
+    ALLOW_METERED_MAPBOX_GEOCODING: "false",
+  }), false);
+  assert.equal(integrationConfigured(mapboxGeocoding, {
+    NEXT_PUBLIC_MAPBOX_TOKEN: "configured",
+    ALLOW_METERED_MAPBOX_GEOCODING: "true",
   }), true);
 });

@@ -43,7 +43,7 @@ Generated from every `process.env.*` read in `app/`, `src/`, `lib/` and
 | `NEXT_PUBLIC_SUPABASE_URL` | database |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | browser database access |
 | `SUPABASE_SERVICE_ROLE_KEY` | server-only database access |
-| `NEXT_PUBLIC_MAPBOX_TOKEN` | map rendering |
+| `NEXT_PUBLIC_MAPBOX_TOKEN` | map rendering; external geocoding remains separately disabled |
 | `NEXT_PUBLIC_SITE_URL` | canonical URLs and metadata |
 | `CRON_SECRET` | scheduled refresh jobs |
 
@@ -56,6 +56,7 @@ Generated from every `process.env.*` read in `app/`, `src/`, `lib/` and
 | `OWNER_SIGNUP_WEBHOOK_URL` | venue-owner signup routing |
 | `GOOGLE_PLACES_API_KEY`, `GOOGLE_STREET_VIEW_API_KEY` | optional venue enrichment and photos; also requires `ALLOW_METERED_GOOGLE_PLACES=true` |
 | `OPENAI_API_KEY` | optional generated copy; also requires `ALLOW_METERED_OPENAI=true` |
+| `ALLOW_METERED_MAPBOX_GEOCODING` | optional nationwide geocoding opt-in using the required map token; leave false under the zero-cost policy |
 | `BRANDFETCH_CLIENT_ID` | venue logos (falls back to site icon) |
 
 Generate the VAPID pair with the script that already exists:
@@ -163,11 +164,9 @@ it rather than deleting the commit.
 
 ### Cruft
 
-23 workflows exist, of which roughly nine are spent one-shot patch jobs
-(`apply-buzz-source-fix`, `one-time-buzz-branch-patch`,
-`elite-live-activity-ui-once`, `restore-mobile-map-pins`, three
-`fix-mobile-map-*`, and similar). There are 93 remote branches. Neither is
-urgent; both make the repository harder to reason about.
+The nine spent one-shot workflows that could write and push source changes were
+removed in PR #113. The remaining production workflows are read-only and tested
+against source mutation. Historical remote branches can still be pruned later.
 
 ---
 

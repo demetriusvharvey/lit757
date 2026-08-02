@@ -39,6 +39,15 @@ fallbacks instead, so public traffic cannot create a provider bill.
 The same rule applies to Resend with `ALLOW_METERED_RESEND=true`. Account setup
 still succeeds when email delivery is disabled.
 
+## Mapbox
+
+Map rendering still uses the configured public Mapbox token. Nationwide
+geocoding is a separate billing-capable path and requires
+`ALLOW_METERED_MAPBOX_GEOCODING=true`. With the flag unset, Buzz searches its
+local Hampton Roads city and activity-district index without calling Mapbox.
+The external path also rejects oversized queries, limits requests per server
+instance, and times out stalled provider calls.
+
 ## TomTom
 
 Buzz samples two rotating roads in each of eight activity districts every 15

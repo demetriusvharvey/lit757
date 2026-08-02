@@ -1,4 +1,11 @@
 import { NextResponse } from "next/server";
+import {
+  mergeLocationResults,
+  searchLocalLocations,
+  type LocationSearchResult,
+} from "../../../src/lib/location-search";
+import { meteredProviderCallsEnabled } from "../../../src/lib/metered-providers";
+import { exceedsRequestRate, requestClientKey } from "../../../src/lib/server/request-guards";
 
 export const dynamic = "force-dynamic";
 
@@ -21,9 +28,31 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const query = (url.searchParams.get("q") || "").trim();
   if (query.length < 2) return NextResponse.json({ success: true, results: [] });
+  if (query.length > 120) {
+    return NextResponse.json({ success: false, error: "Location search is too long", results: [] }, { status: 400 });
+  }
+
+  const localResults = searchLocalLocations(query);
+  const externalSearchEnabled = meteredProviderCallsEnabled("mapbox_geocoding");
+  if (localResults.length || !externalSearchEnabled) {
+    return NextResponse.json({
+      success: true,
+      results: localResults,
+      source: "buzz_local",
+      externalSearchEnabled,
+    }, { headers: { "Cache-Control": "private, max-age=300" } });
+  }
 
   const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
-  if (!token) return NextResponse.json({ success: false, error: "Location search is not configured", results: [] }, { status: 503 });
+  if (!token) {
+    return NextResponse.json({ success: true, results: localResults, source: "buzz_local", externalSearchEnabled: false });
+  }
+  if (exceedsRequestRate(`location-search:${requestClientKey(request)}`, 20, 60_000)) {
+    return NextResponse.json({ success: false, error: "Too many location searches", results: [] }, {
+      status: 429,
+      headers: { "Retry-After": "60" },
+    });
+  }
 
   const endpoint = new URL("https://api.mapbox.com/search/geocode/v6/forward");
   endpoint.searchParams.set("q", query);
@@ -33,11 +62,16 @@ export async function GET(request: Request) {
   endpoint.searchParams.set("autocomplete", "true");
   endpoint.searchParams.set("access_token", token);
 
-  const response = await fetch(endpoint, { cache: "no-store" });
+  let response: Response;
+  try {
+    response = await fetch(endpoint, { cache: "no-store", signal: AbortSignal.timeout(6_000) });
+  } catch {
+    return NextResponse.json({ success: false, error: "Location search is temporarily unavailable", results: [] }, { status: 502 });
+  }
   if (!response.ok) return NextResponse.json({ success: false, error: "Location search is temporarily unavailable", results: [] }, { status: 502 });
 
   const payload = await response.json() as { features?: MapboxFeature[] };
-  const results = (payload.features || []).flatMap((feature) => {
+  const externalResults: LocationSearchResult[] = (payload.features || []).flatMap((feature) => {
     const longitude = Number(feature.properties?.coordinates?.longitude ?? feature.geometry?.coordinates?.[0]);
     const latitude = Number(feature.properties?.coordinates?.latitude ?? feature.geometry?.coordinates?.[1]);
     if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) return [];
@@ -54,6 +88,9 @@ export async function GET(request: Request) {
       bbox: Array.isArray(bbox) && bbox.length === 4 ? bbox : null,
     }];
   });
+  const results = mergeLocationResults(localResults, externalResults);
 
-  return NextResponse.json({ success: true, results }, { headers: { "Cache-Control": "private, max-age=60" } });
+  return NextResponse.json({ success: true, results, source: "mapbox", externalSearchEnabled: true }, {
+    headers: { "Cache-Control": "private, no-store" },
+  });
 }
