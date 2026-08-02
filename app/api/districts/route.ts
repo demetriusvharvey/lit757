@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
-import { ACTIVITY_DISTRICTS, distanceMiles } from "../../../src/lib/buzz/districts";
+import { ACTIVITY_DISTRICTS, distanceMiles, nearestActivityDistrict } from "../../../src/lib/buzz/districts";
+import { dedupeVenueRows } from "../../../src/lib/venue-dedupe";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,7 @@ function arrivalLabel(value: number) {
   return "Normal arrivals";
 }
 
-type VenueRow = { id: string; name: string; lat: number | string | null; lng: number | string | null; ai_score?: number | null };
+type VenueRow = { id: string; name: string; city?: string | null; address?: string | null; lat: number | string | null; lng: number | string | null; ai_score?: number | null };
 type ScoreRow = { venue_id: string; score: number; label: string; computed_at: string; expires_at: string };
 type SignalRow = { venue_id: string; source: string; value: number; is_live: boolean; observed_at: string; expires_at: string };
 type EventRow = { id: string; name?: string | null; venue_name?: string | null; start_time?: string | null; end_time?: string | null; source_url?: string | null };
@@ -35,7 +36,7 @@ export async function GET() {
   const eventEnd = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
 
   const [venueResult, scoreResult, signalResult, eventResult] = await Promise.all([
-    db.from("venues").select("id,name,lat,lng,ai_score").not("lat", "is", null).not("lng", "is", null).limit(3000),
+    db.from("venues").select("id,name,city,address,lat,lng,ai_score").not("lat", "is", null).not("lng", "is", null).limit(3000),
     db.from("buzz_score_snapshots").select("venue_id,score,label,computed_at,expires_at").gt("expires_at", new Date(now.getTime() - 10 * 60 * 1000).toISOString()).limit(5000),
     db.from("buzz_signal_snapshots").select("venue_id,source,value,is_live,observed_at,expires_at").gt("expires_at", now.toISOString()).limit(5000),
     db.from("events").select("id,name,venue_name,start_time,end_time,source_url").gte("start_time", eventStart).lte("start_time", eventEnd).order("start_time").limit(2500),
@@ -43,11 +44,21 @@ export async function GET() {
 
   if (venueResult.error) return NextResponse.json({ success: false, error: venueResult.error.message }, { status: 500 });
 
-  const venues = ((venueResult.data || []) as VenueRow[]).filter((venue) => Number.isFinite(Number(venue.lat)) && Number.isFinite(Number(venue.lng)));
+  const venueIdentity = dedupeVenueRows(((venueResult.data || []) as VenueRow[])
+    .filter((venue) => Number.isFinite(Number(venue.lat)) && Number.isFinite(Number(venue.lng))));
+  const venues = venueIdentity.venues;
+  const primaryVenueIdBySourceId = venueIdentity.primaryVenueIdBySourceId;
   const scores = (scoreResult.data || []) as ScoreRow[];
   const signals = (signalResult.data || []) as SignalRow[];
   const events = (eventResult.data || []) as EventRow[];
-  const scoreMap = new Map(scores.map((row) => [row.venue_id, row]));
+  const scoreMap = new Map<string, ScoreRow>();
+  for (const row of scores) {
+    const venueId = primaryVenueIdBySourceId.get(row.venue_id) || row.venue_id;
+    const current = scoreMap.get(venueId);
+    if (!current || new Date(row.computed_at).getTime() > new Date(current.computed_at).getTime()) {
+      scoreMap.set(venueId, { ...row, venue_id: venueId });
+    }
+  }
   const eventsByVenue = new Map<string, EventRow[]>();
 
   for (const event of events) {
@@ -55,10 +66,15 @@ export async function GET() {
     if (key) eventsByVenue.set(key, [...(eventsByVenue.get(key) || []), event]);
   }
 
+  const districtIdByVenueId = new Map(venues.map(venue => [
+    venue.id,
+    nearestActivityDistrict(Number(venue.lat), Number(venue.lng), venue.city)?.id || null,
+  ]));
+
   const districts = ACTIVITY_DISTRICTS.map((district) => {
     const nearby = venues
+      .filter(venue => districtIdByVenueId.get(venue.id) === district.id)
       .map((venue) => ({ venue, distance: distanceMiles(district.center.lat, district.center.lng, Number(venue.lat), Number(venue.lng)) }))
-      .filter((item) => item.distance <= district.radiusMiles)
       .sort((left, right) => Number(scoreMap.get(right.venue.id)?.score || right.venue.ai_score || 35) - Number(scoreMap.get(left.venue.id)?.score || left.venue.ai_score || 35));
 
     const venueIds = new Set(nearby.map((item) => item.venue.id));
@@ -73,7 +89,10 @@ export async function GET() {
     const latestTraffic = traffic.filter((signal) => Math.abs(new Date(signal.observed_at).getTime() - newestTimestamp) < 60_000);
     const arrivalPressure = Math.round(average(latestTraffic.map((signal) => clamp(Number(signal.value)))));
 
-    const liveSignals = signals.filter((signal) => venueIds.has(signal.venue_id) && signal.is_live && !signal.source.startsWith("tomtom:"));
+    const liveSignals = signals.filter((signal) => {
+      const venueId = primaryVenueIdBySourceId.get(signal.venue_id) || signal.venue_id;
+      return venueIds.has(venueId) && signal.is_live && !signal.source.startsWith("tomtom:");
+    });
     const liveSources = new Set(liveSignals.map((signal) => signal.source));
 
     const districtEvents = nearby

@@ -8,6 +8,7 @@ import {
   groupDirectPresence,
   type DirectPresenceRow,
 } from "../../../src/lib/buzz/direct-presence";
+import { dedupeVenueRows } from "../../../src/lib/venue-dedupe";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -942,9 +943,11 @@ export async function GET(request: Request) {
   }
 
   const safeEvents = (events || []) as EventRow[];
+  const venueIdentity = dedupeVenueRows((venues || []) as VenueRow[]);
+  const primaryVenueIdBySourceId = venueIdentity.primaryVenueIdBySourceId;
   if (presenceError) console.error("Nearby activity unavailable", presenceError.message);
   if (likesError) console.error("Member preferences unavailable", likesError.message);
-  const eligibleVenues = ((venues || []) as VenueRow[]).filter((venue) => {
+  const eligibleVenues = venueIdentity.venues.filter((venue) => {
       const latitude = Number(venue.lat);
       const longitude = Number(venue.lng);
       return (
@@ -956,11 +959,20 @@ export async function GET(request: Request) {
         latitude <= 37.38
       );
     });
-  const nearbyMembers = groupDirectPresence(
+  const rawNearbyMembers = groupDirectPresence(
     (presenceReports || []) as DirectPresenceRow[],
     new Date(referenceTime)
   ).byVenue;
-  const likedVenueIds = new Set((likes || []).map((like) => like.venue_id).filter(Boolean));
+  const nearbyMembers = new Map<string, Set<string>>();
+  for (const [sourceVenueId, group] of rawNearbyMembers) {
+    const venueId = primaryVenueIdBySourceId.get(sourceVenueId) || sourceVenueId;
+    const devices = nearbyMembers.get(venueId) || new Set<string>();
+    for (const deviceId of group.verified) devices.add(deviceId);
+    nearbyMembers.set(venueId, devices);
+  }
+  const likedVenueIds = new Set((likes || [])
+    .map((like) => primaryVenueIdBySourceId.get(like.venue_id) || like.venue_id)
+    .filter(Boolean));
   const likedTags = new Set(
     eligibleVenues
       .filter((venue) => likedVenueIds.has(venue.id))
@@ -979,7 +991,7 @@ export async function GET(request: Request) {
         daypart,
         clock,
         referenceTime,
-        nearbyMembers.get(venue.id)?.verified.size || 0,
+        nearbyMembers.get(venue.id)?.size || 0,
         memberBoost(venue)
       )
     )

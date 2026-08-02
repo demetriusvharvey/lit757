@@ -8,6 +8,7 @@ import {
   type DirectPresenceRow,
 } from "../../../src/lib/buzz/direct-presence";
 import { fetchHrtRealtime, fetchHrtStatic } from "../../../src/lib/integrations/hrt";
+import { dedupeVenueRows, type VenueIdentityRow } from "../../../src/lib/venue-dedupe";
 import {
   fetchNwsWeather,
   HAMPTON_ROADS_WEATHER_POINTS,
@@ -53,7 +54,7 @@ export async function GET() {
 
   const databasePromise = Promise.all([
     db.from("events").select("source,start_time,created_at,source_url").gte("start_time", nowIso).lte("start_time", eventEnd).limit(5000),
-    db.from("venues").select("google_place_id,photo_source").limit(5000),
+    db.from("venues").select("id,name,city,address,lat,lng,google_place_id,photo_source").limit(5000),
     db.from("buzz_provider_venues").select("provider,coverage_status,last_success_at").limit(5000),
     db.from("buzz_provider_events").select("provider,venue_id,external_id").limit(5000),
     db.from("buzz_signal_snapshots").select("source,is_live,observed_at,expires_at").gt("expires_at", nowIso).limit(5000),
@@ -83,7 +84,9 @@ export async function GET() {
   const [results, publicFeeds] = await Promise.all([databasePromise, publicFeedsPromise]);
   const [eventResult, venueResult, providerVenueResult, providerEventResult, signalResult, scoreResult, presenceResult] = results as Result[];
   const events = records(eventResult);
-  const venues = records(venueResult);
+  const venueRows = records(venueResult);
+  const venueIdentity = dedupeVenueRows(venueRows as VenueIdentityRow[]);
+  const venues = venueIdentity.venues;
   const providerVenues = records(providerVenueResult);
   const providerEvents = records(providerEventResult);
   const signals = records(signalResult);
@@ -97,6 +100,7 @@ export async function GET() {
 
   const warnings: string[] = [];
   if (!events.length) warnings.push("No upcoming events were found in the next 60 days.");
+  if (venueIdentity.duplicateRowsRemoved) warnings.push(`${venueIdentity.duplicateRowsRemoved} duplicate venue rows are consolidated at read time.`);
   if (!signals.length) warnings.push("No unexpired activity signals are stored.");
   if (!scores.length) warnings.push("No unexpired Buzz Score snapshots are stored.");
   if (presenceResult.error) warnings.push(`Direct presence health check failed: ${error(presenceResult)}`);
@@ -130,7 +134,9 @@ export async function GET() {
       error: error(eventResult),
     },
     photos: {
-      venues: venues.length,
+      venues: venueRows.length,
+      uniqueVenues: venues.length,
+      duplicateIdentityRows: venueIdentity.duplicateRowsRemoved,
       withGooglePlaceId: venues.filter(item => Boolean(item.google_place_id)).length,
       byStoredSource: countBy(venues, "photo_source"),
       error: error(venueResult),
