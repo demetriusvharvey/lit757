@@ -27,6 +27,12 @@ export type BuzzVenue = {
   openNow?: boolean | null;
   phone?: string | null;
   website?: string | null;
+  musicGenre?: string | null;
+  ageLimit?: string | null;
+  cover?: string | null;
+  parking?: string | null;
+  dressCode?: string | null;
+  interestTags?: string[];
   distanceMiles?: number | null;
   area?: {
     shortName?: string;
