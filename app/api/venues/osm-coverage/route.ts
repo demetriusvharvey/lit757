@@ -165,6 +165,7 @@ function priorityScopeReport(
   const osmCandidates = candidates
     .filter(item => priorityNightlifeScopeIds({
       city: candidateCity(item),
+      address: item.candidate.address || item.match?.venue.address || null,
       lat: item.candidate.latitude,
       lng: item.candidate.longitude,
     }).includes(scope.id));
