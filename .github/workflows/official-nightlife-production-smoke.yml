@@ -17,6 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
+      - name: Check out coverage tooling
+        uses: actions/checkout@v4
+
       - name: Verify official directories and protected coverage report
         env:
           BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
@@ -90,11 +93,52 @@ jobs:
               "inactiveCandidates": report.get("inactiveCandidates"),
           }, indent=2))
           PY
+
+      - name: Audit active Virginia ABC Oceanfront licenses
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error --location --retry 2 --max-time 120 --max-filesize 30000000 \
+            "https://salicenseeexport.blob.core.windows.net/export/LicenseSearchReport.xlsx" \
+            --output virginia-abc-licensees.xlsx
+          python scripts/abc_oceanfront_coverage.py prepare \
+            --workbook virginia-abc-licensees.xlsx \
+            --output abc-license-candidates.json \
+            --geocode-input abc-geocoder-input.csv
+          curl --fail-with-body --silent --show-error --location --retry 2 --max-time 180 \
+            --form addressFile=@abc-geocoder-input.csv \
+            --form benchmark=Public_AR_Current \
+            "https://geocoding.geo.census.gov/geocoder/locations/addressbatch" \
+            --output abc-geocoder-output.csv
+          python scripts/abc_oceanfront_coverage.py report \
+            --candidates abc-license-candidates.json \
+            --geocodes abc-geocoder-output.csv \
+            --inventory official-nightlife-production-smoke-output.json \
+            --output abc-oceanfront-coverage.json
+          python - <<'PY'
+          import json
+
+          with open("abc-oceanfront-coverage.json", encoding="utf-8") as source:
+              report = json.load(source)
+          coverage = report.get("coverage") or {}
+          assert report.get("success") is True, report
+          assert report.get("mode") == "read-only-review", report
+          assert int(coverage.get("inScopeCandidates") or 0) >= 50, coverage
+          assert int(coverage.get("nightlifeHintCandidates") or 0) >= 10, coverage
+          assert int(coverage.get("matchedCandidates") or 0) + int(coverage.get("unmatchedReviewCandidates") or 0) == int(coverage.get("inScopeCandidates") or 0), coverage
+          assert report.get("truthNote"), report
+          print(json.dumps(coverage, indent=2))
+          PY
+
       - name: Upload official nightlife smoke output
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: official-nightlife-production-smoke-output
-          path: official-nightlife-production-smoke-output.json
+          path: |
+            official-nightlife-production-smoke-output.json
+            abc-license-candidates.json
+            abc-geocoder-output.csv
+            abc-oceanfront-coverage.json
           if-no-files-found: warn
           retention-days: 7

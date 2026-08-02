@@ -7,11 +7,12 @@
     "build": "next build",
     "start": "next start",
     "test": "node scripts/run-tests.mjs",
+    "test:python": "python3 scripts/test_abc_oceanfront_coverage.py",
     "test:e2e": "playwright test",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "security:audit": "npm audit --audit-level=high",
-    "validate": "npm run test && npm run lint && npm run typecheck && npm run build",
+    "validate": "npm run test && npm run test:python && npm run lint && npm run typecheck && npm run build",
     "photos:refresh": "node --env-file=.env.local scripts/fill-venue-photos.js",
     "push:keys": "web-push generate-vapid-keys"
   },
