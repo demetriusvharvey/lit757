@@ -12,6 +12,7 @@ const venues = [
     lng: -76.2859,
     reason: "Dinner service is building",
     distanceMiles: 1.2,
+    openNow: true,
     activity: {
       score: 68,
       label: "Busy",
@@ -29,6 +30,10 @@ const venues = [
     lng: -75.978,
     reason: "Live music tonight",
     distanceMiles: 8.4,
+    event: {
+      name: "Live music showcase",
+      startTime: "2099-08-02T02:00:00.000Z",
+    },
     activity: {
       score: 91,
       label: "Very Busy",
@@ -127,6 +132,11 @@ test("responsive Buzz discovery supports filtering and venue details", async (
   const isMobile = testInfo.project.name === "mobile-chromium";
 
   await expect(page.getByRole("button", { name: /BUZZ/ })).toBeVisible();
+  const pulse = page.getByRole("region", { name: "Current 757 pulse" });
+  await expect(pulse.getByRole("heading", { name: "See what’s happening across Hampton Roads right now" })).toBeVisible();
+  await expect(pulse).toContainText("1 reported open");
+  await expect(pulse).toContainText("1 event listing");
+  await expect(pulse).toContainText("Signals, not headcounts.");
   if (isMobile) {
     await expect(page.getByRole("button", { name: "Top Activity" })).toBeVisible();
   } else {

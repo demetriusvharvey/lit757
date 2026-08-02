@@ -9,6 +9,8 @@ import {
 export const BUZZ_PULSE_LAYER_IDS = [
   "buzz-featured-pulse",
   "buzz-all-pulse",
+  "buzz-featured-event-pulse",
+  "buzz-all-event-pulse",
 ] as const;
 
 const pulseColor: mapboxgl.ExpressionSpecification = [
@@ -25,6 +27,12 @@ const buzzingFilter: mapboxgl.FilterSpecification = [
   BUZZING_PIN_MIN_SCORE,
 ];
 
+const eventSoonFilter: mapboxgl.FilterSpecification = [
+  "all",
+  ["==", ["get", "eventSoon"], true],
+  ["<", ["get", "score"], BUZZING_PIN_MIN_SCORE],
+];
+
 function pulsePaint(): mapboxgl.CircleLayerSpecification["paint"] {
   return {
     "circle-radius": 25,
@@ -37,9 +45,22 @@ function pulsePaint(): mapboxgl.CircleLayerSpecification["paint"] {
   };
 }
 
+function eventPulsePaint(): mapboxgl.CircleLayerSpecification["paint"] {
+  return {
+    "circle-radius": 23,
+    "circle-color": "#8b5cf6",
+    "circle-opacity": 0.19,
+    "circle-blur": 0.38,
+    "circle-stroke-color": "#c4b5fd",
+    "circle-stroke-width": 2.2,
+    "circle-stroke-opacity": 0.66,
+  };
+}
+
 /**
- * The pulse layers sit behind guaranteed-visible hot logo layers. This keeps
- * animation meaningful: an orange/red halo always belongs to a real venue.
+ * The pulse layers sit behind guaranteed-visible logo layers. Orange/red is
+ * reserved for strong activity scores; violet means a listed event is close
+ * to its scheduled start. Neither treatment claims a headcount.
  */
 export function addBuzzPulseLayers(map: mapboxgl.Map) {
   map.addLayer({
@@ -58,6 +79,23 @@ export function addBuzzPulseLayers(map: mapboxgl.Map) {
     minzoom: ALL_LOGO_MIN_ZOOM,
     filter: buzzingFilter,
     paint: pulsePaint(),
+  });
+  map.addLayer({
+    id: BUZZ_PULSE_LAYER_IDS[2],
+    type: "circle",
+    source: "buzz-map-featured",
+    minzoom: FEATURED_LOGO_MIN_ZOOM,
+    maxzoom: ALL_LOGO_MIN_ZOOM,
+    filter: eventSoonFilter,
+    paint: eventPulsePaint(),
+  });
+  map.addLayer({
+    id: BUZZ_PULSE_LAYER_IDS[3],
+    type: "circle",
+    source: "buzz-map-venues",
+    minzoom: ALL_LOGO_MIN_ZOOM,
+    filter: eventSoonFilter,
+    paint: eventPulsePaint(),
   });
 }
 
