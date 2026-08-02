@@ -20,7 +20,7 @@ test("prioritizes daytime and nighttime categories without removing any", () => 
 
 test("creates contextual daytime vibe tags", () => {
   assert.deepEqual(contextualVibe({ category: "Food", type: "Cafe", score: 73, scoreMode: "forecast" }, "day"), {
-    label: "🥞 Brunch crowd",
+    label: "🥞 Brunch demand forecast",
     truth: "forecast",
   });
   assert.equal(contextualVibe({ category: "Outdoors", type: "Park" }, "day").label, "🌳 Good outdoor window");
@@ -32,7 +32,7 @@ test("creates contextual nighttime tags while preserving truth mode", () => {
     truth: "live",
   });
   assert.deepEqual(contextualVibe({ category: "Events", type: "Music venue", hasEvent: true, scoreMode: "forecast" }, "night"), {
-    label: "🎵 Live event energy",
+    label: "🎵 Music event forecast",
     truth: "forecast",
   });
 });

@@ -2,6 +2,13 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { ACTIVITY_DISTRICTS, distanceMiles, nearestActivityDistrict } from "../../../src/lib/buzz/districts";
 import { dedupeVenueRows } from "../../../src/lib/venue-dedupe";
+import { districtActivityLabel, districtTruthMode } from "../../../src/lib/buzz/truth-labels";
+import {
+  DIRECT_PRESENCE_WINDOW_MINUTES,
+  groupDirectPresence,
+  presenceMeetsLiveThreshold,
+  type DirectPresenceRow,
+} from "../../../src/lib/buzz/direct-presence";
 
 export const dynamic = "force-dynamic";
 
@@ -11,13 +18,6 @@ const clamp = (value: number) => Math.max(0, Math.min(100, value));
 const average = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
 const canonical = (value: unknown) => String(value || "").toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim().replace(/^the\s+/, "");
 
-function districtLabel(score: number) {
-  if (score >= 84) return "Hot";
-  if (score >= 70) return "Heating up";
-  if (score >= 54) return "Building";
-  return "Calm";
-}
-
 function arrivalLabel(value: number) {
   if (value >= 72) return "Heavy arrival pressure";
   if (value >= 48) return "Busy arrivals";
@@ -26,7 +26,7 @@ function arrivalLabel(value: number) {
 }
 
 type VenueRow = { id: string; name: string; city?: string | null; address?: string | null; lat: number | string | null; lng: number | string | null; ai_score?: number | null };
-type ScoreRow = { venue_id: string; score: number; label: string; computed_at: string; expires_at: string };
+type ScoreRow = { venue_id: string; score: number; label: string; score_mode: "live" | "forecast"; computed_at: string; expires_at: string };
 type SignalRow = { venue_id: string; source: string; value: number; is_live: boolean; observed_at: string; expires_at: string };
 type EventRow = { id: string; name?: string | null; venue_name?: string | null; start_time?: string | null; end_time?: string | null; source_url?: string | null };
 
@@ -34,15 +34,18 @@ export async function GET() {
   const now = new Date();
   const eventStart = new Date(now.getTime() - 3 * 60 * 60 * 1000).toISOString();
   const eventEnd = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+  const presenceStart = new Date(now.getTime() - DIRECT_PRESENCE_WINDOW_MINUTES * 60_000).toISOString();
 
-  const [venueResult, scoreResult, signalResult, eventResult] = await Promise.all([
+  const [venueResult, scoreResult, signalResult, eventResult, presenceResult] = await Promise.all([
     db.from("venues").select("id,name,city,address,lat,lng,ai_score").not("lat", "is", null).not("lng", "is", null).limit(3000),
-    db.from("buzz_score_snapshots").select("venue_id,score,label,computed_at,expires_at").gt("expires_at", new Date(now.getTime() - 10 * 60 * 1000).toISOString()).limit(5000),
+    db.from("buzz_score_snapshots").select("venue_id,score,label,score_mode,computed_at,expires_at").gt("expires_at", now.toISOString()).limit(5000),
     db.from("buzz_signal_snapshots").select("venue_id,source,value,is_live,observed_at,expires_at").gt("expires_at", now.toISOString()).limit(5000),
     db.from("events").select("id,name,venue_name,start_time,end_time,source_url").gte("start_time", eventStart).lte("start_time", eventEnd).order("start_time").limit(2500),
+    db.from("venue_live_reports").select("venue_id,device_id,report_type,created_at").in("report_type", ["nearby_presence", "passive_presence"]).gte("created_at", presenceStart).order("created_at", { ascending: false }).limit(5000),
   ]);
 
   if (venueResult.error) return NextResponse.json({ success: false, error: venueResult.error.message }, { status: 500 });
+  if (presenceResult.error) console.error("District direct presence unavailable", presenceResult.error.message);
 
   const venueIdentity = dedupeVenueRows(((venueResult.data || []) as VenueRow[])
     .filter((venue) => Number.isFinite(Number(venue.lat)) && Number.isFinite(Number(venue.lng))));
@@ -51,6 +54,15 @@ export async function GET() {
   const scores = (scoreResult.data || []) as ScoreRow[];
   const signals = (signalResult.data || []) as SignalRow[];
   const events = (eventResult.data || []) as EventRow[];
+  const groupedPresence = groupDirectPresence((presenceResult.data || []) as DirectPresenceRow[], now).byVenue;
+  const presenceByVenue = new Map<string, { passive: Set<string>; verified: Set<string> }>();
+  for (const [sourceVenueId, group] of groupedPresence) {
+    const venueId = primaryVenueIdBySourceId.get(sourceVenueId) || sourceVenueId;
+    const current = presenceByVenue.get(venueId) || { passive: new Set<string>(), verified: new Set<string>() };
+    for (const deviceId of group.passive) current.passive.add(deviceId);
+    for (const deviceId of group.verified) current.verified.add(deviceId);
+    presenceByVenue.set(venueId, current);
+  }
   const scoreMap = new Map<string, ScoreRow>();
   for (const row of scores) {
     const venueId = primaryVenueIdBySourceId.get(row.venue_id) || row.venue_id;
@@ -77,7 +89,6 @@ export async function GET() {
       .map((venue) => ({ venue, distance: distanceMiles(district.center.lat, district.center.lng, Number(venue.lat), Number(venue.lng)) }))
       .sort((left, right) => Number(scoreMap.get(right.venue.id)?.score || right.venue.ai_score || 35) - Number(scoreMap.get(left.venue.id)?.score || left.venue.ai_score || 35));
 
-    const venueIds = new Set(nearby.map((item) => item.venue.id));
     const topScores = nearby.slice(0, 5).map((item) => Number(scoreMap.get(item.venue.id)?.score || item.venue.ai_score || 35));
     const venueScore = average(topScores);
 
@@ -89,11 +100,25 @@ export async function GET() {
     const latestTraffic = traffic.filter((signal) => Math.abs(new Date(signal.observed_at).getTime() - newestTimestamp) < 60_000);
     const arrivalPressure = Math.round(average(latestTraffic.map((signal) => clamp(Number(signal.value)))));
 
+    const liveSnapshotVenueIds = new Set(nearby
+      .map(item => item.venue.id)
+      .filter(venueId => scoreMap.get(venueId)?.score_mode === "live"));
+    const directPresenceVenueIds = new Set(nearby
+      .map(item => item.venue.id)
+      .filter(venueId => {
+        const group = presenceByVenue.get(venueId);
+        return Boolean(group && presenceMeetsLiveThreshold({
+          passiveDevices: group.passive.size,
+          verifiedDevices: group.verified.size,
+        }));
+      }));
+    const liveVenueIds = new Set([...liveSnapshotVenueIds, ...directPresenceVenueIds]);
     const liveSignals = signals.filter((signal) => {
       const venueId = primaryVenueIdBySourceId.get(signal.venue_id) || signal.venue_id;
-      return venueIds.has(venueId) && signal.is_live && !signal.source.startsWith("tomtom:");
+      return liveVenueIds.has(venueId) && signal.is_live && !signal.source.startsWith("tomtom:");
     });
     const liveSources = new Set(liveSignals.map((signal) => signal.source));
+    if (directPresenceVenueIds.size) liveSources.add("direct_presence");
 
     const districtEvents = nearby
       .flatMap(({ venue }) => eventsByVenue.get(canonical(venue.name)) || [])
@@ -111,8 +136,11 @@ export async function GET() {
     }).length;
 
     const eventBoost = Math.min(18, activeEvents * 8 + soonEvents * 4 + districtEvents.length);
-    const liveBoost = Math.min(18, liveSources.size * 7 + liveSignals.length * 2);
-    const mode = liveSignals.length ? "live" : "forecast";
+    const liveBoost = Math.min(18, liveSources.size * 7 + liveSignals.length * 2 + directPresenceVenueIds.size * 3);
+    const mode = districtTruthMode([
+      ...[...liveSnapshotVenueIds].map(venueId => scoreMap.get(venueId)?.score_mode),
+      ...[...directPresenceVenueIds].map(() => "live"),
+    ]);
     let score = Math.round(venueScore * 0.55 + arrivalPressure * 0.27 + eventBoost + liveBoost);
     if (mode === "forecast") score = Math.min(score, 82);
     score = clamp(score);
@@ -127,7 +155,7 @@ export async function GET() {
     const reason = [
       arrivalLabel(arrivalPressure),
       activeEvents ? `${activeEvents} event${activeEvents === 1 ? "" : "s"} happening` : soonEvents ? `${soonEvents} event${soonEvents === 1 ? "" : "s"} starting soon` : `${districtEvents.length} event${districtEvents.length === 1 ? "" : "s"} in the next 24 hours`,
-      liveSignals.length ? `${liveSignals.length} direct crowd signal${liveSignals.length === 1 ? "" : "s"}` : "no direct crowd reports yet",
+      liveVenueIds.size ? `${liveVenueIds.size} venue${liveVenueIds.size === 1 ? "" : "s"} with direct Live evidence` : "no direct crowd evidence yet",
     ].join(" · ");
 
     return {
@@ -139,7 +167,7 @@ export async function GET() {
       radiusMiles: district.radiusMiles,
       accent: district.accent,
       score,
-      label: districtLabel(score),
+      label: districtActivityLabel(score, mode),
       arrivalPressure,
       arrivalLabel: arrivalLabel(arrivalPressure),
       mode,
@@ -151,7 +179,8 @@ export async function GET() {
       nextEvent: districtEvents.find((event) => new Date(event.start_time || 0).getTime() >= now.getTime()) || null,
       venueCount: nearby.length,
       scoredVenueCount: nearby.filter((item) => scoreMap.has(item.venue.id)).length,
-      liveSignalCount: liveSignals.length,
+      liveSignalCount: liveSignals.length + directPresenceVenueIds.size,
+      liveVenueCount: liveVenueIds.size,
       reason,
       topVenues,
     };

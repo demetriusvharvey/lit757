@@ -55,6 +55,7 @@ type District = {
   venueCount: number;
   scoredVenueCount: number;
   liveSignalCount: number;
+  liveVenueCount: number;
   reason: string;
   topVenues: DistrictVenue[];
 };
@@ -351,7 +352,7 @@ export default function DistrictsPage() {
               <div className="district-detail-stats">
                 <div><CarFront /><strong>{selected.arrivalPressure}</strong><span>Arrival pressure</span></div>
                 <div><CalendarDays /><strong>{selected.eventCountNext24Hours}</strong><span>Next 24 hours</span></div>
-                <div><UsersRound /><strong>{selected.liveSignalCount}</strong><span>Direct live signals</span></div>
+                <div><UsersRound /><strong>{selected.liveVenueCount}</strong><span>Truth-gated Live venues</span></div>
               </div>
 
               {selected.nextEvent && (

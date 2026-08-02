@@ -15,6 +15,7 @@ import {
   type SupportingEvidence,
 } from "../../../src/lib/integrations/public-context";
 import { dedupeVenueRows } from "../../../src/lib/venue-dedupe";
+import { activityStatusLabel } from "../../../src/lib/buzz/truth-labels";
 
 export const dynamic = "force-dynamic";
 
@@ -445,7 +446,7 @@ export async function GET(request: Request) {
       } : null,
       activity: {
         score: buzzScore,
-        label: buzzScore >= 88 ? "On Fire" : buzzScore >= 76 ? "Heating Up" : buzzScore >= 60 ? "Active" : "Chill",
+        label: activityStatusLabel(buzzScore, scoreMode),
         trendLabel,
         confidence,
         scoreMode,

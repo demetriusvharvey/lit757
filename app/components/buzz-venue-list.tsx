@@ -59,12 +59,13 @@ export function BuzzVenueList({
   onSelectVenue,
   onToggleFavorite,
 }: BuzzVenueListProps) {
+  const hasLiveEvidence = venues.some(venue => venue.activity?.scoreMode === "live");
   const heading = buzzingOnly
     ? activeCategory === "All"
-      ? "Buzzing now"
-      : `${activeCategory} buzzing now`
+      ? "High activity scores"
+      : `${activeCategory} with high activity scores`
     : activeCategory === "All"
-      ? "Places buzzing now"
+      ? hasLiveEvidence ? "Best activity signals" : "Best activity forecasts"
       : activeCategory;
 
   return (
@@ -75,16 +76,16 @@ export function BuzzVenueList({
         onClick={onToggleExpanded}
         aria-expanded={expanded}
       >
-        <span><List /> {buzzingOnly ? "Buzzing Now" : "Top Buzz"}</span>
+        <span><List /> {buzzingOnly ? "High Activity" : hasLiveEvidence ? "Top Activity" : "Top Forecasts"}</span>
         {expanded ? <ChevronDown /> : <ChevronUp />}
       </button>
       <div className="buzz-map-list-head">
         <div>
-          <small>HIGHEST BUZZ FIRST</small>
+          <small>HIGHEST ACTIVITY SCORE FIRST</small>
           <h1>{heading}</h1>
           <p>{loading ? "Updating activity…" : `${venues.length} places ${scopeLabel}`}</p>
         </div>
-        <span className="buzz-heat-key"><i /> Heat map <b>→</b> logos · pulse = hot</span>
+        <span className="buzz-heat-key"><i /> Activity score <b>→</b> stronger colors</span>
       </div>
       <div className="buzz-map-list-scroll">
         {venues.map((venue, index) => {
@@ -115,7 +116,7 @@ export function BuzzVenueList({
                 </div>
                 <div className="buzz-list-copy">
                   <small>
-                    {index === 0 ? "BEST NOW" : `#${index + 1}`} · {venueCategory(venue)} ·{" "}
+                    {index === 0 ? "TOP PICK" : `#${index + 1}`} · {venueCategory(venue)} ·{" "}
                     {milesLabel(venue.distanceMiles) || venue.city || "Nearby"}
                   </small>
                   <strong>{venue.name}</strong>
@@ -125,7 +126,6 @@ export function BuzzVenueList({
                   <p>{venue.event?.name || venue.reason || "Available right now"}</p>
                   <span className={`buzz-status s${Math.floor(venueScore(venue) / 20)}`}>
                     {venueStatus(venue)}
-                    {" · "}{venueTruthLabel(venue)}
                   </span>
                 </div>
               </button>
@@ -144,7 +144,7 @@ export function BuzzVenueList({
           <div className="buzz-map-empty">
             <Search />
             <strong>No places match this filter</strong>
-            <p>{buzzingOnly ? "Turn off Buzzing or try another area." : "Try All or zoom to another area."}</p>
+            <p>{buzzingOnly ? "Turn off High Activity or try another area." : "Try All or zoom to another area."}</p>
           </div>
         )}
       </div>

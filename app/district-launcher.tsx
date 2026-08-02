@@ -27,6 +27,7 @@ type District = {
   arrivalPressure: number;
   eventCountNext24Hours: number;
   liveSignalCount: number;
+  liveVenueCount: number;
   reason: string;
   accent: string;
   center: { lat: number; lng: number };
@@ -130,7 +131,7 @@ export default function DistrictLauncher() {
       <div className="integrated-area-toolbar">
         <button type="button" onClick={() => setOpen(false)}><ArrowLeft /> Places</button>
         <span><Radio /> AREAS MODE</span>
-        <small>Traffic + events + verified crowd evidence</small>
+          <small>Forecast context + truth-gated Live evidence</small>
       </div>
 
       <div className="integrated-area-rankings">
@@ -180,7 +181,7 @@ export default function DistrictLauncher() {
         <div className="integrated-area-metrics">
           <span><CarFront /><b>{selected.arrivalPressure}</b><small>Arrivals</small></span>
           <span><CalendarDays /><b>{selected.eventCountNext24Hours}</b><small>Events</small></span>
-          <span><UsersRound /><b>{selected.liveSignalCount}</b><small>Live signals</small></span>
+              <span><UsersRound /><b>{selected.liveVenueCount}</b><small>Live venues</small></span>
         </div>
         <div className="integrated-area-venues">
           <strong>TOP PLACES</strong>

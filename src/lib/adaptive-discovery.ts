@@ -41,37 +41,39 @@ export function contextualVibe(
   const trend = normalized(venue.trend);
   const truth: ContextualVibe["truth"] =
     normalized(venue.scoreMode) === "live" ? "live" : "forecast";
+  const truthful = (liveLabel: string, forecastLabel: string) =>
+    truth === "live" ? liveLabel : forecastLabel;
 
   if (daypart === "day") {
     if (category.includes("outdoor") || type.includes("park") || type.includes("beach")) {
       return { label: "🌳 Good outdoor window", truth };
     }
     if (category.includes("shopping") || type.includes("mall")) {
-      return { label: score >= 68 ? "🛍️ Shopping crowd building" : "🛍️ Easy shopping window", truth };
+      return { label: score >= 68 ? truthful("🛍️ Shopping crowd building", "🛍️ Shopping activity forecast") : "🛍️ Easy shopping window", truth };
     }
     if (type.includes("museum") || category.includes("arts") || category.includes("culture")) {
-      return { label: "🎨 Museum activity", truth };
+      return { label: truthful("🎨 Museum activity", "🎨 Museum activity forecast"), truth };
     }
     if (category.includes("food") || type.includes("cafe") || type.includes("restaurant")) {
-      if (score >= 72 || trend.includes("rising")) return { label: "🥞 Brunch crowd", truth };
+      if (score >= 72 || trend.includes("rising")) return { label: truthful("🥞 Brunch crowd", "🥞 Brunch demand forecast"), truth };
       return { label: "☕ Easy daytime vibe", truth };
     }
-    if (score >= 78) return { label: "☀️ High energy", truth };
-    if (score <= 45) return { label: "☕ Quiet daytime vibe", truth };
-    return { label: "☀️ Daytime activity", truth };
+    if (score >= 78) return { label: truthful("☀️ High live activity", "☀️ High activity forecast"), truth };
+    if (score <= 45) return { label: truthful("☕ Quiet daytime vibe", "☕ Low daytime forecast"), truth };
+    return { label: truthful("☀️ Daytime activity", "☀️ Daytime forecast"), truth };
   }
 
   if (venue.hasEvent && (type.includes("music") || category.includes("nightlife") || category.includes("event"))) {
-    return { label: "🎵 Live event energy", truth };
+    return { label: truthful("🎵 Live event energy", "🎵 Music event forecast"), truth };
   }
   if (category.includes("nightlife") || type.includes("nightclub") || type.includes("bar")) {
-    if (score >= 82) return { label: "🌙 Peak crowd", truth };
-    if (trend.includes("rising") || score >= 68) return { label: "🔥 Nightlife rising", truth };
+    if (score >= 82) return { label: truthful("🌙 Peak crowd", "🌙 Peak-time forecast"), truth };
+    if (trend.includes("rising") || score >= 68) return { label: truthful("🔥 Nightlife rising", "🔥 Strong nightlife forecast"), truth };
     return { label: "🍸 Drinks starting", truth };
   }
-  if (category.includes("drinks")) return { label: score >= 68 ? "🍸 Drinks picking up" : "🍹 Easy drinks vibe", truth };
-  if (venue.hasEvent) return { label: "🎟️ Event activity", truth };
-  if (score >= 82) return { label: "🌙 Peak crowd", truth };
-  if (trend.includes("rising")) return { label: "🔥 Rising fast", truth };
-  return { label: "🌙 Evening activity", truth };
+  if (category.includes("drinks")) return { label: score >= 68 ? truthful("🍸 Drinks picking up", "🍸 Drinks activity forecast") : "🍹 Easy drinks vibe", truth };
+  if (venue.hasEvent) return { label: truthful("🎟️ Event activity", "🎟️ Event activity forecast"), truth };
+  if (score >= 82) return { label: truthful("🌙 Peak crowd", "🌙 Peak-time forecast"), truth };
+  if (trend.includes("rising")) return { label: truthful("🔥 Rising fast", "🔥 Forecast rising"), truth };
+  return { label: truthful("🌙 Evening activity", "🌙 Evening forecast"), truth };
 }
