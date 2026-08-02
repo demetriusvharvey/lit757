@@ -4,6 +4,11 @@ import { isCronAuthorized } from "../../../../src/lib/cron-auth";
 import { venueKinds } from "../../../../src/lib/venue-kind";
 import { getCachedOsmVenueCandidates } from "../../../../src/lib/integrations/osm-cache";
 import {
+  PRIORITY_NIGHTLIFE_SCOPES,
+  priorityNightlifeScopeIds,
+  type PriorityNightlifeScope,
+} from "../../../../src/lib/buzz/priority-nightlife-scopes";
+import {
   buildOsmNightlifeCoverage,
   type OsmCoverageCandidate,
   type VenueForOsmMatch,
@@ -132,6 +137,72 @@ function candidateSummary(item: OsmCoverageCandidate) {
   };
 }
 
+function venueSummary(venue: VenueForOsmMatch) {
+  return {
+    id: venue.id,
+    name: venue.name,
+    city: venue.city || null,
+    address: venue.address || null,
+    latitude: venue.lat === null || venue.lat === undefined ? null : Number(venue.lat),
+    longitude: venue.lng === null || venue.lng === undefined ? null : Number(venue.lng),
+    phone: venue.phone || null,
+    website: venue.website || null,
+    category: venue.category || null,
+    type: venue.type || null,
+    kinds: venueKinds(venue),
+  };
+}
+
+function priorityScopeReport(
+  scope: PriorityNightlifeScope,
+  venues: VenueForOsmMatch[],
+  candidates: OsmCoverageCandidate[],
+) {
+  const databaseInventory = venues
+    .filter(venue => priorityNightlifeScopeIds(venue).includes(scope.id))
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const nightlifeInventory = databaseInventory.filter(venue => venueKinds(venue).includes("nightlife"));
+  const osmCandidates = candidates
+    .filter(item => priorityNightlifeScopeIds({
+      city: candidateCity(item),
+      lat: item.candidate.latitude,
+      lng: item.candidate.longitude,
+    }).includes(scope.id));
+  const matched = osmCandidates.filter(item => item.match);
+  const unmatched = osmCandidates.filter(item => !item.match);
+
+  return {
+    id: scope.id,
+    name: scope.name,
+    definition: scope.definition,
+    database: {
+      totalVenues: databaseInventory.length,
+      nightlifeVenues: nightlifeInventory.length,
+      inventory: databaseInventory.map(venueSummary),
+    },
+    osm: {
+      totalCandidates: osmCandidates.length,
+      matchedCandidates: matched.length,
+      unmatchedReviewCandidates: unmatched.length,
+      byEvidence: evidenceBreakdown(osmCandidates),
+      unmatched: unmatched
+        .sort((left, right) => left.candidate.name.localeCompare(right.candidate.name))
+        .map(candidateSummary),
+      matched: matched
+        .sort((left, right) => left.candidate.name.localeCompare(right.candidate.name))
+        .map(item => ({
+          ...candidateSummary(item),
+          matchedVenue: venueSummary(item.match!.venue),
+          nameScore: Number(item.match!.nameScore.toFixed(3)),
+          distanceMiles: item.match!.distanceMiles === null
+            ? null
+            : Number(item.match!.distanceMiles.toFixed(3)),
+        })),
+    },
+    truthNote: "The inventory is a protected production snapshot and the OSM list is a review source, not proof of completeness or current operation. Unmatched candidates still require current-license or first-party verification before import.",
+  };
+}
+
 export async function GET(request: Request) {
   if (!isCronAuthorized(request)) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
@@ -191,6 +262,9 @@ export async function GET(request: Request) {
         byEvidence: evidenceBreakdown(coverage.candidates),
         metadataCompleteness: metadataCompleteness(coverage.candidates),
       },
+      priorityScopes: PRIORITY_NIGHTLIFE_SCOPES.map(scope => (
+        priorityScopeReport(scope, database.venues, coverage.candidates)
+      )),
       reviewCandidates,
       classificationGaps: classificationGaps.slice(0, limit).map(item => ({
         ...candidateSummary(item),

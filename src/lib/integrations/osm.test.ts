@@ -172,6 +172,7 @@ test("nightlife coverage endpoint is protected and read-only", () => {
   assert.match(source, /isCronAuthorized\(request\)/);
   assert.match(source, /mode: "read-only-review"/);
   assert.match(source, /byEvidence: evidenceBreakdown/);
+  assert.match(source, /priorityScopes: PRIORITY_NIGHTLIFE_SCOPES/);
   assert.doesNotMatch(source, /\.insert\(|\.upsert\(|\.update\(|\.delete\(/);
 });
 

@@ -92,6 +92,21 @@ jobs:
           assert matched_candidates + unmatched_candidates == unique_candidates, "Coverage totals do not balance"
           assert int(database_summary.get("venuesEvaluated") or 0) > 0, "Coverage audit evaluated no database venues"
           assert coverage.get("truthNote"), "Coverage audit truth note is missing"
+          priority_scopes = coverage.get("priorityScopes") or []
+          # Pull-request smoke targets the current production deployment, which
+          # cannot expose a newly added response field until after merge.
+          if os.environ.get("GITHUB_EVENT_NAME") != "pull_request":
+              assert {scope.get("id") for scope in priority_scopes} == {
+                  "virginia-beach-oceanfront",
+                  "downtown-norfolk",
+                  "portsmouth-city",
+              }, "Priority nightlife scopes are incomplete"
+              for scope in priority_scopes:
+                  scope_database = scope.get("database") or {}
+                  scope_osm = scope.get("osm") or {}
+                  assert int(scope_database.get("totalVenues") or 0) == len(scope_database.get("inventory") or []), f"{scope.get('id')} inventory totals do not balance"
+                  assert int(scope_osm.get("matchedCandidates") or 0) + int(scope_osm.get("unmatchedReviewCandidates") or 0) == int(scope_osm.get("totalCandidates") or 0), f"{scope.get('id')} OSM totals do not balance"
+                  assert scope.get("truthNote"), f"{scope.get('id')} truth note is missing"
 
           print(json.dumps({
               "osmCandidates": source_summary.get("total"),
@@ -108,6 +123,7 @@ jobs:
               "nightlifeCoverage": coverage_summary,
               "nightlifeReviewCandidates": coverage.get("reviewCandidates"),
               "nightlifeClassificationGaps": coverage.get("classificationGaps"),
+              "priorityNightlifeScopes": priority_scopes,
           }, indent=2))
           PY
       - name: Upload OSM smoke output
