@@ -50,7 +50,7 @@ export async function POST(request: Request) {
       address: venue.address,
       scopeId: venue.scopeId,
       officialSourceUrl: venue.officialSourceUrl,
-      osmSourceUrl: venue.osmSourceUrl,
+      supportingSourceUrl: venue.supportingSourceUrl,
     }));
     const duplicates = plan.duplicates.map(item => ({
       candidate: { id: item.candidate.id, name: item.candidate.name, city: item.candidate.city },

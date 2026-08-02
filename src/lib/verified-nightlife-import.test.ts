@@ -8,13 +8,13 @@ import {
 } from "./verified-nightlife-import";
 
 test("verified nightlife import has fixed rollback IDs and two-source evidence", () => {
-  assert.equal(VERIFIED_NIGHTLIFE_IMPORT.venues.length, 17);
-  assert.equal(new Set(VERIFIED_NIGHTLIFE_IMPORT.venues.map(venue => venue.id)).size, 17);
+  assert.equal(VERIFIED_NIGHTLIFE_IMPORT.venues.length, 18);
+  assert.equal(new Set(VERIFIED_NIGHTLIFE_IMPORT.venues.map(venue => venue.id)).size, 18);
   assert.match(VERIFIED_NIGHTLIFE_IMPORT.backup.sha256, /^[a-f0-9]{64}$/);
   for (const venue of VERIFIED_NIGHTLIFE_IMPORT.venues) {
     assert.match(venue.id, /^[a-f0-9-]{36}$/);
     assert.match(venue.officialSourceUrl, /^https:\/\//);
-    assert.match(venue.osmSourceUrl, /^https:\/\/www\.openstreetmap\.org\//);
+    assert.match(venue.supportingSourceUrl, /^https:\/\//);
     assert.ok(Number.isFinite(venue.lat));
     assert.ok(Number.isFinite(venue.lng));
   }
@@ -57,6 +57,16 @@ test("insert rows exclude review-only evidence fields", () => {
     "address", "category", "city", "enriched_at", "id", "lat", "lng", "name", "phone", "type", "website",
   ]);
   assert.equal("officialSourceUrl" in row, false);
+  assert.equal("supportingSourceUrl" in row, false);
+});
+
+test("Crocs is verified by its first-party location and a current promoter ticket listing", () => {
+  const crocs = VERIFIED_NIGHTLIFE_IMPORT.venues.find(venue => venue.name === "Crocs 19th Street Bistro");
+  assert.ok(crocs);
+  assert.equal(crocs.address, "620 19th Street, Virginia Beach, VA 23451");
+  assert.equal(crocs.officialSourceUrl, "https://crocs19thstreetbistro.com/");
+  assert.equal(crocs.supportingSourceUrl, "https://posh.vip/e/tde-picture-day-81");
+  assert.match(crocs.type, /Event Venue/);
 });
 
 test("import planning separates additions and existing rows", () => {
