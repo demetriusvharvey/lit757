@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { supabase } from "../src/lib/supabase";
 
 const FAVORITES_KEY = "lit757-mobile-favorites";
 const ALERTS_KEY = "lit757-mobile-alerts";
@@ -121,18 +122,6 @@ export default function NotificationRuntime() {
     let unsubscribe: (() => void) | null = null;
 
     const boot = async () => {
-      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-      if (!url || !key) {
-        writeStatus("error");
-        return;
-      }
-
-      const { createClient } = await import("@supabase/supabase-js");
-      const supabase = createClient(url, key, {
-        auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
-      });
-
       const synchronize = async (accessToken: string) => {
         const savedIds = readJson<string[]>(FAVORITES_KEY, []);
         const alerts = readJson<VenueAlert[]>(VENUE_ALERTS_KEY, []);

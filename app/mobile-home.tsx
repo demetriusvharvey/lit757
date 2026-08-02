@@ -7,6 +7,7 @@ import "./mobile-home.css";
 import { Bell, Bookmark, CalendarDays, ChevronLeft, ChevronRight, Compass, Heart, HelpCircle, LogOut, Map, MapPin, Moon, Music2, Navigation, Search, Send, Settings, ShoppingBag, Sparkles, TreePine, Utensils, Wine, X } from "lucide-react";
 import { useMapController } from "./map-controller";
 import { RemoteVenueImage } from "./components/remote-venue-image";
+import { supabase } from "../src/lib/supabase";
 
 type Venue={id:string;name:string;city?:string;kind?:string;type?:string;lat:number|string;lng:number|string;photoUrl?:string|null;reason?:string;openNow?:boolean|null;event?:{name?:string|null;ticketUrl?:string|null;url?:string|null}|null;activity?:{score:number;label:string;trendLabel:string}};
 type Payload={venues?:Venue[];picks?:Venue[]};
@@ -131,7 +132,7 @@ export default function MobileHome(){
   function toggleFavorite(event:MouseEvent,venue:Venue){event.stopPropagation();setFavoriteIds(current=>{const next=new Set(current);if(next.has(venue.id))next.delete(venue.id);else next.add(venue.id);try{localStorage.setItem(FAVORITES_KEY,JSON.stringify([...next]));}catch{}return next;});}
   async function enableAlerts(){setAlertMessage("");if(typeof Notification==="undefined"){setAlertMessage("Notifications are not supported in this browser yet.");return;}const permission=await Notification.requestPermission();if(permission!=="granted"){setAlertMessage("Notifications were not allowed. You can enable them later in browser settings.");return;}setAlertsEnabled(true);try{localStorage.setItem(ALERTS_KEY,"true");}catch{}setAlertMessage("Alerts are on. We’ll only notify you about saved places and meaningful activity.");}
   function toggleVenueAlert(v:Venue){setVenueAlerts(current=>{const exists=current.some(a=>a.venueId===v.id);const next=exists?current.filter(a=>a.venueId!==v.id):[...current,{venueId:v.id,threshold:80}];try{localStorage.setItem(VENUE_ALERTS_KEY,JSON.stringify(next));}catch{}return next;});}
-  async function signOut(){setProfileMessage("Signing out…");try{const url=process.env.NEXT_PUBLIC_SUPABASE_URL;const key=process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;if(url&&key){const {createClient}=await import("@supabase/supabase-js");await createClient(url,key).auth.signOut();}localStorage.removeItem(FAVORITES_KEY);localStorage.removeItem(ALERTS_KEY);localStorage.removeItem(VENUE_ALERTS_KEY);setFavoriteIds(new Set());setAlertsEnabled(false);setVenueAlerts([]);window.location.href="/";}catch{setProfileMessage("Could not sign out. Please try again.");}}
+  async function signOut(){setProfileMessage("Signing out…");try{await supabase.auth.signOut();localStorage.removeItem(FAVORITES_KEY);localStorage.removeItem(ALERTS_KEY);localStorage.removeItem(VENUE_ALERTS_KEY);setFavoriteIds(new Set());setAlertsEnabled(false);setVenueAlerts([]);window.location.href="/";}catch{setProfileMessage("Could not sign out. Please try again.");}}
 
   const activePlaces=filtered.filter(v=>score(v)>=52&&v.openNow!==false).length;
   const rising=filtered.filter(v=>v.activity?.trendLabel?.toLowerCase().includes("busier")||score(v)>=76).length;

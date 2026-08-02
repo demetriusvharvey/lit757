@@ -29,6 +29,7 @@ import {
   Wine,
 } from "lucide-react";
 import { getVenueLogo } from "../src/lib/venue-logo";
+import { supabase } from "../src/lib/supabase";
 import {
   buildInviteCrewText,
   buildInviteCrewUrl,
@@ -225,14 +226,9 @@ export default function BuzzMapApp() {
 
     let unsubscribe: (() => void) | null = null;
     const bootAuth = async () => {
-      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-      if (!url || !key) return;
-      const { createClient } = await import("@supabase/supabase-js");
-      const client = createClient(url, key, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
-      const { data } = await client.auth.getSession();
+      const { data } = await supabase.auth.getSession();
       setSession(data.session);
-      const listener = client.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession));
+      const listener = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession));
       unsubscribe = () => listener.data.subscription.unsubscribe();
     };
     void bootAuth();
