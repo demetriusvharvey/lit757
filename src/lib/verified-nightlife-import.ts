@@ -14,7 +14,7 @@ export type VerifiedNightlifeVenue = {
   website: string;
   scopeId: PriorityNightlifeScope["id"];
   officialSourceUrl: string;
-  osmSourceUrl: string;
+  supportingSourceUrl: string;
 };
 
 export type ExistingVenueForImport = {
@@ -26,12 +26,12 @@ export type ExistingVenueForImport = {
 };
 
 export const VERIFIED_NIGHTLIFE_IMPORT = {
-  batchId: "priority-nightlife-wave-3-2026-08-02",
-  verifiedAt: "2026-08-02T07:26:23.000Z",
+  batchId: "priority-nightlife-wave-4-2026-08-02",
+  verifiedAt: "2026-08-02T14:52:08.580Z",
   backup: {
-    generatedAt: "2026-08-02T07:21:49.579Z",
-    sha256: "1f77465592f870ef95824ee4262b4c67afafdfd5703264950683d88a4c3ec255",
-    runUrl: "https://github.com/demetriusvharvey/lit757/actions/runs/30737648518",
+    generatedAt: "2026-08-02T14:52:08.580Z",
+    sha256: "3f2ed0715b190c00dc00a5fcbe2fa82cdc0d374c6656671de55b8df66800bcce",
+    runUrl: "https://github.com/demetriusvharvey/lit757/actions/runs/30753044662",
   },
   venues: [
     {
@@ -47,7 +47,7 @@ export const VERIFIED_NIGHTLIFE_IMPORT = {
       website: "https://beachpubvb.com/",
       scopeId: "virginia-beach-oceanfront",
       officialSourceUrl: "https://beachpubvb.com/",
-      osmSourceUrl: "https://www.openstreetmap.org/way/402387223",
+      supportingSourceUrl: "https://www.openstreetmap.org/way/402387223",
     },
     {
       id: "798bde16-8727-4867-916b-12ea8ed1b73f",
@@ -62,7 +62,7 @@ export const VERIFIED_NIGHTLIFE_IMPORT = {
       website: "https://abbeyroadpub.com/",
       scopeId: "virginia-beach-oceanfront",
       officialSourceUrl: "https://abbeyroadpub.com/about-abbey-road/",
-      osmSourceUrl: "https://www.openstreetmap.org/node/4025117504",
+      supportingSourceUrl: "https://www.openstreetmap.org/node/4025117504",
     },
     {
       id: "5b193b81-df95-4e94-81cc-05ef7cf9725b",
@@ -77,7 +77,7 @@ export const VERIFIED_NIGHTLIFE_IMPORT = {
       website: "https://chichospizza.com/11th-street/",
       scopeId: "virginia-beach-oceanfront",
       officialSourceUrl: "https://chichospizza.com/11th-street/",
-      osmSourceUrl: "https://www.openstreetmap.org/node/1857210264",
+      supportingSourceUrl: "https://www.openstreetmap.org/node/1857210264",
     },
     {
       id: "d05d215d-097f-4ecf-be8c-dde2df8c2f6f",
@@ -92,7 +92,7 @@ export const VERIFIED_NIGHTLIFE_IMPORT = {
       website: "https://www.downtownnorfolk.org/go/canvas-social-cuisine",
       scopeId: "downtown-norfolk",
       officialSourceUrl: "https://www.downtownnorfolk.org/go/canvas-social-cuisine",
-      osmSourceUrl: "https://www.openstreetmap.org/search?query=411%20Granby%20Street%2C%20Norfolk%2C%20VA%2023510",
+      supportingSourceUrl: "https://www.openstreetmap.org/search?query=411%20Granby%20Street%2C%20Norfolk%2C%20VA%2023510",
     },
     {
       id: "4997ce0f-4cf0-4d4b-a611-5f1e118bfe4b",
@@ -107,7 +107,7 @@ export const VERIFIED_NIGHTLIFE_IMPORT = {
       website: "https://watersidedistrict.com/eat-and-drink/starr-hill-market-bar",
       scopeId: "downtown-norfolk",
       officialSourceUrl: "https://watersidedistrict.com/Eat-and-Drink",
-      osmSourceUrl: "https://www.openstreetmap.org/node/5791196133",
+      supportingSourceUrl: "https://www.openstreetmap.org/node/5791196133",
     },
     {
       id: "156d4340-87b0-4fa2-b356-980f6dd76a1f",
@@ -122,7 +122,7 @@ export const VERIFIED_NIGHTLIFE_IMPORT = {
       website: "https://oldetowneportsmouth.com/listings/suns-sub-pub/",
       scopeId: "portsmouth-city",
       officialSourceUrl: "https://oldetowneportsmouth.com/listings/suns-sub-pub/",
-      osmSourceUrl: "https://www.openstreetmap.org/node/13069846264",
+      supportingSourceUrl: "https://www.openstreetmap.org/node/13069846264",
     },
     {
       id: "8622b332-0e9c-4b41-84e9-e69e75aed839",
@@ -137,7 +137,7 @@ export const VERIFIED_NIGHTLIFE_IMPORT = {
       website: "https://sandbarvb.com/",
       scopeId: "virginia-beach-oceanfront",
       officialSourceUrl: "https://sandbarvb.com/",
-      osmSourceUrl: "https://www.openstreetmap.org/node/4025117532",
+      supportingSourceUrl: "https://www.openstreetmap.org/node/4025117532",
     },
     {
       id: "d1f6d5ee-1971-4cd2-be4e-8ba94069c6ba",
@@ -152,7 +152,7 @@ export const VERIFIED_NIGHTLIFE_IMPORT = {
       website: "https://www.vbblock.com/chemistry",
       scopeId: "virginia-beach-oceanfront",
       officialSourceUrl: "https://www.vbblock.com/chemistry",
-      osmSourceUrl: "https://www.openstreetmap.org/node/4025117513",
+      supportingSourceUrl: "https://www.openstreetmap.org/node/4025117513",
     },
     {
       id: "e6b6c351-6d1b-4668-9d9f-99c1f5957da2",
@@ -167,7 +167,7 @@ export const VERIFIED_NIGHTLIFE_IMPORT = {
       website: "https://www.pacificavb.com/",
       scopeId: "virginia-beach-oceanfront",
       officialSourceUrl: "https://www.visitvirginiabeach.com/listing/pacifica/129/",
-      osmSourceUrl: "https://www.openstreetmap.org/way/356413302",
+      supportingSourceUrl: "https://www.openstreetmap.org/way/356413302",
     },
     {
       id: "c9a58de2-174c-4ca6-872f-9442690865c6",
@@ -182,7 +182,7 @@ export const VERIFIED_NIGHTLIFE_IMPORT = {
       website: "https://www.facebook.com/BajaCantina23rdst/",
       scopeId: "virginia-beach-oceanfront",
       officialSourceUrl: "https://s3.us-east-1.amazonaws.com/virginia-beach-departments-docs/cor/Businesses/New-Businesses/2026/New-Business-Listings-April-2026.pdf",
-      osmSourceUrl: "https://www.openstreetmap.org/node/4025117527",
+      supportingSourceUrl: "https://www.openstreetmap.org/node/4025117527",
     },
     {
       id: "3ad42abb-82a5-4c50-8902-e75dd3433f05",
@@ -197,7 +197,7 @@ export const VERIFIED_NIGHTLIFE_IMPORT = {
       website: "https://www.visitnorfolk.com/dining/waterside-district/",
       scopeId: "downtown-norfolk",
       officialSourceUrl: "https://www.visitnorfolk.com/dining/waterside-district/",
-      osmSourceUrl: "https://www.openstreetmap.org/node/5791196140",
+      supportingSourceUrl: "https://www.openstreetmap.org/node/5791196140",
     },
     {
       id: "05507eb1-be64-47ef-83a4-24a7455f24cb",
@@ -212,7 +212,7 @@ export const VERIFIED_NIGHTLIFE_IMPORT = {
       website: "https://www.cavalierresortvb.com/dining/hunt-room",
       scopeId: "virginia-beach-oceanfront",
       officialSourceUrl: "https://www.cavalierresortvb.com/dining/hunt-room",
-      osmSourceUrl: "https://www.openstreetmap.org/way/765746330",
+      supportingSourceUrl: "https://www.openstreetmap.org/way/765746330",
     },
     {
       id: "00504af2-7c26-4dd0-a140-b1084551c5dc",
@@ -227,7 +227,7 @@ export const VERIFIED_NIGHTLIFE_IMPORT = {
       website: "https://www.cavalierresortvb.com/dining/the-raleigh-room",
       scopeId: "virginia-beach-oceanfront",
       officialSourceUrl: "https://www.cavalierresortvb.com/dining/the-raleigh-room",
-      osmSourceUrl: "https://www.openstreetmap.org/way/765746330",
+      supportingSourceUrl: "https://www.openstreetmap.org/way/765746330",
     },
     {
       id: "fe48809e-4d44-40e2-84c2-05f45d091187",
@@ -242,7 +242,7 @@ export const VERIFIED_NIGHTLIFE_IMPORT = {
       website: "https://www.cavalierresortvb.com/dining/arbuckles-bar-and-grill",
       scopeId: "virginia-beach-oceanfront",
       officialSourceUrl: "https://www.cavalierresortvb.com/dining/arbuckles-bar-and-grill",
-      osmSourceUrl: "https://www.openstreetmap.org/way/1276371749",
+      supportingSourceUrl: "https://www.openstreetmap.org/way/1276371749",
     },
     {
       id: "b62ae585-9d60-4c77-aab9-cb8fb6471c8a",
@@ -257,7 +257,7 @@ export const VERIFIED_NIGHTLIFE_IMPORT = {
       website: "https://www.cavalierresortvb.com/dining/the-deck",
       scopeId: "virginia-beach-oceanfront",
       officialSourceUrl: "https://www.cavalierresortvb.com/dining/the-deck",
-      osmSourceUrl: "https://www.openstreetmap.org/way/835598004",
+      supportingSourceUrl: "https://www.openstreetmap.org/way/835598004",
     },
     {
       id: "3213afd9-8bf4-4daf-8cec-e40bd7f70559",
@@ -272,7 +272,7 @@ export const VERIFIED_NIGHTLIFE_IMPORT = {
       website: "https://www.cavalierresortvb.com/dining/tacos-n-tequila",
       scopeId: "virginia-beach-oceanfront",
       officialSourceUrl: "https://www.cavalierresortvb.com/dining/tacos-n-tequila",
-      osmSourceUrl: "https://www.openstreetmap.org/way/1276371749",
+      supportingSourceUrl: "https://www.openstreetmap.org/way/1276371749",
     },
     {
       id: "dddde20e-5961-4fea-bccf-33d08867e9e7",
@@ -287,7 +287,22 @@ export const VERIFIED_NIGHTLIFE_IMPORT = {
       website: "https://www.cavalierresortvb.com/distillery",
       scopeId: "virginia-beach-oceanfront",
       officialSourceUrl: "https://www.cavalierresortvb.com/distillery",
-      osmSourceUrl: "https://www.openstreetmap.org/way/765746330",
+      supportingSourceUrl: "https://www.openstreetmap.org/way/765746330",
+    },
+    {
+      id: "c4b14b17-b041-4547-b48b-1923b710d2be",
+      name: "Crocs 19th Street Bistro",
+      city: "Virginia Beach",
+      address: "620 19th Street, Virginia Beach, VA 23451",
+      lat: 36.845553,
+      lng: -75.98317,
+      category: "Bars",
+      type: "Restaurant / Bar / Event Venue",
+      phone: "(757) 428-5444",
+      website: "https://crocs19thstreetbistro.com/",
+      scopeId: "virginia-beach-oceanfront",
+      officialSourceUrl: "https://crocs19thstreetbistro.com/",
+      supportingSourceUrl: "https://posh.vip/e/tde-picture-day-81",
     },
   ] satisfies VerifiedNightlifeVenue[],
 } as const;

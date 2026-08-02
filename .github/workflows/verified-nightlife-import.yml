@@ -26,7 +26,7 @@ jobs:
           BASE_URL: ${{ secrets.BUZZ_PRODUCTION_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           APPLY: ${{ inputs.apply }}
-          CONFIRMATION: apply:priority-nightlife-wave-3-2026-08-02:1f77465592f870ef95824ee4262b4c67afafdfd5703264950683d88a4c3ec255
+          CONFIRMATION: apply:priority-nightlife-wave-4-2026-08-02:3f2ed0715b190c00dc00a5fcbe2fa82cdc0d374c6656671de55b8df66800bcce
         shell: bash
         run: |
           set -euo pipefail
@@ -51,7 +51,7 @@ jobs:
           with open("verified-nightlife-import.json", encoding="utf-8") as source:
               report = json.load(source)
           assert report.get("success") is True, report
-          assert report.get("batchId") == "priority-nightlife-wave-3-2026-08-02", report
+          assert report.get("batchId") == "priority-nightlife-wave-4-2026-08-02", report
           assert report.get("truthNote"), report
           assert len(report.get("rollbackVenueIds") or []) == len(report.get("reviewedAdditions") or []), report
           if os.environ["APPLY"] == "true":
