@@ -8,8 +8,8 @@ import {
 } from "./verified-nightlife-import";
 
 test("verified nightlife import has fixed rollback IDs and two-source evidence", () => {
-  assert.equal(VERIFIED_NIGHTLIFE_IMPORT.venues.length, 18);
-  assert.equal(new Set(VERIFIED_NIGHTLIFE_IMPORT.venues.map(venue => venue.id)).size, 18);
+  assert.equal(VERIFIED_NIGHTLIFE_IMPORT.venues.length, 23);
+  assert.equal(new Set(VERIFIED_NIGHTLIFE_IMPORT.venues.map(venue => venue.id)).size, 23);
   assert.match(VERIFIED_NIGHTLIFE_IMPORT.backup.sha256, /^[a-f0-9]{64}$/);
   for (const venue of VERIFIED_NIGHTLIFE_IMPORT.venues) {
     assert.match(venue.id, /^[a-f0-9-]{36}$/);
@@ -67,6 +67,23 @@ test("Crocs is verified by its first-party location and a current promoter ticke
   assert.equal(crocs.officialSourceUrl, "https://crocs19thstreetbistro.com/");
   assert.equal(crocs.supportingSourceUrl, "https://posh.vip/e/tde-picture-day-81");
   assert.match(crocs.type, /Event Venue/);
+});
+
+test("Oceanfront wave five is anchored to first-party identity and current official evidence", () => {
+  const expected = new Map([
+    ["Seaside Raw Bar", "https://seasiderawbar.com/"],
+    ["Chesapeake Bay Distillery", "https://www.chesapeakebaydistillery.com/"],
+    ["Tempt Restaurant & Lounge", "https://temptvb.com/"],
+    ["Aqua Social Club", "https://slimb6469.wixsite.com/website"],
+    ["Big Sam's Inlet Cafe & Raw Bar", "https://bigsamsrawbar.com/"],
+  ]);
+  assert.equal(VERIFIED_NIGHTLIFE_IMPORT.batchId, "priority-nightlife-wave-5-2026-08-02");
+  for (const [name, officialSourceUrl] of expected) {
+    const venue = VERIFIED_NIGHTLIFE_IMPORT.venues.find(candidate => candidate.name === name);
+    assert.ok(venue, `${name} must remain in the reviewed import`);
+    assert.equal(venue.officialSourceUrl, officialSourceUrl);
+    assert.equal(venue.scopeId, "virginia-beach-oceanfront");
+  }
 });
 
 test("import planning separates additions and existing rows", () => {
