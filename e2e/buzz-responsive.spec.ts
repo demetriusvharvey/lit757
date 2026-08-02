@@ -195,3 +195,26 @@ test("unified search moves the responsive map to a local 757 area", async ({ pag
   await expect(suggestions).toHaveCount(0);
   await expect(page.locator(".buzz-map-list")).toContainText("in Virginia Beach Oceanfront");
 });
+
+test("Near me contributes privacy-safe presence after location consent", async ({ page }) => {
+  const captured: { current: Record<string, unknown> | null } = { current: null };
+  await page.route("**/api/buzz/passive-presence", async route => {
+    captured.current = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ success: true, accepted: true, venueId: "venue-food" }),
+    });
+  });
+  await page.context().setGeolocation({ latitude: 36.8508, longitude: -76.2859, accuracy: 10 });
+  await page.context().grantPermissions(["geolocation"]);
+
+  await page.getByRole("button", { name: "Near me", exact: true }).first().click();
+
+  await expect.poll(() => captured.current).not.toBeNull();
+  expect(captured.current).toMatchObject({
+    latitude: 36.8508,
+    longitude: -76.2859,
+  });
+  expect(Number(captured.current?.accuracy)).toBeGreaterThan(0);
+  expect(String(captured.current?.sessionId)).toMatch(/^[A-Za-z0-9_-]{20,160}$/);
+});

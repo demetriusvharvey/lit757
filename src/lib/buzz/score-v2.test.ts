@@ -56,6 +56,35 @@ test("one unverified live source cannot claim Heating Up or On Fire", () => {
   assert.ok(result.score <= 74, `single-source score was ${result.score}`);
 });
 
+test("one nearby user cannot make a venue Live without corroboration", () => {
+  const result = calculateBuzzScore(venue, [signal({
+    source: "lit757_users",
+    family: "verified_users",
+    type: "verified_presence",
+    value: 1,
+    isLive: true,
+    confidence: 0.8,
+    metadata: { uniqueDevices: 1 },
+  })], now);
+
+  assert.equal(result.mode, "forecast");
+  assert.ok(result.score <= 64);
+});
+
+test("two unique nearby users can establish Live presence", () => {
+  const result = calculateBuzzScore(venue, [signal({
+    source: "lit757_users",
+    family: "verified_users",
+    type: "verified_presence",
+    value: 2,
+    isLive: true,
+    confidence: 0.75,
+    metadata: { uniqueDevices: 2 },
+  })], now);
+
+  assert.equal(result.mode, "live");
+});
+
 test("independent direct evidence with mature calibration can produce a high-confidence strong score", () => {
   const result = calculateBuzzScore(venue, [
     signal({ source: "venue_partner", family: "first_party_occupancy", type: "partner_pulse", value: 92, isLive: true, confidence: 0.95 }),

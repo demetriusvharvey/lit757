@@ -152,33 +152,47 @@ function entities(payload: Record<string, unknown>) {
   return Array.isArray(payload.entity) ? payload.entity as Array<Record<string, unknown>> : [];
 }
 
+function objectField(record: Record<string, unknown>, camelCase: string, snakeCase: string) {
+  const value = record[camelCase] ?? record[snakeCase];
+  return value && typeof value === "object" ? value as Record<string, unknown> : {};
+}
+
+function arrayField(record: Record<string, unknown>, camelCase: string, snakeCase: string) {
+  const value = record[camelCase] ?? record[snakeCase];
+  return Array.isArray(value) ? value as Array<Record<string, unknown>> : [];
+}
+
+function scalarField(record: Record<string, unknown>, camelCase: string, snakeCase: string) {
+  return record[camelCase] ?? record[snakeCase];
+}
+
 export function normalizeTripUpdates(payload: Record<string, unknown>) {
   return entities(payload).flatMap(entity => {
-    const update = entity.tripUpdate as Record<string, unknown> | undefined;
-    if (!update) return [];
-    const trip = (update.trip || {}) as Record<string, unknown>;
-    const vehicle = (update.vehicle || {}) as Record<string, unknown>;
-    const stopTimeUpdate = Array.isArray(update.stopTimeUpdate) ? update.stopTimeUpdate as Array<Record<string, unknown>> : [];
+    const update = objectField(entity, "tripUpdate", "trip_update");
+    if (!Object.keys(update).length) return [];
+    const trip = objectField(update, "trip", "trip");
+    const vehicle = objectField(update, "vehicle", "vehicle");
+    const stopTimeUpdate = arrayField(update, "stopTimeUpdate", "stop_time_update");
     return [{
       entityId: String(entity.id || ""),
-      tripId: String(trip.tripId || ""),
-      routeId: String(trip.routeId || ""),
-      startDate: String(trip.startDate || ""),
+      tripId: String(scalarField(trip, "tripId", "trip_id") || ""),
+      routeId: String(scalarField(trip, "routeId", "route_id") || ""),
+      startDate: String(scalarField(trip, "startDate", "start_date") || ""),
       vehicleId: vehicle.id ? String(vehicle.id) : null,
       timestamp: update.timestamp ? new Date(Number(update.timestamp) * 1000).toISOString() : null,
       stops: stopTimeUpdate.map(stop => {
-        const arrival = (stop.arrival || {}) as Record<string, unknown>;
-        const departure = (stop.departure || {}) as Record<string, unknown>;
+        const arrival = objectField(stop, "arrival", "arrival");
+        const departure = objectField(stop, "departure", "departure");
         const arrivalTime = Number(arrival.time || 0);
         const departureTime = Number(departure.time || 0);
         return {
-          stopId: String(stop.stopId || ""),
-          stopSequence: Number(stop.stopSequence || 0),
+          stopId: String(scalarField(stop, "stopId", "stop_id") || ""),
+          stopSequence: Number(scalarField(stop, "stopSequence", "stop_sequence") || 0),
           arrivalTime: arrivalTime ? new Date(arrivalTime * 1000).toISOString() : null,
           departureTime: departureTime ? new Date(departureTime * 1000).toISOString() : null,
           arrivalDelaySeconds: Number.isFinite(Number(arrival.delay)) ? Number(arrival.delay) : null,
           departureDelaySeconds: Number.isFinite(Number(departure.delay)) ? Number(departure.delay) : null,
-          scheduleRelationship: stop.scheduleRelationship ?? null,
+          scheduleRelationship: scalarField(stop, "scheduleRelationship", "schedule_relationship") ?? null,
         };
       }),
     }];
@@ -187,23 +201,26 @@ export function normalizeTripUpdates(payload: Record<string, unknown>) {
 
 export function normalizeVehiclePositions(payload: Record<string, unknown>) {
   return entities(payload).flatMap(entity => {
-    const vehicle = entity.vehicle as Record<string, unknown> | undefined;
-    if (!vehicle) return [];
-    const position = (vehicle.position || {}) as Record<string, unknown>;
-    const descriptor = (vehicle.vehicle || {}) as Record<string, unknown>;
-    const trip = (vehicle.trip || {}) as Record<string, unknown>;
+    const vehicle = objectField(entity, "vehicle", "vehicle");
+    if (!Object.keys(vehicle).length) return [];
+    const position = objectField(vehicle, "position", "position");
+    const descriptor = objectField(vehicle, "vehicle", "vehicle");
+    const trip = objectField(vehicle, "trip", "trip");
     const latitude = Number(position.latitude);
     const longitude = Number(position.longitude);
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return [];
     return [{
       entityId: String(entity.id || ""), vehicleId: String(descriptor.id || ""), label: descriptor.label ? String(descriptor.label) : null,
-      tripId: trip.tripId ? String(trip.tripId) : null, routeId: trip.routeId ? String(trip.routeId) : null,
+      tripId: scalarField(trip, "tripId", "trip_id") ? String(scalarField(trip, "tripId", "trip_id")) : null,
+      routeId: scalarField(trip, "routeId", "route_id") ? String(scalarField(trip, "routeId", "route_id")) : null,
       latitude, longitude, bearing: Number.isFinite(Number(position.bearing)) ? Number(position.bearing) : null,
       speedMetersPerSecond: Number.isFinite(Number(position.speed)) ? Number(position.speed) : null,
-      currentStopSequence: Number.isFinite(Number(vehicle.currentStopSequence)) ? Number(vehicle.currentStopSequence) : null,
-      stopId: vehicle.stopId ? String(vehicle.stopId) : null,
+      currentStopSequence: Number.isFinite(Number(scalarField(vehicle, "currentStopSequence", "current_stop_sequence")))
+        ? Number(scalarField(vehicle, "currentStopSequence", "current_stop_sequence"))
+        : null,
+      stopId: scalarField(vehicle, "stopId", "stop_id") ? String(scalarField(vehicle, "stopId", "stop_id")) : null,
       timestamp: vehicle.timestamp ? new Date(Number(vehicle.timestamp) * 1000).toISOString() : null,
-      occupancyStatus: vehicle.occupancyStatus ?? null,
+      occupancyStatus: scalarField(vehicle, "occupancyStatus", "occupancy_status") ?? null,
     }];
   });
 }
