@@ -27,7 +27,6 @@ import {
   UserRound,
   Utensils,
   Wine,
-  X,
 } from "lucide-react";
 import { getVenueLogo } from "../src/lib/venue-logo";
 import {
@@ -46,6 +45,7 @@ import {
   orderedDiscoveryCategories,
   type DiscoveryDaypart,
 } from "../src/lib/adaptive-discovery";
+import type { LocationSearchResult } from "../src/lib/location-search";
 import {
   DEFAULT_BUZZ_CENTER as DEFAULT_CENTER,
   getBrowserPosition as getPosition,
@@ -70,6 +70,7 @@ import {
 import { useBuzzMapbox } from "./hooks/use-buzz-mapbox";
 import { BuzzVenueDetail } from "./components/buzz-venue-detail";
 import { BuzzVenueList } from "./components/buzz-venue-list";
+import { BuzzMapSearch } from "./components/buzz-map-search";
 
 const categories = [
   ["All", Compass],
@@ -313,6 +314,33 @@ export default function BuzzMapApp() {
     });
   }
 
+  function chooseSearchedVenue(venueId: string) {
+    setActive("All");
+    setBuzzingOnly(false);
+    setQuery("");
+    selectVenue(venueId);
+  }
+
+  async function chooseLocation(result: LocationSearchResult) {
+    setQuery("");
+    setSelected(null);
+    setListExpanded(false);
+
+    const map = mapRef.current;
+    if (result.bbox?.length === 4) {
+      map?.fitBounds(
+        [[result.bbox[0], result.bbox[1]], [result.bbox[2], result.bbox[3]]],
+        { padding: 64, maxZoom: 13, duration: 650 },
+      );
+      await loadNearby({ bounds: result.bbox.join(","), label: `in ${result.name}` });
+      return;
+    }
+
+    const radius = result.featureType === "neighborhood" ? 3 : 10;
+    map?.easeTo({ center: [result.longitude, result.latitude], zoom: result.featureType === "neighborhood" ? 12.5 : 10.5, duration: 650 });
+    await loadNearby({ lat: result.latitude, lng: result.longitude, radius, label: `in ${result.name}` });
+  }
+
   function toggleBuzzingFilter() {
     const next = !buzzingOnly;
     if (next && selected && !isBuzzingPinScore(score(selected))) {
@@ -488,7 +516,13 @@ export default function BuzzMapApp() {
         <button type="button" className="buzz-map-brand" onClick={() => { mapRef.current?.easeTo({ center: DEFAULT_CENTER, zoom: 8.8, duration: 600 }); void loadNearby(); }}>
           <strong>BUZZ</strong><span>THINGS TO DO NOW</span>
         </button>
-        <label className="buzz-map-search"><Search /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search places, events, or neighborhoods" />{query && <button type="button" onClick={() => setQuery("")} aria-label="Clear search"><X /></button>}</label>
+        <BuzzMapSearch
+          query={query}
+          venues={venues}
+          onQueryChange={setQuery}
+          onSelectVenue={chooseSearchedVenue}
+          onSelectLocation={chooseLocation}
+        />
         <div className="buzz-map-header-actions">
           <button type="button" onClick={() => void requestMyLocation()}><LocateFixed /><span>Near me</span></button>
           <button type="button" aria-label="Enable Buzz alerts" onClick={() => void enableNotifications()}><Bell /></button>
