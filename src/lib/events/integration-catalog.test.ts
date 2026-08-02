@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { BUZZ_INTEGRATIONS, integrationConfigured } from "../integration-catalog";
 
@@ -61,6 +62,16 @@ test("integration IDs are unique and every source has a truth role", () => {
   const ids = BUZZ_INTEGRATIONS.map(integration => integration.id);
   assert.equal(new Set(ids).size, ids.length);
   assert.ok(BUZZ_INTEGRATIONS.every(integration => integration.role && integration.detail));
+});
+
+test("production smoke checks stable integration identities instead of a catalog count", () => {
+  const workflow = readFileSync(
+    ".github/workflows/operations-surfaces-production-smoke.yml",
+    "utf8",
+  );
+
+  assert.match(workflow, /required\.issubset\(names\)/);
+  assert.doesNotMatch(workflow, /len\(catalog\)\s*(?:==|in)\s*[^\n]*\d/);
 });
 
 test("billing-capable integrations are not configured by credentials alone", () => {

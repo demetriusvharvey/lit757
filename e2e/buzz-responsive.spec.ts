@@ -90,6 +90,22 @@ async function mockBuzzData(page: Page) {
       }),
     }),
   );
+  await page.route("**/api/location-search**", (route) => {
+    const query = new URL(route.request().url()).searchParams.get("q")?.toLowerCase() || "";
+    const results = query.includes("oceanfront") ? [{
+      id: "local-district:virginia-beach-oceanfront",
+      name: "Virginia Beach Oceanfront",
+      detail: "Virginia Beach activity district",
+      featureType: "neighborhood",
+      longitude: -75.978,
+      latitude: 36.8529,
+      bbox: null,
+    }] : [];
+    return route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ success: true, results, source: "buzz_local", externalSearchEnabled: false }),
+    });
+  });
   await page.route("**/api/venue-logo**", (route) =>
     route.fulfill({
       contentType: "image/svg+xml",
@@ -163,4 +179,19 @@ test("responsive shell has no serious or critical accessibility violations", asy
     violation.impact === "serious" || violation.impact === "critical"
   );
   expect(blocking).toEqual([]);
+});
+
+test("unified search moves the responsive map to a local 757 area", async ({ page }) => {
+  const search = page.getByRole("combobox", { name: "Search places and Hampton Roads areas" });
+  await search.fill("Oceanfront");
+
+  const suggestions = page.getByRole("dialog", { name: "Search suggestions" });
+  await expect(suggestions).toBeVisible();
+  const oceanfront = suggestions.getByRole("button", { name: /Virginia Beach Oceanfront/ });
+  await expect(oceanfront).toBeVisible();
+  await oceanfront.click();
+
+  await expect(search).toHaveValue("");
+  await expect(suggestions).toHaveCount(0);
+  await expect(page.locator(".buzz-map-list")).toContainText("in Virginia Beach Oceanfront");
 });
