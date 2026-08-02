@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
+  buildOsmNightlifeCoverage,
   buildHamptonRoadsOverpassQuery,
+  dedupeOsmVenueCandidates,
   findBestOsmMatch,
   normalizeOsmElement,
   osmEnrichmentPatch,
@@ -74,6 +77,55 @@ test("Overpass response parser uses way centers and deduplicates elements", () =
   assert.equal(parsed.rawElementCount, 3);
   assert.equal(parsed.candidates.length, 2);
   assert.equal(parsed.osmBaseTimestamp, "2026-07-22T15:00:00Z");
+});
+
+test("nightlife coverage deduplicates OSM elements and separates review gaps", () => {
+  const nightlife = (overrides: Partial<OsmVenueCandidate>): OsmVenueCandidate => ({
+    ...candidate,
+    name: "Granby Taproom",
+    category: "Nightlife",
+    type: "Bar",
+    rawTag: { key: "amenity", value: "bar" },
+    tags: { amenity: "bar", name: "Granby Taproom" },
+    ...overrides,
+  });
+  const candidates = [
+    nightlife({ osmType: "node", osmId: 201, latitude: 36.8508, longitude: -76.2859, city: null }),
+    nightlife({ osmType: "way", osmId: 202, latitude: 36.85082, longitude: -76.28592, city: "Norfolk" }),
+    nightlife({ osmType: "node", osmId: 203, name: "Missing Lounge", latitude: 36.86, longitude: -76.29 }),
+    { ...candidate, osmId: 204, name: "Gallery Only", category: "Arts & Culture" },
+  ];
+
+  const deduplicated = dedupeOsmVenueCandidates(candidates.slice(0, 2));
+  assert.equal(deduplicated.candidates.length, 1);
+  assert.equal(deduplicated.duplicateElementsRemoved, 1);
+  assert.deepEqual(deduplicated.candidates[0].sourceKeys, ["node:201", "way:202"]);
+  assert.equal(deduplicated.candidates[0].candidate.city, "Norfolk");
+
+  const coverage = buildOsmNightlifeCoverage([{
+    id: "venue-taproom",
+    name: "Granby Taproom",
+    city: "Norfolk",
+    lat: 36.85081,
+    lng: -76.28591,
+    category: "Nightlife",
+    type: "Bar",
+  }], candidates);
+
+  assert.equal(coverage.rawNightlifeCandidates, 3);
+  assert.equal(coverage.uniqueNightlifeCandidates, 2);
+  assert.equal(coverage.duplicateElementsRemoved, 1);
+  assert.equal(coverage.matchedCandidates, 1);
+  assert.equal(coverage.unmatchedCandidates, 1);
+  assert.equal(coverage.candidates.find(item => item.candidate.name === "Granby Taproom")?.match?.venue.id, "venue-taproom");
+  assert.equal(coverage.candidates.find(item => item.candidate.name === "Missing Lounge")?.match, null);
+});
+
+test("nightlife coverage endpoint is protected and read-only", () => {
+  const source = readFileSync(new URL("../../../app/api/venues/osm-coverage/route.ts", import.meta.url), "utf8");
+  assert.match(source, /isCronAuthorized\(request\)/);
+  assert.match(source, /mode: "read-only-review"/);
+  assert.doesNotMatch(source, /\.insert\(|\.upsert\(|\.update\(|\.delete\(/);
 });
 
 test("name similarity handles articles, punctuation, and business suffixes", () => {
