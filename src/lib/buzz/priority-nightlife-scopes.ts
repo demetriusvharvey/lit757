@@ -1,4 +1,5 @@
 import { nearestActivityDistrict } from "./districts";
+import { venueCityFromAddress } from "../venue-dedupe";
 
 export type PriorityNightlifeScope = {
   id: "virginia-beach-oceanfront" | "downtown-norfolk" | "portsmouth-city";
@@ -8,6 +9,7 @@ export type PriorityNightlifeScope = {
 
 export type VenueLocation = {
   city?: string | null;
+  address?: string | null;
   lat?: number | string | null;
   lng?: number | string | null;
 };
@@ -47,7 +49,9 @@ function coordinate(value: unknown) {
 export function priorityNightlifeScopeIds(location: VenueLocation) {
   const latitude = coordinate(location.lat);
   const longitude = coordinate(location.lng);
-  const city = String(location.city || "").trim() || null;
+  const city = venueCityFromAddress(location.address)
+    || String(location.city || "").trim()
+    || null;
   const districtId = latitude !== null && longitude !== null
     ? nearestActivityDistrict(latitude, longitude, city)?.id || null
     : null;

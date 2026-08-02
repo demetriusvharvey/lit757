@@ -178,6 +178,9 @@ test("nightlife coverage endpoint is protected and read-only", () => {
 
 test("name similarity handles articles, punctuation, and business suffixes", () => {
   assert.equal(venueNameSimilarity("The Granby Theater, LLC", "Granby Theater"), 1);
+  assert.equal(venueNameSimilarity("Baxter's Sports Lounge", "Baxters Sports Lounge"), 1);
+  assert.equal(venueNameSimilarity("Gershwin’s", "Gershwins"), 1);
+  assert.ok(venueNameSimilarity("Grain", "Grain Rooftop Beer Garden") >= 0.9);
   assert.ok(venueNameSimilarity("Sandler Center for Performing Arts", "Sandler Center") >= 0.9);
   assert.ok(venueNameSimilarity("Completely Different", "Granby Theater") < 0.3);
 });

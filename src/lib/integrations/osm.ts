@@ -328,6 +328,7 @@ export function normalizeVenueName(value: unknown) {
     .toLowerCase()
     .normalize("NFKD")
     .replace(/\p{Diacritic}/gu, "")
+    .replace(/[’']/g, "")
     .replace(/&/g, " and ")
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
@@ -347,7 +348,7 @@ export function venueNameSimilarity(leftValue: unknown, rightValue: unknown) {
   const right = normalizeVenueName(rightValue);
   if (!left || !right) return 0;
   if (left === right) return 1;
-  if ((left.includes(right) || right.includes(left)) && Math.min(left.length, right.length) >= 6) return 0.92;
+  if ((left.includes(right) || right.includes(left)) && Math.min(left.length, right.length) >= 5) return 0.92;
   const leftTokens = tokens(left);
   const rightTokens = tokens(right);
   const intersection = [...leftTokens].filter(token => rightTokens.has(token)).length;

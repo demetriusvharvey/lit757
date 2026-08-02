@@ -41,3 +41,12 @@ test("all explicitly tagged Portsmouth locations remain in the city scope", () =
   });
   assert.equal(contradictoryNorfolkLocation.includes("portsmouth-city"), false);
 });
+
+test("a street-address city overrides an incorrect stored city", () => {
+  assert.deepEqual(priorityNightlifeScopeIds({
+    city: "Portsmouth",
+    address: "332 Granby St, Norfolk, VA 23510",
+    lat: 36.8505,
+    lng: -76.2900,
+  }), ["downtown-norfolk"]);
+});
