@@ -7,6 +7,7 @@ import {
   dedupeOsmVenueCandidates,
   findBestOsmMatch,
   normalizeOsmElement,
+  osmNightlifeEvidence,
   osmEnrichmentPatch,
   parseOverpassResponse,
   venueNameSimilarity,
@@ -36,8 +37,48 @@ test("Overpass query is bounded and limited to discovery-relevant tags", () => {
   assert.match(query, /amenity/);
   assert.match(query, /tourism/);
   assert.match(query, /leisure/);
+  assert.match(query, /hookah_lounge/);
+  assert.match(query, /stripclub/);
+  assert.match(query, /\["bar"="yes"\]/);
+  assert.match(query, /\["microbrewery"="yes"\]/);
+  assert.match(query, /\["club"="music"\]/);
   assert.match(query, /out tags center qt/);
   assert.doesNotMatch(query, /\["shop"\]\(/);
+});
+
+test("OSM normalization recognizes dedicated hookah lounges as nightlife", () => {
+  const normalized = normalizeOsmElement({
+    type: "node",
+    id: 45,
+    lat: 36.87,
+    lon: -76.3,
+    tags: { name: "Example Hookah", amenity: "hookah_lounge" },
+  });
+
+  assert.equal(normalized?.category, "Nightlife");
+  assert.equal(normalized?.type, "Hookah Lounge");
+  assert.equal(normalized && osmNightlifeEvidence(normalized), "primary-tag");
+});
+
+test("nightlife evidence keeps OSM tags separate from conservative name review", () => {
+  const restaurant = (name: string, tags: Record<string, string> = {}): OsmVenueCandidate => ({
+    ...candidate,
+    name,
+    category: "Food",
+    type: "Restaurant",
+    rawTag: { key: "amenity", value: "restaurant" },
+    tags: { amenity: "restaurant", name, ...tags },
+  });
+
+  assert.equal(osmNightlifeEvidence(restaurant("The Social Terrace", { bar: "yes" })), "secondary-tag");
+  assert.equal(osmNightlifeEvidence(restaurant("Local Brewpub", { microbrewery: "yes" })), "secondary-tag");
+  assert.equal(osmNightlifeEvidence(restaurant("Skeleton Key Bar & Grille")), "name-review");
+  assert.equal(osmNightlifeEvidence(restaurant("Downtown Juice Bar")), null);
+  assert.equal(osmNightlifeEvidence({
+    ...restaurant("Club Pilates"),
+    category: "Sports & Fitness",
+    type: "Fitness Centre",
+  }), null);
 });
 
 test("OSM element normalization preserves useful contact and classification data", () => {
@@ -115,6 +156,11 @@ test("nightlife coverage deduplicates OSM elements and separates review gaps", (
   assert.equal(coverage.rawNightlifeCandidates, 3);
   assert.equal(coverage.uniqueNightlifeCandidates, 2);
   assert.equal(coverage.duplicateElementsRemoved, 1);
+  assert.deepEqual(coverage.evidenceCounts, {
+    primaryTag: 2,
+    secondaryTag: 0,
+    nameReview: 0,
+  });
   assert.equal(coverage.matchedCandidates, 1);
   assert.equal(coverage.unmatchedCandidates, 1);
   assert.equal(coverage.candidates.find(item => item.candidate.name === "Granby Taproom")?.match?.venue.id, "venue-taproom");
@@ -125,6 +171,7 @@ test("nightlife coverage endpoint is protected and read-only", () => {
   const source = readFileSync(new URL("../../../app/api/venues/osm-coverage/route.ts", import.meta.url), "utf8");
   assert.match(source, /isCronAuthorized\(request\)/);
   assert.match(source, /mode: "read-only-review"/);
+  assert.match(source, /byEvidence: evidenceBreakdown/);
   assert.doesNotMatch(source, /\.insert\(|\.upsert\(|\.update\(|\.delete\(/);
 });
 
