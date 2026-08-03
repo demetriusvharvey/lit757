@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local ML model caches
+/ml-worker/.cache/
+/ml-worker/models-cache/
