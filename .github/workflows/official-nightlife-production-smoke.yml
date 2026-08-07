@@ -18,7 +18,7 @@ jobs:
     timeout-minutes: 12
     steps:
       - name: Check out coverage tooling
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Verify official directories and protected coverage report
         env:
