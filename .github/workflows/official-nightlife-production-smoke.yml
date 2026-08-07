@@ -132,7 +132,7 @@ jobs:
 
       - name: Upload official nightlife smoke output
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: official-nightlife-production-smoke-output
           path: |

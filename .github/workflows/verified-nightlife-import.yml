@@ -64,7 +64,7 @@ jobs:
           PY
       - name: Upload import audit
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: verified-nightlife-import-${{ inputs.apply && 'apply' || 'dry-run' }}
           path: verified-nightlife-import.json
