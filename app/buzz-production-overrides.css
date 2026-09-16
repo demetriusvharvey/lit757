@@ -1,0 +1,4 @@
+/* Launch polish: keep the map readable and action-first. */
+.buzz-pulse-brief {
+  display: none !important;
+}

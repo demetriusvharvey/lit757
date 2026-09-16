@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { MapControllerProvider } from "./map-controller";
 import "./mapbox-load-image-adapter";
 import "./buzz-logo-overrides.css";
+import "./buzz-production-overrides.css";
 
 // The unified map is the primary production discovery experience.
 const BuzzMapApp = dynamic(() => import("./buzz-map-app"), { ssr: false });

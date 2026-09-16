@@ -15,6 +15,7 @@ export type VenueIdentityRow = {
   address?: string | null;
   lat?: number | string | null;
   lng?: number | string | null;
+  google_place_id?: string | null;
   [key: string]: unknown;
 };
 
@@ -53,6 +54,9 @@ function coordinate(value: unknown) {
 }
 
 function identityKey(row: VenueIdentityRow) {
+  const placeId = String(row.google_place_id || "").trim();
+  if (placeId) return `place:${placeId}`;
+
   const name = canonicalName(row.name);
   const latitude = coordinate(row.lat);
   const longitude = coordinate(row.lng);
