@@ -1,30 +1,17 @@
 import type mapboxgl from "mapbox-gl";
 import {
-  ALL_LOGO_MIN_ZOOM,
   BUZZING_PIN_MIN_SCORE,
-  FEATURED_LOGO_MIN_ZOOM,
   ON_FIRE_PIN_MIN_SCORE,
 } from "./buzz-map-presentation";
 
-export const BUZZ_PULSE_LAYER_IDS = [
-  "buzz-featured-pulse",
-  "buzz-all-pulse",
-] as const;
+const CLOSE_GLOW_MIN_ZOOM = 12.25;
+const CLOSE_PULSE_MIN_ZOOM = 12.75;
+const STATUS_LABEL_MIN_ZOOM = 14.25;
 
-export const EVENT_PULSE_LAYER_IDS = [
-  "buzz-featured-event-pulse",
-  "buzz-all-event-pulse",
-] as const;
-
-export const BUZZ_GLOW_LAYER_IDS = [
-  "buzz-featured-glow",
-  "buzz-all-glow",
-] as const;
-
-export const BUZZ_LABEL_LAYER_IDS = [
-  "buzz-featured-status-label",
-  "buzz-all-status-label",
-] as const;
+export const BUZZ_PULSE_LAYER_IDS = ["buzz-all-pulse"] as const;
+export const EVENT_PULSE_LAYER_IDS = ["buzz-all-event-pulse"] as const;
+export const BUZZ_GLOW_LAYER_IDS = ["buzz-all-glow"] as const;
+export const BUZZ_LABEL_LAYER_IDS = ["buzz-all-status-label"] as const;
 
 const pulseColor: mapboxgl.ExpressionSpecification = [
   "step",
@@ -52,58 +39,62 @@ function glowPaint(): mapboxgl.CircleLayerSpecification["paint"] {
       "interpolate",
       ["linear"],
       ["zoom"],
-      FEATURED_LOGO_MIN_ZOOM,
-      25,
-      14,
-      30,
+      CLOSE_GLOW_MIN_ZOOM,
+      15,
+      15,
+      20,
       18,
-      34,
+      23,
     ],
     "circle-color": pulseColor,
-    "circle-opacity": 0.2,
-    "circle-blur": 0.28,
+    "circle-opacity": [
+      "interpolate",
+      ["linear"],
+      ["zoom"],
+      CLOSE_GLOW_MIN_ZOOM,
+      0.1,
+      15,
+      0.16,
+      18,
+      0.2,
+    ],
+    "circle-blur": 0.68,
     "circle-stroke-color": pulseColor,
-    "circle-stroke-width": 2.8,
-    "circle-stroke-opacity": 0.88,
+    "circle-stroke-width": 1.2,
+    "circle-stroke-opacity": 0.48,
   };
 }
 
 function pulsePaint(): mapboxgl.CircleLayerSpecification["paint"] {
   return {
-    "circle-radius": 34,
+    "circle-radius": 22,
     "circle-color": pulseColor,
-    "circle-opacity": 0.16,
-    "circle-blur": 0.2,
+    "circle-opacity": 0.07,
+    "circle-blur": 0.48,
     "circle-stroke-color": pulseColor,
-    "circle-stroke-width": 3.2,
-    "circle-stroke-opacity": 0.82,
+    "circle-stroke-width": 1.5,
+    "circle-stroke-opacity": 0.5,
   };
 }
 
 function eventPulsePaint(): mapboxgl.CircleLayerSpecification["paint"] {
   return {
-    "circle-radius": 25,
+    "circle-radius": 20,
     "circle-color": "#8b5cf6",
-    "circle-opacity": 0.18,
-    "circle-blur": 0.36,
+    "circle-opacity": 0.09,
+    "circle-blur": 0.55,
     "circle-stroke-color": "#c4b5fd",
-    "circle-stroke-width": 2.2,
-    "circle-stroke-opacity": 0.62,
+    "circle-stroke-width": 1.4,
+    "circle-stroke-opacity": 0.48,
   };
 }
 
-function statusLabelLayer(
-  id: string,
-  source: "buzz-map-featured" | "buzz-map-venues",
-  minzoom: number,
-  maxzoom?: number,
-): mapboxgl.SymbolLayerSpecification {
+function statusLabelLayer(): mapboxgl.SymbolLayerSpecification {
   return {
-    id,
+    id: BUZZ_LABEL_LAYER_IDS[0],
     type: "symbol",
-    source,
-    minzoom,
-    ...(maxzoom == null ? {} : { maxzoom }),
+    source: "buzz-map-venues",
+    minzoom: STATUS_LABEL_MIN_ZOOM,
     filter: buzzingFilter,
     layout: {
       "text-field": [
@@ -113,10 +104,10 @@ function statusLabelLayer(
         ON_FIRE_PIN_MIN_SCORE,
         "ON FIRE",
       ],
-      "text-size": ["interpolate", ["linear"], ["zoom"], 11.5, 9, 14, 10.5, 17, 12],
-      "text-offset": [0, -3.05],
+      "text-size": ["interpolate", ["linear"], ["zoom"], STATUS_LABEL_MIN_ZOOM, 9, 17, 10.5],
+      "text-offset": [0, -3.15],
       "text-anchor": "center",
-      "text-letter-spacing": 0.13,
+      "text-letter-spacing": 0.12,
       "text-allow-overlap": false,
       "text-ignore-placement": false,
       "symbol-sort-key": ["-", 100, ["get", "score"]],
@@ -124,33 +115,24 @@ function statusLabelLayer(
     paint: {
       "text-color": pulseColor,
       "text-halo-color": "rgba(4,7,11,.96)",
-      "text-halo-width": 2.2,
-      "text-halo-blur": 0.6,
+      "text-halo-width": 2,
+      "text-halo-blur": 0.5,
     },
   };
 }
 
 /**
- * Close zoom needs to answer a different question than the heat map: which
- * exact venue is hot? Buzzing venues therefore get a persistent inner glow,
- * an animated outer beacon, and a small status label at close zoom. The logo
- * remains the click target and stays visually dominant.
+ * The heatmap owns the wide-area view. Individual venue treatments only fade
+ * in once users are zoomed far enough that a specific block or venue is the
+ * question. This keeps the map calm and prevents animated halos from reading
+ * as rendering artifacts at neighborhood zoom.
  */
 export function addBuzzPulseLayers(map: mapboxgl.Map) {
   map.addLayer({
     id: BUZZ_GLOW_LAYER_IDS[0],
     type: "circle",
-    source: "buzz-map-featured",
-    minzoom: FEATURED_LOGO_MIN_ZOOM,
-    maxzoom: ALL_LOGO_MIN_ZOOM,
-    filter: buzzingFilter,
-    paint: glowPaint(),
-  });
-  map.addLayer({
-    id: BUZZ_GLOW_LAYER_IDS[1],
-    type: "circle",
     source: "buzz-map-venues",
-    minzoom: ALL_LOGO_MIN_ZOOM,
+    minzoom: CLOSE_GLOW_MIN_ZOOM,
     filter: buzzingFilter,
     paint: glowPaint(),
   });
@@ -158,17 +140,8 @@ export function addBuzzPulseLayers(map: mapboxgl.Map) {
   map.addLayer({
     id: BUZZ_PULSE_LAYER_IDS[0],
     type: "circle",
-    source: "buzz-map-featured",
-    minzoom: FEATURED_LOGO_MIN_ZOOM,
-    maxzoom: ALL_LOGO_MIN_ZOOM,
-    filter: buzzingFilter,
-    paint: pulsePaint(),
-  });
-  map.addLayer({
-    id: BUZZ_PULSE_LAYER_IDS[1],
-    type: "circle",
     source: "buzz-map-venues",
-    minzoom: ALL_LOGO_MIN_ZOOM,
+    minzoom: CLOSE_PULSE_MIN_ZOOM,
     filter: buzzingFilter,
     paint: pulsePaint(),
   });
@@ -176,61 +149,40 @@ export function addBuzzPulseLayers(map: mapboxgl.Map) {
   map.addLayer({
     id: EVENT_PULSE_LAYER_IDS[0],
     type: "circle",
-    source: "buzz-map-featured",
-    minzoom: FEATURED_LOGO_MIN_ZOOM,
-    maxzoom: ALL_LOGO_MIN_ZOOM,
-    filter: eventSoonFilter,
-    paint: eventPulsePaint(),
-  });
-  map.addLayer({
-    id: EVENT_PULSE_LAYER_IDS[1],
-    type: "circle",
     source: "buzz-map-venues",
-    minzoom: ALL_LOGO_MIN_ZOOM,
+    minzoom: CLOSE_PULSE_MIN_ZOOM,
     filter: eventSoonFilter,
     paint: eventPulsePaint(),
   });
 
-  // Labels intentionally begin late enough that neighborhood-level views stay
-  // clean. Users see the animated beacon first, then explicit status text as
-  // they zoom into individual blocks.
-  map.addLayer(statusLabelLayer(
-    BUZZ_LABEL_LAYER_IDS[0],
-    "buzz-map-featured",
-    11.2,
-    ALL_LOGO_MIN_ZOOM,
-  ));
-  map.addLayer(statusLabelLayer(
-    BUZZ_LABEL_LAYER_IDS[1],
-    "buzz-map-venues",
-    ALL_LOGO_MIN_ZOOM,
-  ));
+  map.addLayer(statusLabelLayer());
 }
 
 export function buzzPulseFrame(timestamp: number) {
-  const progress = (timestamp % 1_650) / 1_650;
+  const progress = (timestamp % 2_600) / 2_600;
   const eased = 1 - (1 - progress) ** 2;
   return {
-    radius: 31 + eased * 22,
-    opacity: 0.24 - eased * 0.21,
-    strokeOpacity: 0.92 - eased * 0.72,
-    strokeWidth: 3.4 - eased * 1.1,
+    radius: 20 + eased * 13,
+    opacity: 0.1 - eased * 0.085,
+    strokeOpacity: 0.58 - eased * 0.5,
+    strokeWidth: 1.6 - eased * 0.45,
   };
 }
 
 function eventPulseFrame(timestamp: number) {
-  const progress = (timestamp % 2_100) / 2_100;
+  const progress = (timestamp % 3_000) / 3_000;
   const eased = 1 - (1 - progress) ** 2;
   return {
-    radius: 24 + eased * 12,
-    opacity: 0.2 - eased * 0.15,
-    strokeOpacity: 0.7 - eased * 0.45,
+    radius: 19 + eased * 9,
+    opacity: 0.1 - eased * 0.075,
+    strokeOpacity: 0.5 - eased * 0.4,
   };
 }
 
 /**
- * Animates at about 30fps to keep mobile GPU work bounded. Reduced-motion
- * users still get the persistent high-contrast glow and status label.
+ * A deliberately slow, low-contrast pulse keeps hot venues visible without
+ * making the map shimmer. Animation is capped around 24fps and disappears
+ * entirely for reduced-motion users, who still retain the static glow/label.
  */
 export function startBuzzPulseAnimation(map: mapboxgl.Map) {
   const reducedMotion = window.matchMedia(
@@ -243,7 +195,7 @@ export function startBuzzPulseAnimation(map: mapboxgl.Map) {
   let lastPaintAt = 0;
   const animate = (timestamp: number) => {
     animationFrame = window.requestAnimationFrame(animate);
-    if (timestamp - lastPaintAt < 33) return;
+    if (timestamp - lastPaintAt < 42) return;
     lastPaintAt = timestamp;
 
     const buzz = buzzPulseFrame(timestamp);
@@ -256,7 +208,7 @@ export function startBuzzPulseAnimation(map: mapboxgl.Map) {
         BUZZING_PIN_MIN_SCORE,
         buzz.radius,
         100,
-        buzz.radius + 7,
+        buzz.radius + 3,
       ]);
       map.setPaintProperty(layerId, "circle-opacity", buzz.opacity);
       map.setPaintProperty(layerId, "circle-stroke-opacity", buzz.strokeOpacity);
