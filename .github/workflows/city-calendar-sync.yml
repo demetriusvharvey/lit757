@@ -43,3 +43,9 @@ jobs:
           curl --silent --show-error --fail-with-body --retry 2 --max-time 180 \
             -H "Authorization: Bearer ${CRON_SECRET}" \
             "${BASE_URL}/api/events/institution-calendars"
+
+          echo
+          echo "Syncing verified local promoter ticket pages"
+          curl --silent --show-error --fail-with-body --retry 2 --max-time 90 \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${BASE_URL}/api/events/promoter-calendars"
